@@ -3,6 +3,8 @@ dist/
 reports/
 test-results/
 playwright-report/
+wechat/project.private.config.json
+wechat/.idea/
 .cache/
 .env
 .env.*

@@ -14,6 +14,8 @@ import CompanionName from "./CompanionName.jsx";
 import HuntPanel from "./HuntPanel.jsx";
 import WorldPanel from "./WorldPanel.jsx";
 import { createFarm, loadFarm, saveFarm, advanceFarm, applyFarmAction, FARM_KEY } from "./farm-state.js";
+import { ECONOMY_CONFIG } from "./economy-config.js";
+import { createEconomyTelemetry, createFarmTelemetryJournal } from "./economy-telemetry.js";
 
 const chinese = new URLSearchParams(location.search).get("locale") !== "en";
 const tr = (zh, en) => chinese ? zh : en;
@@ -95,6 +97,14 @@ export default function Courtyard() {
   const farmRef = useRef(farm);
   const [farmSaved, setFarmSaved] = useState(true);
   const farmSavedRef = useRef(true);
+  const telemetry = useRef(null);
+  const telemetryJournal = useRef(null);
+  if (!telemetry.current) {
+    let storage = null;
+    try { storage = localStorage; } catch {}
+    telemetry.current = createEconomyTelemetry(storage);
+    telemetryJournal.current = createFarmTelemetryJournal(telemetry.current);
+  }
   const [selectedPlot, setSelectedPlot] = useState("meadow-west");
   const [selectedAnimal, setSelectedAnimal] = useState("");
   const [area, setArea] = useState("courtyard");
@@ -175,9 +185,16 @@ export default function Courtyard() {
   };
   const farmAction = action => {
     let current = farmRef.current;
-    try { if (farmSavedRef.current && localStorage.getItem(FARM_KEY)) current = loadFarm(localStorage); } catch {}
+    try {
+      if (farmSavedRef.current && localStorage.getItem(FARM_KEY)) {
+        current = loadFarm(localStorage);
+        telemetryJournal.current.discard();
+      }
+    } catch {}
     const result = applyFarmAction(current, action, Date.now());
+    telemetryJournal.current.stage(action, current, result);
     storeFarm(result.state);
+    telemetryJournal.current.persisted(farmSavedRef.current);
     const message = tr(result.message, result.messageEn);
     flash(farmSavedRef.current ? message : `${message}${tr(" · 本次进度未保存", " · Progress could not be saved")}`);
     return result.ok;
@@ -351,6 +368,21 @@ export default function Courtyard() {
     try { localStorage.setItem("anheli-progress-v1", JSON.stringify(progress)); } catch {}
   }, [progress]);
   useEffect(() => {
+    const tracker = telemetry.current;
+    const savedBalance = () => farmSavedRef.current ? farmRef.current.coins : null;
+    const pulse = () => tracker.pulse(savedBalance(), !document.hidden);
+    tracker.startSession(savedBalance(), !document.hidden);
+    const timer = setInterval(pulse, 15_000);
+    document.addEventListener("visibilitychange", pulse);
+    window.addEventListener("pagehide", pulse);
+    return () => {
+      clearInterval(timer);
+      tracker.pulse(savedBalance(), false);
+      document.removeEventListener("visibilitychange", pulse);
+      window.removeEventListener("pagehide", pulse);
+    };
+  }, []);
+  useEffect(() => {
     const update = next => {
       farmRef.current = next;
       setFarm(next);
@@ -360,7 +392,12 @@ export default function Courtyard() {
     const storageChanged = event => {
       if (event.key !== FARM_KEY || !event.newValue) return;
       if (!farmSavedRef.current) return;
-      try { update(advanceFarm(JSON.parse(event.newValue), Date.now())); setFarmSaved(true); } catch {}
+      try {
+        const next = advanceFarm(JSON.parse(event.newValue), Date.now());
+        telemetryJournal.current.discard();
+        update(next);
+        setFarmSaved(true);
+      } catch {}
     };
     tick();
     const timer = setInterval(tick, 1000);
@@ -517,9 +554,9 @@ export default function Courtyard() {
     </div>
     {companion && <aside className="animal-care" aria-label={tr("照顾小伙伴", "Care for your companion")}>
       <div className="animal-care-title"><PawPrint size={20} /><CompanionName animal={companion} onAction={farmAction} tr={tr} /><IconButton icon={X} label={tr("收起照料", "Close animal care")} onClick={() => setSelectedAnimal("")} /></div>
-      <span className="animal-care-bond"><Heart size={13} />{tr("亲近", "Bond")} {companion.comfort} / 100</span>
+      <span className="animal-care-bond"><Heart size={13} />{tr("亲近", "Bond")} {companion.comfort} / {ECONOMY_CONFIG.care.maxComfort}</span>
       {!farmSaved && <p className="companion-name-error" role="alert">{tr("本次进度未保存", "Progress could not be saved")}</p>}
-      <div className="animal-care-buttons"><button disabled={!farm.inventory.grass} onClick={() => farmAction({ type: "feed", animalId: companion.id, feed: "grass" })}><Wheat size={18} /><span>{tr("喂草", "Feed")}</span><small>{farm.inventory.grass}</small></button><button disabled={now.getTime() - companion.lastPettedAt < 5000} onClick={() => farmAction({ type: "pet", animalId: companion.id })}><Heart size={18} /><span>{tr("摸摸", "Pet")}</span></button><button disabled={!companion.readyProduct} onClick={() => farmAction({ type: "collect", animalId: companion.id })}><Package size={18} /><span>{tr("收获", "Collect")}</span><small>{companion.readyProduct || ""}</small></button></div>
+      <div className="animal-care-buttons"><button disabled={!farm.inventory.grass} onClick={() => farmAction({ type: "feed", animalId: companion.id, feed: "grass" })}><Wheat size={18} /><span>{tr("喂草", "Feed")}</span><small>{farm.inventory.grass}</small></button><button disabled={now.getTime() - companion.lastPettedAt < ECONOMY_CONFIG.timing.petCooldownMs} onClick={() => farmAction({ type: "pet", animalId: companion.id })}><Heart size={18} /><span>{tr("摸摸", "Pet")}</span></button><button disabled={!companion.readyProduct} onClick={() => farmAction({ type: "collect", animalId: companion.id })}><Package size={18} /><span>{tr("收获", "Collect")}</span><small>{companion.readyProduct || ""}</small></button></div>
     </aside>}
     <div className="bottom-left">
       <span className="visitor-name"><span className={`live-dot ${status === "connected" ? "" : "offline"}`} />{status === "connected" ? self?.nickname || tr("一位来客", "A visitor") : tr("独处", "A quiet visit")}</span>

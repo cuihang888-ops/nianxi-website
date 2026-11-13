@@ -1,12 +1,13 @@
 import React, { useEffect, useState } from "react";
 import { ArrowRight, Bird, Carrot, Check, Coins, Droplets, Egg, Fence, Gift, Heart, Leaf, MapPin, Package, PawPrint, Plus, Rabbit, Scissors, ShoppingBasket, Sprout, Wheat } from "lucide-react";
 import { ANIMAL_TYPES, CROPS } from "./farm-state.js";
+import { ECONOMY_CONFIG, PRODUCT_VALUES } from "./economy-config.js";
 import CompanionName from "./CompanionName.jsx";
 import "./farm.css";
 
 const animalIcons = { sheep: PawPrint, rabbit: Rabbit, chicken: Bird };
 const productNames = { wool: ["羊毛", "Wool"], fur: ["兔绒", "Soft fur"], egg: ["鸡蛋", "Eggs"], game: ["山野收获", "Game"] };
-const productValues = { wool: 32, fur: 22, egg: 16, game: 45 };
+const productValues = PRODUCT_VALUES;
 const productIcons = { wool: Scissors, fur: Rabbit, egg: Egg, game: Leaf };
 const seconds = (until, now) => Math.max(0, Math.ceil((until - now) / 1000));
 
@@ -41,8 +42,8 @@ export default function FarmPanel({ farm, onAction, onGo, tr, now, selectedPlot,
           const fed = animal.fedUntil > now;
           return <article className={`farm-animal ${selectedAnimal === animal.id ? "farm-animal-selected" : ""}`} key={animal.id} data-testid={`animal-${animal.id}`}>
             <div className="farm-animal-head"><span className={`farm-animal-mark animal-${animal.type}`}><Icon size={30} strokeWidth={1.5} /></span><div><CompanionName animal={animal} onAction={onAction} tr={tr} /><p>{name(spec)} · {animal.readyProduct ? tr(`收获篮里有 ${animal.readyProduct} 份小礼物`, `${animal.readyProduct} little gifts are ready`) : fed ? tr("吃饱了，在草地上慢慢散步", "Well fed, wandering through the grass") : tr("在草地上自在歇着", "Resting in the meadow")}</p></div></div>
-            <div className="farm-comfort"><Heart size={13} /><span>{tr("亲近", "Bond")}</span><meter min="0" max="100" value={animal.comfort} aria-label={tr("亲近程度", "Bond level")} /><b>{animal.comfort}</b></div>
-            <div className="farm-animal-actions"><button className="secondary" disabled={!farm.inventory.grass} onClick={() => onAction({ type: "feed", animalId: animal.id, feed: "grass" })}><Wheat size={15} />{tr("喂牧草", "Feed grass")}</button><button className="secondary" disabled={!farm.inventory.carrot} onClick={() => onAction({ type: "feed", animalId: animal.id, feed: "carrot" })}><Carrot size={15} />{tr("喂萝卜", "Carrot")}</button><button className="secondary" disabled={now - animal.lastPettedAt < 5000} onClick={() => onAction({ type: "pet", animalId: animal.id })}><Heart size={15} />{tr("摸摸", "Pet")}</button><button className="primary" disabled={!animal.readyProduct} onClick={() => onAction({ type: "collect", animalId: animal.id })}><Package size={15} />{tr("收获", "Collect")}</button></div>
+            <div className="farm-comfort"><Heart size={13} /><span>{tr("亲近", "Bond")}</span><meter min="0" max={ECONOMY_CONFIG.care.maxComfort} value={animal.comfort} aria-label={tr("亲近程度", "Bond level")} /><b>{animal.comfort}</b></div>
+            <div className="farm-animal-actions"><button className="secondary" disabled={!farm.inventory.grass} onClick={() => onAction({ type: "feed", animalId: animal.id, feed: "grass" })}><Wheat size={15} />{tr("喂牧草", "Feed grass")}</button><button className="secondary" disabled={!farm.inventory.carrot} onClick={() => onAction({ type: "feed", animalId: animal.id, feed: "carrot" })}><Carrot size={15} />{tr("喂萝卜", "Carrot")}</button><button className="secondary" disabled={now - animal.lastPettedAt < ECONOMY_CONFIG.timing.petCooldownMs} onClick={() => onAction({ type: "pet", animalId: animal.id })}><Heart size={15} />{tr("摸摸", "Pet")}</button><button className="primary" disabled={!animal.readyProduct} onClick={() => onAction({ type: "collect", animalId: animal.id })}><Package size={15} />{tr("收获", "Collect")}</button></div>
           </article>;
         })}</div>
         <div className="farm-section-heading"><h3>{tr("迎接新伙伴", "Welcome a companion")}</h3></div><div className="farm-adoptions">{Object.values(ANIMAL_TYPES).map(spec => { const Icon = animalIcons[spec.id]; return <button key={spec.id} disabled={farm.coins < spec.price || localAnimals.length >= plot.capacity} onClick={() => onAction({ type: "buyAnimal", plotId: plot.id, animalType: spec.id })} aria-label={tr(`领养${spec.name}`, `Adopt ${spec.nameEn}`)}><Icon size={30} strokeWidth={1.4} /><strong>{name(spec)}</strong><span><Leaf size={12} />{spec.price}</span><Plus size={15} /></button>; })}</div>

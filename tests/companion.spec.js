@@ -96,10 +96,13 @@ test("companions pause, graze and respond to real canvas care on desktop and mob
   await expect(care.getByRole("heading", { name: "云朵", exact: true })).toBeVisible();
   await care.getByRole("button", { name: "摸摸", exact: true }).click();
   await expect.poll(async () => (await state()).farm.animals[0].motion).toBe("responding");
-  const responding = await state();
-  const companion = responding.farm.animals[0];
-  const targetHeading = Math.atan2(responding.x - companion.x, responding.z - companion.z);
-  expect(Math.abs(Math.atan2(Math.sin(companion.heading - targetHeading), Math.cos(companion.heading - targetHeading)))).toBeLessThan(.5);
+  await expect.poll(async () => {
+    const responding = await state();
+    const companion = responding.farm.animals[0];
+    if (companion.motion !== "responding") return Number.POSITIVE_INFINITY;
+    const targetHeading = Math.atan2(responding.x - companion.x, responding.z - companion.z);
+    return Math.abs(Math.atan2(Math.sin(companion.heading - targetHeading), Math.cos(companion.heading - targetHeading)));
+  }, { timeout: 3000, intervals: [50, 100, 150] }).toBeLessThan(.5);
   await page.screenshot({ path: resolve("reports/companion-care-desktop.png") });
   await expect.poll(async () => (await state()).farm.animals[0].motion, { timeout: 18000 }).toBe("walking");
 

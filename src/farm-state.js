@@ -1,34 +1,34 @@
 import { createWorld, getRegion, getSettlement, HORSE_PRICE, normalizeWorld } from "./world-state.js";
+import { ECONOMY_CONFIG, PRODUCT_VALUES } from "./economy-config.js";
 
 const FARM_KEY = "anheli-farm-v1";
 const VERSION = 1;
-const MAX_COINS = 9_999_999;
-const MAX_ITEMS = 9999;
+const MAX_COINS = ECONOMY_CONFIG.limits.maxCoins;
+const MAX_ITEMS = ECONOMY_CONFIG.limits.maxItems;
 const MAX_TIME = 8_640_000_000_000_000;
-const PET_COOLDOWN_MS = 5000;
-export const HUNT_COOLDOWN_MS = 20_000;
+export const PET_COOLDOWN_MS = ECONOMY_CONFIG.timing.petCooldownMs;
+export const HUNT_COOLDOWN_MS = ECONOMY_CONFIG.timing.huntCooldownMs;
 export const MAX_ANIMAL_NAME_LENGTH = 12;
 
 export const LAND_PLOTS = Object.freeze([
-  Object.freeze({ id: "meadow-west", name: "西侧草场", nameEn: "West meadow", price: 400, capacity: 6, x: -19, z: 39 }),
-  Object.freeze({ id: "meadow-east", name: "东侧草场", nameEn: "East meadow", price: 600, capacity: 6, x: 19, z: 39 }),
-  Object.freeze({ id: "river-west", name: "柳岸西田", nameEn: "West riverside", price: 800, capacity: 6, x: -19, z: 57 }),
-  Object.freeze({ id: "river-east", name: "柳岸东田", nameEn: "East riverside", price: 1100, capacity: 6, x: 19, z: 57 }),
+  Object.freeze({ id: "meadow-west", name: "西侧草场", nameEn: "West meadow", price: ECONOMY_CONFIG.land.meadowWest, capacity: ECONOMY_CONFIG.land.capacity, x: -19, z: 39 }),
+  Object.freeze({ id: "meadow-east", name: "东侧草场", nameEn: "East meadow", price: ECONOMY_CONFIG.land.meadowEast, capacity: ECONOMY_CONFIG.land.capacity, x: 19, z: 39 }),
+  Object.freeze({ id: "river-west", name: "柳岸西田", nameEn: "West riverside", price: ECONOMY_CONFIG.land.riverWest, capacity: ECONOMY_CONFIG.land.capacity, x: -19, z: 57 }),
+  Object.freeze({ id: "river-east", name: "柳岸东田", nameEn: "East riverside", price: ECONOMY_CONFIG.land.riverEast, capacity: ECONOMY_CONFIG.land.capacity, x: 19, z: 57 }),
 ]);
 
 export const ANIMAL_TYPES = Object.freeze({
-  sheep: Object.freeze({ id: "sheep", name: "小羊", nameEn: "Sheep", price: 260, product: "wool", productEn: "Wool", productValue: 32, productionMs: 30_000 }),
-  rabbit: Object.freeze({ id: "rabbit", name: "兔子", nameEn: "Rabbit", price: 180, product: "fur", productEn: "Rabbit fur", productValue: 22, productionMs: 24_000 }),
-  chicken: Object.freeze({ id: "chicken", name: "小鸡", nameEn: "Chicken", price: 140, product: "egg", productEn: "Egg", productValue: 16, productionMs: 18_000 }),
+  sheep: Object.freeze({ id: "sheep", name: "小羊", nameEn: "Sheep", ...ECONOMY_CONFIG.animals.sheep, product: "wool", productEn: "Wool", productValue: PRODUCT_VALUES.wool }),
+  rabbit: Object.freeze({ id: "rabbit", name: "兔子", nameEn: "Rabbit", ...ECONOMY_CONFIG.animals.rabbit, product: "fur", productEn: "Rabbit fur", productValue: PRODUCT_VALUES.fur }),
+  chicken: Object.freeze({ id: "chicken", name: "小鸡", nameEn: "Chicken", ...ECONOMY_CONFIG.animals.chicken, product: "egg", productEn: "Egg", productValue: PRODUCT_VALUES.egg }),
 });
 
 export const CROPS = Object.freeze({
-  grass: Object.freeze({ id: "grass", name: "牧草", nameEn: "Grass", cost: 12, growMs: 20_000, yield: 3 }),
-  carrot: Object.freeze({ id: "carrot", name: "胡萝卜", nameEn: "Carrot", cost: 18, growMs: 30_000, yield: 2 }),
+  grass: Object.freeze({ id: "grass", name: "牧草", nameEn: "Grass", ...ECONOMY_CONFIG.crops.grass }),
+  carrot: Object.freeze({ id: "carrot", name: "胡萝卜", nameEn: "Carrot", ...ECONOMY_CONFIG.crops.carrot }),
 });
 
 const INVENTORY_KEYS = Object.freeze(["grass", "carrot", "wool", "fur", "egg", "game"]);
-const PRODUCT_VALUES = Object.freeze({ wool: 32, fur: 22, egg: 16, game: 45 });
 const timestamp = (value, fallback = 0) => Number.isFinite(value) ? Math.max(0, Math.min(MAX_TIME, Math.floor(value))) : fallback;
 const asTime = value => timestamp(value, Date.now());
 const integer = (value, fallback = 0, max = 999_999) => Number.isSafeInteger(value) ? Math.max(0, Math.min(max, value)) : fallback;
@@ -59,7 +59,7 @@ function defaultPlot(definition) {
 function animalDefaults(id, type, plotId, now) {
   const spec = ANIMAL_TYPES[type];
   return {
-    id, type, plotId, name: spec.name, comfort: 55, fedUntil: 0,
+    id, type, plotId, name: spec.name, comfort: ECONOMY_CONFIG.care.initialComfort, fedUntil: 0,
     nextProductAt: now + spec.productionMs, readyProduct: 0,
     lastPettedAt: 0, adoptedAt: now,
   };
@@ -70,12 +70,12 @@ export function createFarm(now = Date.now()) {
   const plots = LAND_PLOTS.map(defaultPlot);
   return {
     version: VERSION,
-    coins: 1200,
+    coins: ECONOMY_CONFIG.startingCoins,
     world: createWorld(),
     plots,
     animals: [],
     beds: plots.flatMap(plot => emptyBeds(plot.id)),
-    inventory: { grass: 4, carrot: 2, wool: 0, fur: 0, egg: 0, game: 0 },
+    inventory: { ...ECONOMY_CONFIG.startingInventory },
     lastDailyGift: "",
     lastHuntAt: 0,
     huntStats: { attempts: 0, successes: 0 },
@@ -95,10 +95,10 @@ function normalizeAnimal(raw, index, plotIds, now) {
     type: raw.type,
     plotId,
     name: animalName(raw.name, true) || spec.name,
-    comfort: Math.round(Math.max(0, Math.min(100, finite(raw.comfort, 55)))),
-    fedUntil: Math.min(now + spec.productionMs * 4, timestamp(raw.fedUntil)),
-    nextProductAt: Math.max(adoptedAt + spec.productionMs, Math.min(now + spec.productionMs * 5, timestamp(raw.nextProductAt, adoptedAt + spec.productionMs))),
-    readyProduct: integer(raw.readyProduct, 0, 12),
+    comfort: Math.round(Math.max(0, Math.min(ECONOMY_CONFIG.care.maxComfort, finite(raw.comfort, ECONOMY_CONFIG.care.initialComfort)))),
+    fedUntil: Math.min(now + spec.productionMs * ECONOMY_CONFIG.care.maxFedCycles, timestamp(raw.fedUntil)),
+    nextProductAt: Math.max(adoptedAt + spec.productionMs, Math.min(now + spec.productionMs * ECONOMY_CONFIG.care.maxNextProductCycles, timestamp(raw.nextProductAt, adoptedAt + spec.productionMs))),
+    readyProduct: integer(raw.readyProduct, 0, ECONOMY_CONFIG.limits.maxReadyProduct),
     lastPettedAt: Math.min(now, timestamp(raw.lastPettedAt)),
     adoptedAt,
   };
@@ -179,7 +179,7 @@ export function advanceFarm(state, now = Date.now()) {
     if (animal.fedUntil > 0 && nextProductAt <= horizon) {
       const cycles = Math.floor((horizon - nextProductAt) / spec.productionMs) + 1;
       if (cycles > 0) {
-        readyProduct = Math.min(12, readyProduct + cycles * (animal.comfort >= 80 ? 2 : 1));
+        readyProduct = Math.min(ECONOMY_CONFIG.limits.maxReadyProduct, readyProduct + cycles * (animal.comfort >= ECONOMY_CONFIG.care.bonusThreshold ? ECONOMY_CONFIG.care.bonusMultiplier : 1));
         // Advance every elapsed cycle even when storage is full, so collection cannot replay it.
         nextProductAt += cycles * spec.productionMs;
       }
@@ -229,22 +229,22 @@ export function applyFarmAction(state, action, now = Date.now()) {
   if (type === "hunt") {
     if (typeof action.success !== "boolean") return fail(next, "这次狩猎结果无效", "Invalid hunt result");
     if (next.huntStats.attempts > 0 && time - next.lastHuntAt < HUNT_COOLDOWN_MS) return fail(next, "山林需要安静一会儿，再试一次吧", "Let the forest rest before another attempt");
-    if (action.success && next.inventory.game >= MAX_ITEMS) return fail(next, "仓库已经放不下了", "Storage is full");
+    if (action.success && next.inventory.game + ECONOMY_CONFIG.hunt.rewardQuantity > MAX_ITEMS) return fail(next, "仓库已经放不下了", "Storage is full");
     next.lastHuntAt = time;
     next.huntStats.attempts = Math.min(999_999, next.huntStats.attempts + 1);
     if (action.success) {
-      next.inventory.game += 1;
+      next.inventory.game += ECONOMY_CONFIG.hunt.rewardQuantity;
       next.huntStats.successes = Math.min(999_999, next.huntStats.successes + 1);
     }
     return action.success
-      ? result(next, true, "获得一份山野收获", "Received one game item")
+      ? result(next, true, ECONOMY_CONFIG.hunt.rewardQuantity === 1 ? "获得一份山野收获" : `获得${ECONOMY_CONFIG.hunt.rewardQuantity}份山野收获`, ECONOMY_CONFIG.hunt.rewardQuantity === 1 ? "Received one game item" : `Received ${ECONOMY_CONFIG.hunt.rewardQuantity} game items`)
       : result(next, true, "这次没有命中，下次再试", "Missed this time. Try again soon");
   }
   if (type === "dailyGift") {
     if (next.lastDailyGift === dateKey(time)) return fail(next, "今日补给已经领取", "Today's supply was already claimed");
-    next.coins = Math.min(MAX_COINS, next.coins + 120);
-    next.inventory.grass = Math.min(MAX_ITEMS, next.inventory.grass + 2);
-    next.inventory.carrot = Math.min(MAX_ITEMS, next.inventory.carrot + 1);
+    next.coins = Math.min(MAX_COINS, next.coins + ECONOMY_CONFIG.dailyGift.coins);
+    next.inventory.grass = Math.min(MAX_ITEMS, next.inventory.grass + ECONOMY_CONFIG.dailyGift.inventory.grass);
+    next.inventory.carrot = Math.min(MAX_ITEMS, next.inventory.carrot + ECONOMY_CONFIG.dailyGift.inventory.carrot);
     next.lastDailyGift = dateKey(time);
     return result(next, true, "收到今日农场补给", "Daily farm supply received");
   }
@@ -315,8 +315,8 @@ export function applyFarmAction(state, action, now = Date.now()) {
     }
     if (type === "pet") {
       if (target.lastPettedAt > 0 && time - target.lastPettedAt < PET_COOLDOWN_MS) return fail(next, "让它玩一小会儿再来摸摸吧", "Let it play a moment before petting again");
-      if (target.comfort >= 100) return fail(next, "它已经很开心了", "It is already feeling happy");
-      target.comfort = Math.min(100, target.comfort + 12);
+      if (target.comfort >= ECONOMY_CONFIG.care.maxComfort) return fail(next, "它已经很开心了", "It is already feeling happy");
+      target.comfort = Math.min(ECONOMY_CONFIG.care.maxComfort, target.comfort + ECONOMY_CONFIG.care.petComfort);
       target.lastPettedAt = Math.max(1, time);
       return result(next, true, `${target.name}开心地蹭了蹭你`, `${spec.nameEn} is feeling loved`);
     }
@@ -324,11 +324,11 @@ export function applyFarmAction(state, action, now = Date.now()) {
       const feed = action.feed;
       if (feed !== "grass" && feed !== "carrot") return fail(next, "这份饲料不能喂食", "This feed is unavailable");
       if (next.inventory[feed] < 1) return fail(next, feed === "grass" ? "牧草不够了，先种一些吧" : "胡萝卜不够了，先种一些吧", feed === "grass" ? "You need more grass" : "You need more carrots");
-      if (target.fedUntil > time + spec.productionMs * 2) return fail(next, "它已经吃得很饱了", "It has enough food for now");
+      if (target.fedUntil > time + spec.productionMs * ECONOMY_CONFIG.care.feedCycles) return fail(next, "它已经吃得很饱了", "It has enough food for now");
       next.inventory[feed] -= 1;
       if (target.fedUntil <= time) target.nextProductAt = time + spec.productionMs;
-      target.fedUntil = Math.max(target.fedUntil, time) + spec.productionMs * 2;
-      target.comfort = Math.min(100, target.comfort + 8);
+      target.fedUntil = Math.max(target.fedUntil, time) + spec.productionMs * ECONOMY_CONFIG.care.feedCycles;
+      target.comfort = Math.min(ECONOMY_CONFIG.care.maxComfort, target.comfort + ECONOMY_CONFIG.care.feedComfort);
       return result(next, true, `喂饱了${target.name}`, `${spec.nameEn} has been fed`);
     }
     if (target.readyProduct < 1) return fail(next, `${target.name}还没有产出`, `${spec.nameEn} has no product ready`);
@@ -340,7 +340,7 @@ export function applyFarmAction(state, action, now = Date.now()) {
   }
   if (type === "sell") {
     const item = typeof action.item === "string" ? action.item : "";
-    const quantity = integer(action.quantity, 0, 9999);
+    const quantity = integer(action.quantity, 0, MAX_ITEMS);
     const value = Object.hasOwn(PRODUCT_VALUES, item) ? PRODUCT_VALUES[item] : 0;
     if (!value || quantity < 1) return fail(next, "没有可出售的货物", "There is nothing to sell");
     if (next.inventory[item] < quantity) return fail(next, "库存里的货物不够", "You do not have enough in storage");

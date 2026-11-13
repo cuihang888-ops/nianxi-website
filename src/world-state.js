@@ -1,3 +1,5 @@
+import { ECONOMY_CONFIG } from "./economy-config.js";
+
 const settlement = (id, name, nameEn, kind) => Object.freeze({ id, name, nameEn, kind });
 const region = definition => Object.freeze({ ...definition, settlements: Object.freeze(definition.settlements) });
 
@@ -30,7 +32,7 @@ export const TEMPLE = Object.freeze({
   x: 36, y: 76,
 });
 
-export const HORSE_PRICE = 480;
+export const HORSE_PRICE = ECONOMY_CONFIG.horse.price;
 export const WORLD_TRANSPORT = Object.freeze({
   walk: Object.freeze({ id: "walk", name: "步行", nameEn: "Walk", speed: 1 }),
   horse: Object.freeze({ id: "horse", name: "骑马", nameEn: "Horseback", speed: 2 }),

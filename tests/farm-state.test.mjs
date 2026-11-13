@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { ECONOMY_CONFIG, PRODUCT_VALUES, validateEconomyConfig } from "../src/economy-config.js";
 import {
   ANIMAL_TYPES, CROPS, FARM_KEY, HUNT_COOLDOWN_MS, LAND_PLOTS, advanceFarm, applyFarmAction,
   createFarm, loadFarm, normalizeFarm, saveFarm,
@@ -16,6 +17,50 @@ const step = (state, action, now = START) => {
 const withLand = () => step(createFarm(START), { type: "buyPlot", plotId: PLOT });
 const withSheep = () => step(withLand(), { type: "buyAnimal", plotId: PLOT, animalType: "sheep" });
 const fedSheep = () => step(withSheep(), { type: "feed", animalId: "animal-1", feed: "grass" });
+
+test("free economy keeps the shipped prices, production timing, supplies and limits", () => {
+  assert.equal(ECONOMY_CONFIG.version, "free-v1");
+  assert.equal(ECONOMY_CONFIG.startingCoins, 1200);
+  assert.deepEqual(LAND_PLOTS.map(plot => [plot.price, plot.capacity]), [[400, 6], [600, 6], [800, 6], [1100, 6]]);
+  assert.deepEqual(Object.values(ANIMAL_TYPES).map(spec => [spec.price, spec.productionMs, spec.productValue]), [[260, 30_000, 32], [180, 24_000, 22], [140, 18_000, 16]]);
+  assert.deepEqual(Object.values(CROPS).map(spec => [spec.cost, spec.growMs, spec.yield]), [[12, 20_000, 3], [18, 30_000, 2]]);
+  assert.deepEqual(PRODUCT_VALUES, { wool: 32, fur: 22, egg: 16, game: 45 });
+  assert.deepEqual(ECONOMY_CONFIG.dailyGift, { coins: 120, inventory: { grass: 2, carrot: 1 } });
+  assert.deepEqual(ECONOMY_CONFIG.limits, { maxCoins: 9_999_999, maxItems: 9999, maxReadyProduct: 12 });
+  assert.equal(ECONOMY_CONFIG.horse.price, 480);
+  assert.equal(validateEconomyConfig(ECONOMY_CONFIG), true);
+});
+
+test("economy tables reject invalid values and cannot be changed at runtime", () => {
+  const invalidCases = [
+    config => { config.animals.sheep.productionMs = 0; },
+    config => { config.crops.grass.yield = 0.5; },
+    config => { config.products.wool = -1; },
+    config => { config.startingCoins = Number.MAX_SAFE_INTEGER + 1; },
+    config => { delete config.dailyGift; },
+    config => { config.payments = true; },
+    config => { config.startingCoins = config.limits.maxCoins + 1; },
+    config => { config.care.maxFedCycles = config.care.feedCycles; },
+  ];
+  for (const mutate of invalidCases) {
+    const config = structuredClone(ECONOMY_CONFIG);
+    mutate(config);
+    assert.throws(() => validateEconomyConfig(config), TypeError);
+  }
+  assert.throws(() => { ECONOMY_CONFIG.dailyGift.inventory.grass = 999; }, TypeError);
+  assert.throws(() => { PRODUCT_VALUES.wool = 999; }, TypeError);
+});
+
+test("save files and actions cannot inject economy configuration", () => {
+  const state = createFarm(START);
+  state.economyConfig = { startingCoins: 999999, land: { meadowWest: 0 } };
+  const normalized = normalizeFarm(state, START);
+  assert.equal(normalized.economyConfig, undefined);
+  const bought = step(state, { type: "buyPlot", plotId: PLOT, price: 0, economyConfig: state.economyConfig });
+  assert.equal(bought.coins, 800);
+  state.inventory.grass = 100;
+  assert.equal(createFarm(START).inventory.grass, 4);
+});
 
 test("new farm starts with virtual funds and four independent unowned plots", () => {
   const state = createFarm(START);
