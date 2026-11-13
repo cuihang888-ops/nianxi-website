@@ -1,0 +1,56 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>安和里 · 玄枢万年历</title>
+  <meta name="robots" content="noindex,follow">
+  <meta name="description" content="安和里玄枢万年历：公历、农历、节气、每日宜忌和四十二重时轮。传统文化参考，非科学预测。">
+  <link rel="stylesheet" href="src/app.css"><link rel="stylesheet" href="src/web.css">
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand"><span class="seal">安</span><div><h1>玄枢<span>万年历</span></h1><p>ANHE HOME · THE CELESTIAL ALMANAC</p></div></div>
+      <div class="edition"><i></i> 四十二重时轮 <span>42 ORBITS</span></div>
+      <div class="top-actions"><span id="liveStatus" class="status"><i></i> 北京时间 · 实时</span><button id="fullBtn" title="全屏 · F" aria-label="全屏">⛶ <span>全屏</span></button></div>
+    </header>
+
+    <main class="workspace">
+      <aside class="left-panel">
+        <section class="clock-section"><p class="eyebrow" id="clockCaption">BEIJING STANDARD TIME</p><div class="digital-clock"><span id="clockText">00:00:00</span><small id="milliseconds">000</small></div><div class="clock-meta"><span id="civilDate">正在校时</span><span id="weekday"></span></div><div class="time-track"><i id="secondTrack"></i></div></section>
+        <section class="lunar-section"><p class="eyebrow">阴阳合历 <span id="zodiacText"></span></p><h2 id="lunarText">农历</h2><div id="pillars" class="pillars"></div></section>
+        <section class="calendar-section">
+          <div class="section-heading"><h2 id="monthLabel">2026 / 11</h2><div class="month-actions"><button id="prevMonth" aria-label="上个月" title="上个月">‹</button><button id="nextMonth" aria-label="下个月" title="下个月">›</button></div></div>
+          <div class="calendar-week"><span>一</span><span>二</span><span>三</span><span>四</span><span>五</span><span>六</span><span>日</span></div>
+          <div id="monthGrid" class="month-grid" aria-label="公历月历"></div>
+          <div class="date-tools"><input id="dateInput" aria-label="选择公历日期" type="date" min="1901-01-01" max="2100-12-31"><button id="dateBtn">查看</button></div>
+          <button id="todayBtn" class="today-button">↺ 回到今天 · 实时</button>
+        </section>
+        <div class="sidebar-foot"><span>UTC +08:00</span><span>1901 — 2100</span></div>
+      </aside>
+
+      <section class="instrument-section" aria-label="42圈五行八卦罗盘">
+        <div class="instrument-heading"><div><span class="eyebrow">观天察时 · 万象归一</span><h2>四十二重<span> · </span>玄枢</h2></div><button id="liveBtn" class="mode-button active">◉ 实时运行</button></div>
+        <div class="instrument-view" id="instrumentView"><canvas id="compass" width="1440" height="1440" aria-label="可缩放拖动的四十二圈罗盘"></canvas><div class="axis n">北 <small>N</small></div><div class="axis e">东 <small>E</small></div><div class="axis s">南 <small>S</small></div><div class="axis w">西 <small>W</small></div><div class="reticle tl"></div><div class="reticle tr"></div><div class="reticle bl"></div><div class="reticle br"></div><div id="loading" class="loading">正在展开四十二重时轮…</div><div class="zoom-hint" id="zoomHint">Ctrl + 滚轮缩放 · 滑杆调节</div></div>
+        <div class="instrument-toolbar"><button id="motionBtn" aria-pressed="false" title="暂停旋转与流光，时钟照常更新">Ⅱ 暂停动效</button><div class="zoom-control"><span>缩放</span><input id="zoomRange" aria-label="罗盘缩放" type="range" min="100" max="260" value="100" step="5"><output id="zoomValue">100%</output><button id="resetView" aria-label="重置视角" title="重置视角">↺</button></div><button id="detailsBtn" aria-expanded="false">42 圈层 <span>↗</span></button></div>
+        <div class="selected-ring" id="selectedRing"><span class="ring-index" id="selectedIndex">42</span><div><strong id="selectedName">四十二重时轮</strong><p id="selectedDescription">选择右侧「圈层目录」，查看每一道环带的名称与含义。</p></div><span class="selected-tag" id="selectedTag">层层相映</span></div>
+      </section>
+
+      <aside class="right-panel">
+        <section class="almanac-section"><div class="section-heading"><h2>每日宜忌</h2><span class="mini-label" id="almanacDate"></span></div><div class="almanac-row yi"><span class="almanac-mark">宜</span><div id="yiList" class="almanac-items"></div></div><div class="almanac-row ji"><span class="almanac-mark">忌</span><div id="jiList" class="almanac-items"></div></div><div class="almanac-foot"><span>传统黄历参考</span><button id="almanacMore">全部宜忌 ↗</button></div></section>
+        <section class="solar-section"><p class="eyebrow">二十四节气 <span id="termSeason"></span></p><div class="solar-title"><h2 id="currentTerm">霜降</h2><span>当令</span></div><div class="term-path"><i></i><div></div><i></i></div><div class="term-next"><span>距 <strong id="nextTerm">立冬</strong></span><span id="termDate"></span></div><div class="term-countdown"><strong id="termDays">00</strong><span>天</span><em id="termClock">00:00:00</em></div></section>
+        <section class="elements-section"><div class="section-heading"><h2>五行流转</h2><span class="mini-label">相生</span></div><div id="elementRows"></div></section>
+        <section class="progress-section"><div class="progress-caption"><span>今日流逝</span><strong id="dayPercent"></strong></div><div class="progress-track"><i id="dayProgress"></i></div><div class="progress-caption"><span>年轮进度</span><strong id="yearPercent"></strong></div><div class="progress-track gold"><i id="yearProgress"></i></div></section>
+        <section class="layer-preview"><div class="section-heading"><h2>圈层目录</h2><span class="mini-label">01 — 42</span></div><button class="layer-category" data-category="calendar"><span>历法与时间</span><b>↗</b></button><button class="layer-category" data-category="symbol"><span>八卦与传统符号</span><b>↗</b></button><button class="layer-category" data-category="decoration"><span>分度与流光</span><b>↗</b></button></section>
+        <div class="app-note">随设备时钟换算北京时间。<br>传统符号与历法的动态可视化。</div>
+      </aside>
+    </main>
+
+    <footer class="bottom-bar"><span><i></i> 浏览器计算 <b>·</b> <span id="modeFoot">实时模式</span></span><span>立春定年 · 节气定月 · 午夜换日</span><button id="aboutBtn">关于玄枢</button></footer>
+  </div>
+
+  <dialog id="layersDialog" class="layers-dialog"><div class="dialog-heading"><div><p class="eyebrow">THE FORTY-TWO ORBITS</p><h2>圈层目录</h2></div><button id="closeLayers" aria-label="关闭圈层目录">×</button></div><div class="layer-filters"><button data-filter="all" class="active">全部 42</button><button data-filter="calendar">历法</button><button data-filter="symbol">符号</button><button data-filter="decoration">分度与流光</button></div><div id="ringList" class="ring-list"></div><p class="dialog-note">这是42层创意历法仪表，圈层可逐一查看；不作为实地测向或某一流派的专业排盘工具。</p></dialog>
+  <dialog id="almanacDialog" class="almanac-dialog"><div class="dialog-heading"><div><p class="eyebrow">DAILY ALMANAC</p><h2>每日宜忌</h2></div><button id="closeAlmanac" aria-label="关闭每日宜忌">×</button></div><p id="almanacFullDate" class="almanac-full-date"></p><div class="almanac-full-row yi"><span class="almanac-mark">宜</span><div id="fullYiList" class="almanac-items"></div></div><div class="almanac-full-row ji"><span class="almanac-mark">忌</span><div id="fullJiList" class="almanac-items"></div></div><p class="dialog-note">传统黄历参考，非科学预测。不同历书的宜忌条目可能不同；本应用使用 lunar-javascript 的整日宜忌，随北京时间日期更新。</p></dialog>
+  <dialog id="aboutDialog" class="about-dialog"><div class="dialog-heading"><h2>玄枢 · 万象时轮</h2><button id="closeAbout" aria-label="关闭关于">×</button></div><p>四十二层环带，将农历、干支、五行、八卦与时钟融为一体。选择日期可查阅1901–2100年的万年历，一键返回实时模式。</p><p>金色与青色的流光属于动效；历法数据按北京时间计算。生肖与干支年按立春切换，干支月按节气切换，日柱按午夜切换。节气秒数为算法计算值。</p><p>每日宜忌采用 lunar-javascript 默认整日规则，随公历日期切换，作为传统黄历参考，并非科学预测。不同历书条目可能不同。</p><p>42圈是本作品的设计层数，各种传统罗盘的层数与配置会不同。本应用没有方位传感器，也不提供风水判断。</p><p>安和里网页版本：历法数据在浏览器中计算，使用北京时间；无需下载安装软件，无需填写个人信息。浏览器会从年禧商城载入本工具的脚本与字体。</p><p class="credits">历法：6tail / lunar-javascript（MIT）<br>字体：Noto Sans SC · Noto Serif SC（OFL）<br>画面：Canvas 2D 程序绘制</p></dialog>
+  <script src="src/web.js"></script><script src="vendor/lunar.js"></script><script src="src/calendar.js"></script><script src="src/rings.js"></script><script src="src/compass.js"></script><script src="src/app.js"></script>
+</body></html>

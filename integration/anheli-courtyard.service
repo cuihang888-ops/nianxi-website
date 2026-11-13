@@ -1,0 +1,26 @@
+# Example only. Verify the Node executable, account and directory before installing.
+[Unit]
+Description=Anheli courtyard presence
+After=network.target
+
+[Service]
+Type=simple
+User=anheli
+Group=anheli
+WorkingDirectory=/www/wwwroot/nianxi-anheli/live
+EnvironmentFile=/etc/anheli-courtyard.env
+ExecStart=/usr/bin/node /www/wwwroot/nianxi-anheli/live/server.mjs
+Restart=on-failure
+RestartSec=3
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

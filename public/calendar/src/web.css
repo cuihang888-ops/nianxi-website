@@ -1,0 +1,29 @@
+html[data-embedded] .app-shell {
+  height: 760px;
+  min-height: 760px;
+}
+
+.brand p { letter-spacing: 1.6px; }
+.instrument-view { touch-action: pan-y; }
+.instrument-view.is-zoomed { touch-action: none; }
+
+@media (max-width: 980px) {
+  html[data-embedded] .app-shell { height: auto; min-height: 0; }
+  html[data-embedded] .workspace { flex: none; }
+}
+
+@media (max-width: 380px) {
+  .instrument-view { min-height: 280px; }
+  .instrument-toolbar { flex-wrap: wrap; gap: 12px; }
+  .topbar { padding: 0 14px; }
+  .brand { gap: 11px; }
+  .workspace { padding: 14px; }
+  .brand h1 { font-size: 21px; }
+  .digital-clock > span { font-size: 38px; }
+}
+
+html:fullscreen .app-shell { height: 100vh; min-height: 700px; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation: none !important; transition: none !important; }
+}

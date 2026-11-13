@@ -1,0 +1,62 @@
+[
+  {
+    "path": "fonts/NotoSansSC-OFL.txt",
+    "sha256": "1c05c68c34f9708415aada51f17e1b0092d2cea709bf4a94cd38114f9e73d7d9"
+  },
+  {
+    "path": "fonts/NotoSansSC-web.woff2",
+    "sha256": "1c7720006a4250815d504661b749b7e13bb80e4218fb88a078e13b81436e3975"
+  },
+  {
+    "path": "fonts/NotoSerifSC-OFL.txt",
+    "sha256": "5e0da210fb04058a8c0087985d2d456b931c2579811a49655721d3cf0c36b6d6"
+  },
+  {
+    "path": "fonts/NotoSerifSC-web.woff2",
+    "sha256": "c95fcff3f94d32be56884a5135b3616822bacb74a3d54e64fa83d13c6a1cf701"
+  },
+  {
+    "path": "index.html",
+    "sha256": "c073b41eeae092d71930180afde90047a4dcb30da0e04d8c1ee2bc4c90488ab8"
+  },
+  {
+    "path": "src/app.css",
+    "sha256": "7056bdb0b31bc27a2376ed7d7574912f22e445fcacc6ba5ed26471a2078d7de8"
+  },
+  {
+    "path": "src/app.js",
+    "sha256": "129dd7486066c9d75295608dbb497835fea006d9e0a28d0ba39a70a86d812aa0"
+  },
+  {
+    "path": "src/calendar.js",
+    "sha256": "1ecef8266e4b2427b1fb33598925bd95fbac53bbbbc43b5fa5c44fdc05a35f9a"
+  },
+  {
+    "path": "src/compass.js",
+    "sha256": "4bc3fd233b1a9a8a91ffc723f19680ac28006f3e43a5d3b994f811685a3b5f86"
+  },
+  {
+    "path": "src/rings.js",
+    "sha256": "670de445b2064ee5afc3ef961c805eec3cc295f57893f3b6db813d0107344a86"
+  },
+  {
+    "path": "src/web.css",
+    "sha256": "057ae995931cf572b75bf3f4ea48de155deccf63f846457cb4ef946dfd3ab9f4"
+  },
+  {
+    "path": "src/web.js",
+    "sha256": "3d5582ac92bc46882758f0e2dec902ac4c9aaf21ecce693b500b368e48e627ae"
+  },
+  {
+    "path": "vendor/lunar-LICENSE.txt",
+    "sha256": "d9210caf1844dcf410095cea464b79800aad30dbd49df092076b9f0ddc015404"
+  },
+  {
+    "path": "vendor/lunar-commit.txt",
+    "sha256": "0ace5201b5ec8a52b58164a3ebca3607b3477dc615ce23f891bdb418fb86bdcc"
+  },
+  {
+    "path": "vendor/lunar.js",
+    "sha256": "9750324bfe1aa63c146f8c72b1143df924466c11c8a5277d7d9225c541a18aaa"
+  }
+]

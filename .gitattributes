@@ -1,0 +1,11 @@
+* text=auto
+*.js text eol=lf
+*.mjs text eol=lf
+*.jsx text eol=lf
+*.css text eol=lf
+*.md text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+public/calendar/** -text
+*.png -text
+*.woff2 -text
