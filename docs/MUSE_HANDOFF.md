@@ -28,11 +28,17 @@ Three.js 庭院、六个真实多人房间、仪式活动、邀茶与心灯；�
 
 本地后续完善：免费动物昵称（`renameAnimal`），护理面板与场景共用 `src/CompanionName.jsx`；动物错峰走动、吃草、抬头和转向照料者。`farm.animate` 第四个参数为玩家位置；原三个参数仍可用。`src/farm-scene.js` 已有后续修改，Muse 回传时需逐项合并。
 
-本轮总单测 87/87 通过，已覆盖农场与世界规则、场景回归、临时庭院联机、经济遥测、微信适配器及后端登录 HTTP 契约；微信接口响应仍为 mock。构建通过，原日历源码与构建产物各 15/15 文件校验通过。最新网页 UI 全套首次为 15 通过、1 失败；失败是照料后平滑转向尚未收敛时立即断言，已仅修正测试等待逻辑，相关 `companion.spec.js` 两项复测通过，未改游戏实现或放宽阈值。模拟器已验证诊断画布及未配置登录的失败提示；仍需完成真实微信登录联调、游戏迁移、真机低端性能、上线环境回归与实际用户留存验证。
+本轮全套单测 109/109 通过，随后补充的实际构建包无 DOM 启动测试 1/1 通过；微信上游响应仍为 mock。网页 UI 全套 16/16、网页构建、原日历源码与构建产物各 15/15 校验通过。源码工程和独立 `dist/wechat` 均在微信模拟器启动，触控、本机保存、重载恢复、终止后重启恢复及未配置登录提示已实际验证。前后台暂停逻辑有自动测试覆盖，明确的模拟器 hide/show 和真机切后台尚未验收；真实微信登录、游戏迁移、云存档及真机性能仍未完成。完整记录见 `WECHAT_PLATFORM_VERIFICATION_20261113.md`。
 
 ## 确定分工
 
 用户最新分工：Codex 先把微信平台与框架接入做好；Muse 负责游戏画面、玩法、细节和游戏内部运行完整性。Codex 本轮不扩写游戏场景或玩法。
+
+2026-11-13 平台增量已经提供固定接入口：Muse 在 `wechat/game-entry.js` 导出 `createGame(context)`，由 `wechat/game.js` 创建宿主。使用宿主的 `context.canvas`、`context.input`、`context.viewport` 和 `context.platform`，不要另开主画布或重复启动帧循环；内部游戏返回 `update/render/resize/pause/resume/dispose`。地图重做可在 Muse 自己的目录进行，保留 Codex 的平台层与入口引导。详细约定见 `WECHAT_RUNTIME_CONTRACT.md`。
+
+第五轮累计地图 ZIP 已只读评审，新增安家层，但仍是旧基线网页入口，尚未合并或运行；最新阻碍和 Muse 的单场景微信接入任务见 [第五轮地图包微信接入评审](MUSE_ROUND5_WECHAT_REVIEW_20261113.md)，前轮记录保留在 [第四轮评审](MUSE_ROUND4_WECHAT_REVIEW_20261113.md)。请等待本轮平台提交完成后使用协作分支最新基线，不整体覆盖累计包。
+
+本机进度使用 `platform/save-repository.js`，由 Muse 提供纯 JSON 游戏状态及校验函数；保存失败、版本冲突和损坏旧档均须反馈。这里尚无云同步，不能把 `cloudSynced:false` 显示成云端保存成功，见 `WECHAT_SAVE_CONTRACT.md`。打包命令为 `npm run build:wechat`，输出 `dist/wechat`，资产放到 `wechat/assets/`；初始单包超出内部预算时需先商定分包方案，见 `WECHAT_BUILD.md`。
 
 Muse 可继续完善自然环境与动物吸引力，并把游戏接入 `wechat/` 平台层。首轮曲折小路、草地斑块、花丛聚落、山谷层次和短暂靠近已合入；自然活动与照料动作保留本地实现。修改 `src/scene.js` 或平台入口前先对齐接口，不整体覆盖已有工作。
 
@@ -53,7 +59,8 @@ Codex 负责外部后台、工程配置、平台适配、登录与存档服务�
 | `service/server.mjs` | 临时多人状态、身份接续、房间、移动、心灯、同意式邀茶 |
 | `service/wechat-auth.mjs` | 独立微信登录交换、会话检查、注销；已实现但未部署，密钥与 HTTPS 域名未配置 |
 | `wechat/project.config.json`、`wechat/game.json` | 已配置真实 AppID 的小游戏工程入口配置 |
-| `wechat/game.js` | Canvas 平台诊断入口，后续由 Muse 接入游戏；当前无游戏玩法 |
+| `wechat/game.js`、`wechat/game-entry.js` | 启动平台宿主、导出游戏工厂；当前绑定诊断页，Muse 替换工厂接入游戏 |
+| `wechat/platform/game-host.js`、`wechat/platform/save-repository.js` | 单画布、触控、生命周期及带版本的本机存档 |
 | `wechat/platform/wechat-adapter.js` | 微信登录交换、字符串存储、生命周期接口；后端尚未配置 |
 | `tests/wechat-adapter.test.mjs` | 平台接口测试及真实 HTTP 登录契约测试，微信上游仍为 mock；已并入 `npm test` |
 | `public/calendar/` | 保留的原万年历，禁止改动 |

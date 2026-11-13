@@ -11,10 +11,13 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
     "live": "node service/server.mjs",
     "wechat:auth": "node service/wechat-auth.mjs",
+    "build:wechat": "node scripts/build-wechat.mjs",
+    "check:wechat": "node scripts/build-wechat.mjs --check",
+    "test:wechat": "node --test tests/wechat-*.test.mjs service/wechat-auth.test.mjs",
     "test:live": "node --test service/*.test.mjs",
     "test:farm": "node --test tests/farm-state.test.mjs tests/farm-scene.test.mjs tests/world-state.test.mjs",
     "test:ui": "playwright test",
-    "test": "node --test tests/farm-state.test.mjs tests/farm-scene.test.mjs tests/world-state.test.mjs tests/economy-telemetry.test.mjs tests/wechat-adapter.test.mjs service/*.test.mjs",
+    "test": "node --test tests/farm-state.test.mjs tests/farm-scene.test.mjs tests/world-state.test.mjs tests/economy-telemetry.test.mjs tests/wechat-*.test.mjs service/*.test.mjs",
     "verify:calendar": "node scripts/verify-calendar.mjs"
   },
   "dependencies": {
@@ -26,6 +29,7 @@
   },
   "devDependencies": {
     "@playwright/test": "^1.62.1",
+    "esbuild": "0.28.2",
     "vite": "^7.3.1"
   }
 }

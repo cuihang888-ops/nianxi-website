@@ -1,6 +1,6 @@
 # 安和里微信产品协作边界
 
-日期：2026-11-13。本文按用户最新分工落实接口、交付物和验收规则。小游戏后台基础信息已完成，名称“年禧安和里”，AppID 为 `wx24c1d8b3a00f962e`。微信认证已提交、等待审核，尚未通过；官方最终页提示一般耗时 1 至 3 个工作日。后台类目仍为空，备案未完成；实际注册主体仍因类目未完成而未能核实，尚未上线。
+日期：2026-11-13。本文按用户最新分工落实接口、交付物和验收规则。此前已核实小游戏后台基础信息已完成，名称“年禧安和里”，AppID 为 `wx24c1d8b3a00f962e`。微信认证已提交，本轮后台画面仍显示审核中，尚未通过；此前官方最终页提示一般耗时 1 至 3 个工作日。类目为空、备案未完成和实际注册主体待核实，沿用最近一次已核实记录；尚未上线。
 
 ## 产品形态
 
@@ -10,7 +10,9 @@
 
 微信开发者工具 `2.02.2609250` 已安装到 `D:\CodexStorage\app-runtime\wechat-devtools`。本地 `wechat/` 已成功导入并识别为小游戏模式；首次模拟器启动缺失的官方 `3.18.0` 基础库已重取、验签并恢复到 D 盘缓存。重新打开工程后，模拟器已显示非空诊断画布和正确 AppID，点击登录检查后明确提示后端未配置，控制台无错误；顶部内容已避让微信菜单按钮。本机截图为 `reports/wechat/wechat-diagnostic-20261113.png`。该结果不代表真实登录、游戏迁移或真机验证完成。
 
-独立后端 `service/wechat-auth.mjs` 已实现登录交换、会话检查和注销，但尚未部署，后端 URL、AppSecret 与 HTTPS 域名未配置。总单测 87/87 通过，包含真实 HTTP 契约与 mock 微信接口响应；构建通过，日历源码与构建产物各 15/15 校验通过。最新网页 UI 全套首次 15 通过、1 失败，仅修正平滑转向的测试等待竞态后，相关 `companion.spec.js` 两项复测通过；游戏实现和原断言阈值未改。这些本地验证不代表真实微信登录或云存档成功。Muse 最新留存包的整合限制见 `MUSE_RETENTION_REVIEW_20261113.md`。
+本次新增运行宿主、本地存档仓库和独立小游戏构建。`wechat/game.js` 启动平台宿主，Muse 通过 `wechat/game-entry.js` 导出的 `createGame(context)` 接入自己的渲染器；地图、画面及游戏内部流程仍由 Muse 开发。源码 `wechat/` 工程已在微信开发者工具启动，触控计数增加，本机测试记录保存成功 1 次，重新加载后恢复 1 次。独立构建产物 `dist/wechat` 已成功导入并启动，触控计数增加，本机测试记录保存成功 1 次；Ctrl+R 重载后显示恢复 1 次，停止模拟器再启动后仍恢复 1 次。登录检查明确提示服务未配置，无 JavaScript 错误，仅有基础库提示。本机截图为 `reports/wechat/wechat-platform-runtime-20261113.png`。这些记录验证本地平台诊断，不代表游戏场景、真实登录或云存档完成；未成功进行明确的 hide/show 手工验证，停止重启不作为前后台切换证据。生命周期行为已由自动测试覆盖，真机 SDK 运行尚未完成。接口与构建说明见 [运行宿主契约](WECHAT_RUNTIME_CONTRACT.md)、[本地存档契约](WECHAT_SAVE_CONTRACT.md)、[构建说明](WECHAT_BUILD.md)。
+
+独立后端 `service/wechat-auth.mjs` 已实现登录交换、会话检查和注销，但尚未部署，后端 URL、AppSecret 与 HTTPS 域名未配置。本次完整单测 109/109 通过，随后独立运行的实际构建包冒烟测试 1/1 通过；这两次记录不合并表述为一次 110 项测试。新版网页 UI 全套 16/16、网页构建、日历源码与构建产物各 15/15 校验通过。微信上游响应仍为 mock，构建包冒烟测试也不等于微信 SDK 或真机运行。这些验证不代表真实微信登录或云存档成功。Muse 最新留存包的整合限制见 `MUSE_RETENTION_REVIEW_20261113.md`。
 
 当前状态分为三层：
 
@@ -62,11 +64,14 @@ Muse 可以实现注册和经济系统的**界面与客户端流程**，但注�
 
 - `src/world-state.js`：区域、聚落、总佛寺、交通方式和路线计算。
 - `src/farm-state.js`：安家、买马、养成、安币和旧存档迁移；旧余额与动物资产不因迁移改变。
-- `wechat/project.config.json`、`wechat/game.json`：当前小游戏工程配置；`wechat/game.js` 只是平台诊断入口，Muse 后续接入游戏运行入口。
+- `wechat/project.config.json`、`wechat/game.json`：当前小游戏工程配置；`wechat/game.js` 启动运行宿主，`wechat/game-entry.js` 导出的 `createGame(context)` 当前指向平台诊断，Muse 在该入口接入游戏工厂。
+- `wechat/platform/game-host.js`：管理一个 Canvas、帧循环、触控、窗口尺寸与前后台暂停恢复；接口见 `WECHAT_RUNTIME_CONTRACT.md`。诊断页不代表游戏场景已移植。
 - `wechat/platform/wechat-adapter.js`：已提供登录、字符串存储与生命周期适配；`wechat/runtime-config.js` 的后端 URL 为空，当前未连接真实登录服务。
+- `wechat/platform/save-repository.js`：已实现同步本地快照、版本冲突和写入失败反馈；`load()`、`save(state,{expectedRevision})` 只返回本机结果，`cloudSynced` 固定为 false，损坏或不兼容记录不自动覆盖。接口见 `WECHAT_SAVE_CONTRACT.md`。
+- `scripts/build-wechat.mjs`：独立生成 `dist/wechat`，只包含小游戏代码、公开配置和允许的运行资源；不上传或发布。说明见 `WECHAT_BUILD.md`。
 - `service/wechat-auth.mjs`：已实现独立微信登录交换、会话检查和注销；尚未部署，平台密钥及 HTTPS 域名待配置，不能把 mock 微信响应测试当作真实联调。
 - `PlatformSession`：`startLogin()`, `getSession()`, `signOut()`；返回服务端验证后的玩家身份，不返回可由客户端修改的权威余额。
-- `SaveRepository`：`load()`, `save(expectedRevision)`, `migrate()`；每次保存返回版本、冲突或失败原因。
+- 后续云端 `SaveRepository` 与迁移：仍需账号归属、服务端版本、冲突恢复与迁移设计；当前本地仓库未实现云存档或自动迁移。
 - `WorldRenderer`：`loadRegion()`, `unloadRegion()`, `setPlayerState()`, `setAssetState()`；渲染回调不能改变钱包或家园归属。
 - `InputAdapter`：只发送移动、选择、照料、购买确认和路线选择等语义指令，不把平台事件直接写进规则层。
 - 后续服务命令：`POST /world/home`、`POST /assets/purchase`、`POST /payments/orders`、`POST /payments/webhook`。这些是设计契约，当前网页服务尚未提供全部端点。

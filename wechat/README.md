@@ -2,6 +2,10 @@
 
 这是微信小游戏工程入口，不是已移植的游戏。当前只有 Canvas 接入诊断页，以及登录、存储和生命周期适配器。庭院、山谷、猎场、画布 UI 及资源由 Muse 按接口接入，原网页继续回归测试。
 
+本轮已将平台启动与诊断页拆开：`game.js` 启动宿主，`game-entry.js` 是 Muse 的游戏接入口；`platform/game-host.js` 管理画布、触控和前后台帧循环；`platform/save-repository.js` 提供带版本和失败保护的本机存档。诊断记录使用独立命名空间，不会改动农场存档。
+
+执行 `npm run build:wechat` 生成可导入的 `dist/wechat`；同时构建网页时先执行 `npm run build`，再构建小游戏。`npm run check:wechat` 只检查、不写构建目录。运行接口、存档接口和构建边界分别见 `../docs/WECHAT_RUNTIME_CONTRACT.md`、`../docs/WECHAT_SAVE_CONTRACT.md`、`../docs/WECHAT_BUILD.md`。当前构建仍是平台验收页，Muse 地图和游戏玩法尚未接入。
+
 在微信开发者工具中导入本目录 `D:\CodexStorage\projects\nianxi-website\wechat`。`project.config.json` 使用小游戏类型 `compileType: game`、`miniprogramRoot: ./`，根入口为 `game.js` 和 `game.json`。AppID 已填 `wx24c1d8b3a00f962e`；它是公开应用标识，不是密钥。不要复制官方示例的 AppID、云环境、权限或插件配置。
 
 2026-11-13 已在官方稳定版 `2.02.2609250` 导入，并识别为小游戏模式。工程私有配置 `project.private.config.json` 已排除提交。工具安装、Chromium资料及应用缓存实际留在 D:；C 盘应用专属路径通过 junction 指向 D:，不能删除这个兼容入口。启动时使用：
