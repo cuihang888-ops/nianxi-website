@@ -184,3 +184,25 @@ test("disposal immediately after start prevents any deferred platform initializa
   assert.equal(env.canvasCount(), 0);
   assert.equal(env.listenerCount(), 0);
 });
+
+test("host owns an optional separate overlay canvas and releases it on failure or disposal", async () => {
+  for (const fail of [false, true]) {
+    const env = environment();
+    const overlay = { width: 320, height: 640, getContext() { return {}; } };
+    let count = 0, context;
+    env.wx.createCanvas = () => ++count === 1 ? env.canvas : overlay;
+    const host = createWechatGameHost(env.wx, { config, scheduler: env.scheduler, createGame(value) {
+      context = value;
+      assert.equal(context.createOverlayCanvas(), overlay);
+      if (fail) throw new Error("factory error");
+      return {};
+    } });
+    assert.equal((await host.start()).ok, !fail);
+    host.dispose();
+    assert.equal(count, 2);
+    assert.equal(overlay.width, 0);
+    assert.equal(overlay.height, 0);
+    assert.throws(() => context.createOverlayCanvas());
+    assert.ok(env.canvas.width > 0);
+  }
+});

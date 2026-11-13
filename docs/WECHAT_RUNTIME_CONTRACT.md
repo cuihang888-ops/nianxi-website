@@ -21,7 +21,7 @@ host.start().then(result => {
 });
 ```
 
-`wechat/game-entry.js` now exists and exports the platform diagnostic factory. Muse replaces that export with its renderer factory; `wechat/game.js` stays the platform bootstrap. `start()` returns the same promise when called again. It resolves to `{ok:true}` when the factory and initial hooks complete, or `{ok:false,error:{code,message}}`. This is host startup, not proof of login, asset completeness or game readiness. Create a new host to retry after an error; do not run two hosts concurrently. The first canvas created by this host is the screen canvas. The game factory must use it rather than create a replacement screen canvas.
+`wechat/game-entry.js` exports the shared playable game factory. The diagnostic factory remains a test fixture; `wechat/game.js` stays the platform bootstrap. `start()` returns the same promise when called again. It resolves to `{ok:true}` when the factory and initial hooks complete, or `{ok:false,error:{code,message}}`. This is host startup, not proof of login, asset completeness or game readiness. Create a new host to retry after an error; do not run two hosts concurrently. The first canvas created by this host is the screen canvas. The game factory must use it rather than create a replacement screen canvas.
 
 `host.getState()` returns `{phase,visible,viewport,error}`. Phases are `idle`, `loading`, `running`, `paused`, `error`, `disposed`. `host.dispose()` is idempotent and terminal. It cancels rendering, removes platform/input listeners, disposes the platform adapter and releases the game. A factory resolving after disposal is released without starting.
 
@@ -30,6 +30,7 @@ host.start().then(result => {
 `createGame(context)` may be asynchronous while loading assets. It receives:
 
 - `canvas`: actual `wx.createCanvas()` output, sized to the viewport backing pixels. The host does not select a drawing context. A Canvas 2D or WebGL renderer may use it.
+- `createOverlayCanvas()`: create a separate offscreen canvas for Canvas UI. The host owns its lifetime and releases its backing dimensions on disposal or startup failure. This does not replace the main screen canvas or start another frame loop. The game uses a CanvasTexture and recreates its GPU allocation after dimensions change.
 - `platform`: existing `createWechatAdapter` instance, with login, local string storage and lifecycle subscription. Empty backend configuration remains an explicit login failure.
 - `viewport`: a getter returning the current immutable `{width,height,pixelRatio,safeTop,safeBottom,safeLeft,safeRight}`. Width, height, safe insets and input coordinates use logical pixels. Backing canvas size is `round(width * pixelRatio)` by `round(height * pixelRatio)`. Pixel ratio is capped at 3. `safeTop` includes the WeChat menu button bottom.
 - `input.subscribe(handler)`: subscribe to normalized touch events and receive an unsubscribe function. Events are `{type,touches,changedTouches}`, with `type` equal to `start`, `move`, `end` or `cancel`; points are `{id,x,y}` in logical pixels. Do not multiply them by pixel ratio for UI hit testing. No original platform event is exposed.

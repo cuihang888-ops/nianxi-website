@@ -83,3 +83,44 @@ test("assets use an explicit allowlist and links cannot redirect build output", 
   await assert.rejects(buildWechat({ projectRoot }), /Links are not allowed/);
   await fs.unlink(path.join(projectRoot, "dist", "wechat"));
 });
+
+test("bundles vendor code and preserves license bytes without copying raw source or arbitrary text", async t => {
+  const projectRoot = await fixture(t);
+  const vendor = path.join(projectRoot, "wechat", "vendor");
+  const licenseName = "threejs-miniprogram.LICENSE";
+  const license = Buffer.from("MIT License\r\n\r\nCopyright (c) Test library authors\r\nPermission is hereby granted, free of charge.\r\n");
+  await fs.mkdir(path.join(vendor, "nested"), { recursive: true });
+  await fs.writeFile(path.join(vendor, licenseName), license);
+  await fs.writeFile(path.join(vendor, "threejs-miniprogram.cjs"), "module.exports = { value: 42 };\n");
+  await fs.writeFile(path.join(vendor, "unrelated-source.js"), "throw new Error('must not ship');\n");
+  await fs.writeFile(path.join(vendor, "notes.txt"), "private development notes");
+  await fs.writeFile(path.join(vendor, ".env"), "private configuration");
+  await fs.writeFile(path.join(vendor, "not-a-license.LICENSE.txt"), "not allowlisted");
+  await fs.writeFile(path.join(vendor, "nested", "hidden.LICENSE"), "not a top-level notice");
+  await fs.writeFile(path.join(projectRoot, "wechat", "game.js"), "import library from './vendor/threejs-miniprogram.cjs'; wx.record(library.value);\n");
+  const report = await buildWechat({ projectRoot });
+  const output = path.join(projectRoot, "dist", "wechat");
+  assert.deepEqual(await fs.readdir(path.join(output, "vendor")), [licenseName]);
+  assert.deepEqual(await fs.readFile(path.join(output, "vendor", licenseName)), license);
+  assert.equal(report.files.find(file => file.path === `vendor/${licenseName}`).bytes, license.length);
+  assert.equal(report.files.length, 4);
+  assert.equal(report.modules.includes("wechat/vendor/threejs-miniprogram.cjs"), true);
+  let actual;
+  vm.runInNewContext(await fs.readFile(path.join(output, "game.js"), "utf8"), { wx: { record: value => { actual = value; } } });
+  assert.equal(actual, 42);
+});
+
+test("vendor license collection rejects credentials and directory links", async t => {
+  const projectRoot = await fixture(t);
+  const vendor = path.join(projectRoot, "wechat", "vendor");
+  await fs.mkdir(vendor);
+  const licensePath = path.join(vendor, "library.LICENSE");
+  await fs.writeFile(licensePath, "ghp_" + "A".repeat(36));
+  await assert.rejects(buildWechat({ projectRoot }), /Potential credential.*vendor\/library\.LICENSE/);
+  await fs.unlink(licensePath);
+  const target = path.join(projectRoot, "linked-notices");
+  await fs.mkdir(target);
+  await fs.symlink(target, licensePath, process.platform === "win32" ? "junction" : "dir");
+  await assert.rejects(buildWechat({ projectRoot }), /Links are not allowed/);
+  await fs.unlink(licensePath);
+});

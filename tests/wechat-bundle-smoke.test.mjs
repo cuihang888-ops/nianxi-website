@@ -11,9 +11,9 @@ const testRoot = path.join(root, "reports", "wechat-build-tests");
 const settle = () => new Promise(resolve => setImmediate(resolve));
 const saveKey = "anheli-platform-diagnostic:save";
 
-async function actualBundle(t) {
+async function diagnosticBundle(t) {
   await fs.mkdir(testRoot, { recursive: true });
-  const fixture = await fs.mkdtemp(path.join(testRoot, "actual-bundle-"));
+  const fixture = await fs.mkdtemp(path.join(testRoot, "diagnostic-bundle-"));
   t.after(async () => {
     assert.equal(path.dirname(fixture), testRoot);
     await fs.rm(fixture, { recursive: true, force: true });
@@ -26,9 +26,11 @@ async function actualBundle(t) {
       if (stat.isDirectory()) return true;
       const name = path.basename(filename);
       return name !== "project.private.config.json" && !name.startsWith(".")
-        && [".js", ".mjs", ".ts", ".json"].includes(path.extname(name));
+        && [".js", ".mjs", ".cjs", ".ts", ".json", ".LICENSE"].includes(path.extname(name));
     },
   });
+  // Exercise the platform diagnostic bundle independently of Muse's game renderer.
+  await fs.writeFile(path.join(fixture, "wechat", "game-entry.js"), 'export { createDiagnostics as createGame } from "./platform/diagnostics.js";\n');
   const report = await buildWechat({ projectRoot: fixture });
   assert.ok(report.files.some(file => file.path === "game.js"));
   assert.equal(report.modules.includes("wechat/game.js"), true);
@@ -112,8 +114,8 @@ function runtime(bundle, store) {
   };
 }
 
-test("actual generated game bundle starts without DOM or module loader and preserves touch-save-restart flow", async t => {
-  const bundle = await actualBundle(t);
+test("diagnostic fixture bundle starts without DOM or module loader and preserves touch-save-restart flow", async t => {
+  const bundle = await diagnosticBundle(t);
   const store = new Map([["anheli-farm-v1", "existing-game-data"]]);
   const first = runtime(bundle, store);
   t.after(() => first.stop());

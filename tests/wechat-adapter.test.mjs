@@ -25,6 +25,25 @@ function mockApi() {
   return { api, calls, events, store };
 }
 
+test("legacy storage reader is restricted to its migration key and rejects exotic data", () => {
+  const mock = mockApi();
+  const { storage } = createWechatAdapter(mock.api, config);
+  assert.throws(() => storage.getLegacyItem("anheli-minigame-v2:save"), TypeError);
+  const raw = { coins: 1200, nested: { days: [1, 3] } };
+  mock.store.set("anheli-minigame-v1", raw);
+  assert.deepEqual(JSON.parse(storage.getLegacyItem("anheli-minigame-v1")), raw);
+  assert.throws(() => storage.getItem("anheli-minigame-v1"), TypeError);
+  const cyclic = {}; cyclic.self = cyclic;
+  let getterCalls = 0;
+  const getter = { get coins() { getterCalls++; return 1200; } };
+  for (const invalid of [[], new Date(), { coins: NaN }, { coins: undefined }, { toJSON() { return raw; } }, cyclic, getter]) {
+    mock.store.set("anheli-minigame-v1", invalid);
+    assert.throws(() => storage.getLegacyItem("anheli-minigame-v1"), TypeError);
+    assert.equal(mock.store.get("anheli-minigame-v1"), invalid);
+  }
+  assert.equal(getterCalls, 0);
+});
+
 test("unconfigured or invalid backend cannot request a code or create a player", async () => {
   for (const [backendBaseUrl, code] of [["", "BACKEND_NOT_CONFIGURED"], ["http://api.example.test", "INVALID_BACKEND_URL"], ["https://user:secret@api.example.test", "INVALID_BACKEND_URL"]]) {
     const mock = mockApi();

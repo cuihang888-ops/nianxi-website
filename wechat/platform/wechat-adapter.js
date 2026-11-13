@@ -14,6 +14,25 @@ function failure(code) {
   return { ok: false, error: { code, message: ERROR_MESSAGES[code] } };
 }
 
+function legacyJsonData(value, ancestors = new Set(), depth = 0) {
+  if (depth > 32) return false;
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (typeof value !== "object" || ancestors.has(value)) return false;
+  if (!Array.isArray(value) && ![Object.prototype, null].includes(Object.getPrototypeOf(value))) return false;
+  const keys = Reflect.ownKeys(value);
+  if (keys.some(key => typeof key !== "string")) return false;
+  const entries = Array.isArray(value) ? keys.filter(key => key !== "length") : keys;
+  if (Array.isArray(value) && (entries.length !== value.length || entries.some((key, index) => key !== String(index)))) return false;
+  ancestors.add(value);
+  const valid = entries.every(key => {
+    const descriptor = Object.getOwnPropertyDescriptor(value, key);
+    return descriptor.enumerable && Object.hasOwn(descriptor, "value") && legacyJsonData(descriptor.value, ancestors, depth + 1);
+  });
+  ancestors.delete(value);
+  return valid;
+}
+
 function backendUrl(value) {
   if (typeof value !== "string" || !value.trim()) return failure("BACKEND_NOT_CONFIGURED");
   const url = value.trim();
@@ -43,6 +62,16 @@ export function createWechatAdapter(wxApi, config, options = {}) {
       if (value === "" || value === undefined || value === null) return null;
       if (typeof value !== "string") throw new TypeError("Unexpected storage format");
       return value;
+    },
+    getLegacyItem(key) {
+      if (key !== "anheli-minigame-v1") throw new TypeError("Unsupported legacy storage key");
+      const value = wxApi.getStorageSync(key);
+      if (value === "" || value === undefined || value === null) return null;
+      if (typeof value === "string") return value;
+      if (!value || Array.isArray(value) || typeof value !== "object" || !legacyJsonData(value)) {
+        throw new TypeError("Unexpected legacy storage format");
+      }
+      return JSON.stringify(value);
     },
     setItem(key, value) {
       if (typeof value !== "string") throw new TypeError("Storage values must be strings");

@@ -43,6 +43,7 @@ export function createWechatGameHost(wxApi, { config, createGame, onError, sched
   const inputListeners = new Set();
   const removers = [];
   const releasedGames = new WeakSet();
+  const overlayCanvases = new Set();
 
   const stopped = () => phase === "disposed" || phase === "error";
   const getState = () => Object.freeze({ phase, visible, viewport, error: lastError });
@@ -68,6 +69,10 @@ export function createWechatGameHost(wxApi, { config, createGame, onError, sched
     try { platform?.dispose(); } catch {}
     releaseGame(game);
     game = null;
+    for (const auxiliary of overlayCanvases) {
+      try { auxiliary.width = 0; auxiliary.height = 0; } catch {}
+    }
+    overlayCanvases.clear();
   }
 
   function fail(code) {
@@ -183,7 +188,17 @@ export function createWechatGameHost(wxApi, { config, createGame, onError, sched
       bind("Error", () => fail("PLATFORM_ERROR"));
       bind("WindowResize", event => resize(event?.size || event));
       for (const type of ["Start", "Move", "End", "Cancel"]) bind(`Touch${type}`, event => notifyInput(type.toLowerCase(), event));
-      const context = Object.freeze({ canvas, platform, input, get viewport() { return viewport; } });
+      const context = Object.freeze({
+        canvas, platform, input,
+        createOverlayCanvas() {
+          if (stopped()) throw new Error("The game host is no longer active");
+          const auxiliary = wxApi.createCanvas();
+          if (auxiliary === canvas || typeof auxiliary?.getContext !== "function") throw new TypeError("A separate overlay canvas is required");
+          overlayCanvases.add(auxiliary);
+          return auxiliary;
+        },
+        get viewport() { return viewport; },
+      });
       const instance = await createGame(context);
       if (stopped()) {
         releaseGame(instance);

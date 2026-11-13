@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const ASSET_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".ktx2", ".basis", ".glb", ".gltf", ".bin", ".mp3", ".ogg", ".wav", ".json", ".ttf", ".woff", ".woff2", ".atlas"]);
 const CODE_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".json"]);
+const VENDOR_LICENSE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.LICENSE$/;
 const NODE_MODULES = new Set(builtinModules.flatMap(name => [name, `node:${name}`]));
 const SECRET_PATTERN = /(?:gh[pousr]_[A-Za-z0-9]{30,}|github_pat_[A-Za-z0-9_]{40,}|AKIA[0-9A-Z]{16}|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|sk-[A-Za-z0-9]{30,})/;
 const BLOCKED_NAMES = /(?:^|\/)(?:\.env(?:\..*)?|project\.private\.config\.json|[^/]+\.(?:key|pem|p12|pfx|db|sqlite\d*|sql|dump|zip|bak))$/i;
@@ -142,6 +143,22 @@ export async function buildWechat({ projectRoot = REPO_ROOT, checkOnly = false, 
       if (BLOCKED_NAMES.test(relative) || !ASSET_EXTENSIONS.has(ext) || relative.split("/").some(part => part.startsWith("."))) throw new Error(`Asset is not allowlisted: ${relative}`);
       const bytes = await fs.readFile(filename);
       if ([".json", ".gltf", ".atlas"].includes(ext)) inspectText(relative, bytes);
+      outputFiles.set(relative, bytes);
+    }
+  }
+  const vendor = path.join(client, "vendor");
+  if (await exists(vendor)) {
+    await noLinks(root, vendor);
+    // Vendor code is bundled by imports; only top-level license notices are copied.
+    const entries = await fs.readdir(vendor, { withFileTypes: true });
+    for (const entry of entries.sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!VENDOR_LICENSE_NAME.test(entry.name)) continue;
+      const filename = path.join(vendor, entry.name);
+      await noLinks(root, filename);
+      if (!entry.isFile()) throw new Error(`Vendor license must be a regular file: ${entry.name}`);
+      const relative = `vendor/${entry.name}`;
+      const bytes = await fs.readFile(filename);
+      inspectText(relative, bytes);
       outputFiles.set(relative, bytes);
     }
   }

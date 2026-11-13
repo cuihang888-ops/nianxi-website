@@ -1,12 +1,14 @@
-# 安和里微信接入骨架
+# 安和里微信游戏工程
 
-这是微信小游戏工程入口，不是已移植的游戏。当前只有 Canvas 接入诊断页，以及登录、存储和生命周期适配器。庭院、山谷、猎场、画布 UI 及资源由 Muse 按接口接入，原网页继续回归测试。
+截至 2026-11-14，Muse 第 26 轮的庭院、牧场和五坝游戏已接入现有微信宿主，包含画布 UI、步行骑马、家园经营、节日和图鉴。浏览器试玩与微信构建共用 `game-entry.js`。这是免费本机原型，尚未正式发布；实际微信游戏模拟器与手机验收仍待完成，不能把诊断页的历史结果当作游戏已验收。
 
-本轮已将平台启动与诊断页拆开：`game.js` 启动宿主，`game-entry.js` 是 Muse 的游戏接入口；`platform/game-host.js` 管理画布、触控和前后台帧循环；`platform/save-repository.js` 提供带版本和失败保护的本机存档。诊断记录使用独立命名空间，不会改动农场存档。
+`game.js` 启动宿主，`game-entry.js` 创建游戏；`platform/game-host.js` 管理画布、触控和前后台帧循环；`platform/preview-save.js` 通过 `save-repository.js` 提供版本校验、旧档迁移和失败回滚。存档键为 `anheli-minigame-v2:save`，原始 `anheli-minigame-v1` 迁移后保留，原网页农场存档不变。诊断页保留在独立测试中。
 
-执行 `npm run build:wechat` 生成可导入的 `dist/wechat`；同时构建网页时先执行 `npm run build`，再构建小游戏。`npm run check:wechat` 只检查、不写构建目录。运行接口、存档接口和构建边界分别见 `../docs/WECHAT_RUNTIME_CONTRACT.md`、`../docs/WECHAT_SAVE_CONTRACT.md`、`../docs/WECHAT_BUILD.md`。当前构建仍是平台验收页，Muse 地图和游戏玩法尚未接入。
+执行 `npm run build:wechat` 生成可导入的 `dist/wechat`；同时构建网页时先执行 `npm run build`，再构建小游戏。`npm run check:wechat` 只检查、不写构建目录。运行接口、存档接口和构建边界分别见 `../docs/WECHAT_RUNTIME_CONTRACT.md`、`../docs/WECHAT_SAVE_CONTRACT.md`、`../docs/WECHAT_BUILD.md`。本轮接入和验收范围见 `../docs/MUSE_ROUND26_INTEGRATION_20261114.md`。
 
-在微信开发者工具中导入本目录 `D:\CodexStorage\projects\nianxi-website\wechat`。`project.config.json` 使用小游戏类型 `compileType: game`、`miniprogramRoot: ./`，根入口为 `game.js` 和 `game.json`。AppID 已填 `wx24c1d8b3a00f962e`；它是公开应用标识，不是密钥。不要复制官方示例的 AppID、云环境、权限或插件配置。
+在微信开发者工具中导入构建目录 `D:\CodexStorage\projects\nianxi-website\dist\wechat`。构建将 `.cjs` 场景依赖合并为单个 `game.js`，不要求开发者工具直接处理源码模块。`project.config.json` 使用小游戏类型 `compileType: game`、`miniprogramRoot: ./`，根入口为 `game.js` 和 `game.json`。AppID 已填 `wx24c1d8b3a00f962e`；它是公开应用标识，不是密钥。
+
+本机浏览器试玩运行 `npm run trial:minigame`，地址 `http://127.0.0.1:5180/`。`?renderer=wechat` 使用随微信包提供的 r108 渲染适配器；这仍是浏览器验收，不能替代微信真机。顶部箭头切景、WASD/方向键或屏幕摇杆移动，点击画面按钮操作。试玩的免费回家和直接切景仍保留。浏览器存档和微信本机存档分开，尚无跨设备同步。
 
 2026-11-13 已在官方稳定版 `2.02.2609250` 导入，并识别为小游戏模式。工程私有配置 `project.private.config.json` 已排除提交。工具安装、Chromium资料及应用缓存实际留在 D:；C 盘应用专属路径通过 junction 指向 D:，不能删除这个兼容入口。启动时使用：
 
