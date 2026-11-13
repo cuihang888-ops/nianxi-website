@@ -62,6 +62,65 @@ test("land capacity allows six animals and rejects a seventh", () => {
   assert.equal(rejected.state.coins, state.coins);
 });
 
+test("renaming a companion is free, normalizes spaces, and changes only its name", () => {
+  const state = fedSheep();
+  const original = structuredClone(state);
+  const renamed = step(state, { type: "renameAnimal", animalId: "animal-1", name: "  小团子\u3000  云朵  " });
+  assert.equal(renamed.animals[0].name, "小团子 云朵");
+  const expected = structuredClone(original);
+  expected.animals[0].name = "小团子 云朵";
+  assert.deepEqual(renamed, expected);
+  assert.deepEqual(state, original);
+});
+
+test("companion names count Unicode code points without splitting emoji", () => {
+  const state = withSheep();
+  for (const name of ["云", "小羊🐑", "🐑".repeat(12), "👩‍🌾的小羊"]) {
+    assert.equal(step(state, { type: "renameAnimal", animalId: "animal-1", name }).animals[0].name, name);
+  }
+  for (const name of ["云".repeat(13), "🐑".repeat(13)]) {
+    const outcome = applyFarmAction(state, { type: "renameAnimal", animalId: "animal-1", name }, START);
+    assert.equal(outcome.ok, false);
+    assert.deepEqual(outcome.state, state);
+  }
+});
+
+test("invalid names and missing animals leave the farm unchanged", () => {
+  const state = fedSheep();
+  const original = structuredClone(state);
+  for (const name of [undefined, null, 12, {}, "", "   ", "\u3000", "小\n羊", "小\t羊", "\u0000羊", "\u007f羊", "\u0085羊", "\u202e羊", "\u2066羊", "\u061c羊", "\u200b羊", "\ufeff羊", "\ud800", "\u200d\ufe0f"]) {
+    const outcome = applyFarmAction(state, { type: "renameAnimal", animalId: "animal-1", name }, START);
+    assert.equal(outcome.ok, false);
+    assert.deepEqual(outcome.state, original);
+  }
+  const missing = applyFarmAction(state, { type: "renameAnimal", animalId: "missing", name: "云朵" }, START);
+  assert.equal(missing.ok, false);
+  assert.deepEqual(missing.state, original);
+  assert.deepEqual(state, original);
+});
+
+test("renamed companions survive save/load and legacy names normalize safely", () => {
+  const data = new Map();
+  const storage = { getItem: key => data.get(key), setItem: (key, value) => data.set(key, value) };
+  const state = step(withSheep(), { type: "renameAnimal", animalId: "animal-1", name: "云朵🐑" });
+  assert.equal(saveFarm(storage, state), true);
+  assert.deepEqual(loadFarm(storage, START), state);
+  assert.equal(loadFarm(storage, START + 60_000).animals[0].name, "云朵🐑");
+  assert.equal(state.version, 1);
+  for (const [legacyName, expected] of [
+    ["小羊", "小羊"], ["  云  朵  ", "云 朵"], ["🐑".repeat(13), "🐑".repeat(12)],
+    [undefined, "小羊"], ["\u202e小羊", "小羊"], ["\ud800", "小羊"],
+  ]) {
+    const legacy = structuredClone(state);
+    legacy.animals[0].name = legacyName;
+    const normalized = normalizeFarm(legacy, START);
+    assert.equal(normalized.animals[0].name, expected);
+    assert.equal(normalized.coins, state.coins);
+    assert.deepEqual(normalized.inventory, state.inventory);
+    assert.equal(legacy.animals[0].name, legacyName);
+  }
+});
+
 test("crop needs watering and full growth; a harvest cannot be replayed", () => {
   let state = step(withLand(), { type: "plant", bedId: BED, crop: "grass" });
   const ready = START + CROPS.grass.growMs;

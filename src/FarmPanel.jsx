@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from "react";
 import { ArrowRight, Bird, Carrot, Check, Coins, Droplets, Egg, Fence, Gift, Heart, Leaf, MapPin, Package, PawPrint, Plus, Rabbit, Scissors, ShoppingBasket, Sprout, Wheat } from "lucide-react";
 import { ANIMAL_TYPES, CROPS } from "./farm-state.js";
+import CompanionName from "./CompanionName.jsx";
 import "./farm.css";
 
 const animalIcons = { sheep: PawPrint, rabbit: Rabbit, chicken: Bird };
@@ -9,7 +10,7 @@ const productValues = { wool: 32, fur: 22, egg: 16, game: 45 };
 const productIcons = { wool: Scissors, fur: Rabbit, egg: Egg, game: Leaf };
 const seconds = (until, now) => Math.max(0, Math.ceil((until - now) / 1000));
 
-export default function FarmPanel({ farm, onAction, onGo, tr, now, selectedPlot, onSelectPlot, selectedAnimal, saved }) {
+export default function FarmPanel({ farm, onAction, onGo, tr, now, selectedPlot, onSelectPlot, selectedAnimal, saved, message }) {
   const [tab, setTab] = useState("land");
   useEffect(() => { if (selectedAnimal) setTab("animals"); }, [selectedAnimal]);
   const plot = farm.plots.find(item => item.id === selectedPlot) || farm.plots[0];
@@ -24,6 +25,7 @@ export default function FarmPanel({ farm, onAction, onGo, tr, now, selectedPlot,
 
   return <div className="farm-panel">
     <div className="farm-wallet"><span><Leaf size={18} /><strong data-testid="farm-coins">{farm.coins}</strong><small>{tr("叶币 · 游戏内", "Leaf coins · in game")}</small></span><button className="small-command" disabled={dailyClaimed} onClick={() => onAction({ type: "dailyGift" })}>{dailyClaimed ? <Check size={16} /> : <Gift size={16} />}{tr(dailyClaimed ? "今日已领" : "每日补给", dailyClaimed ? "Claimed today" : "Daily supplies")}</button></div>
+    <div className="farm-feedback" role="status">{message}</div>
     <div className="farm-tabs" role="tablist" aria-label={tr("牧场事务", "Farm views")}>{tabs.map(([id, Icon, label]) => <button role="tab" aria-selected={tab === id} key={id} onClick={() => setTab(id)}><Icon size={18} /><span>{label}</span></button>)}</div>
     <div className="farm-view" role="tabpanel">
       {tab === "land" && <div className="farm-lands">{farm.plots.map((item, index) => <article className={`farm-land land-tone-${index} ${selectedPlot === item.id ? "farm-land-selected" : ""}`} key={item.id} data-testid={`plot-${item.id}`}>
@@ -36,9 +38,9 @@ export default function FarmPanel({ farm, onAction, onGo, tr, now, selectedPlot,
         <div className="farm-section-heading"><h3>{tr("牧场小伙伴", "Your little companions")}</h3><span>{localAnimals.length} / {plot.capacity}</span></div>
         <div className="farm-animal-list">{localAnimals.map(animal => {
           const spec = ANIMAL_TYPES[animal.type], Icon = animalIcons[animal.type];
-          const fed = animal.fedUntil > now, wait = seconds(animal.nextProductAt, now);
+          const fed = animal.fedUntil > now;
           return <article className={`farm-animal ${selectedAnimal === animal.id ? "farm-animal-selected" : ""}`} key={animal.id} data-testid={`animal-${animal.id}`}>
-            <div className="farm-animal-head"><span className={`farm-animal-mark animal-${animal.type}`}><Icon size={30} strokeWidth={1.5} /></span><div><h4>{name(spec)} <small>#{animal.id.replace("animal-", "")}</small></h4><p>{animal.readyProduct ? tr(`可收获 ${animal.readyProduct} 份`, `${animal.readyProduct} ready to collect`) : fed ? tr(`自在吃草 · ${wait} 秒后收获`, `Grazing · ready in ${wait}s`) : tr("想吃一点新鲜牧草", "Ready for some fresh grass")}</p></div></div>
+            <div className="farm-animal-head"><span className={`farm-animal-mark animal-${animal.type}`}><Icon size={30} strokeWidth={1.5} /></span><div><CompanionName animal={animal} onAction={onAction} tr={tr} /><p>{name(spec)} · {animal.readyProduct ? tr(`收获篮里有 ${animal.readyProduct} 份小礼物`, `${animal.readyProduct} little gifts are ready`) : fed ? tr("吃饱了，在草地上慢慢散步", "Well fed, wandering through the grass") : tr("在草地上自在歇着", "Resting in the meadow")}</p></div></div>
             <div className="farm-comfort"><Heart size={13} /><span>{tr("亲近", "Bond")}</span><meter min="0" max="100" value={animal.comfort} aria-label={tr("亲近程度", "Bond level")} /><b>{animal.comfort}</b></div>
             <div className="farm-animal-actions"><button className="secondary" disabled={!farm.inventory.grass} onClick={() => onAction({ type: "feed", animalId: animal.id, feed: "grass" })}><Wheat size={15} />{tr("喂牧草", "Feed grass")}</button><button className="secondary" disabled={!farm.inventory.carrot} onClick={() => onAction({ type: "feed", animalId: animal.id, feed: "carrot" })}><Carrot size={15} />{tr("喂萝卜", "Carrot")}</button><button className="secondary" disabled={now - animal.lastPettedAt < 5000} onClick={() => onAction({ type: "pet", animalId: animal.id })}><Heart size={15} />{tr("摸摸", "Pet")}</button><button className="primary" disabled={!animal.readyProduct} onClick={() => onAction({ type: "collect", animalId: animal.id })}><Package size={15} />{tr("收获", "Collect")}</button></div>
           </article>;

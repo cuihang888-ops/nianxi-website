@@ -5,6 +5,7 @@ const MAX_ITEMS = 9999;
 const MAX_TIME = 8_640_000_000_000_000;
 const PET_COOLDOWN_MS = 5000;
 export const HUNT_COOLDOWN_MS = 20_000;
+export const MAX_ANIMAL_NAME_LENGTH = 12;
 
 export const LAND_PLOTS = Object.freeze([
   Object.freeze({ id: "meadow-west", name: "西侧草场", nameEn: "West meadow", price: 400, capacity: 6, x: -19, z: 39 }),
@@ -35,6 +36,15 @@ const dateKey = value => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 };
 const idFor = (prefix, index) => `${prefix}-${index}`;
+
+function animalName(value, truncate = false) {
+  if (typeof value !== "string" || /[\p{Cc}\p{Cs}\u061c\u200b\u200e\u200f\u202a-\u202e\u2060-\u206f\ufeff]/u.test(value)) return "";
+  const name = value.trim().replace(/\s+/gu, " ");
+  if (!/[\p{L}\p{N}\p{P}\p{S}]/u.test(name)) return "";
+  const characters = Array.from(name);
+  if (characters.length <= MAX_ANIMAL_NAME_LENGTH) return name;
+  return truncate ? characters.slice(0, MAX_ANIMAL_NAME_LENGTH).join("").trim() : "";
+}
 
 function emptyBeds(plotId) {
   return [1, 2].map(index => ({ id: `${plotId}-bed-${index}`, plotId, crop: "", plantedAt: 0, readyAt: 0, watered: false }));
@@ -81,7 +91,7 @@ function normalizeAnimal(raw, index, plotIds, now) {
     id: typeof raw.id === "string" && raw.id ? raw.id.slice(0, 40) : idFor("animal", index + 1),
     type: raw.type,
     plotId,
-    name: typeof raw.name === "string" && raw.name.trim() ? raw.name.slice(0, 24) : spec.name,
+    name: animalName(raw.name, true) || spec.name,
     comfort: Math.round(Math.max(0, Math.min(100, finite(raw.comfort, 55)))),
     fedUntil: Math.min(now + spec.productionMs * 4, timestamp(raw.fedUntil)),
     nextProductAt: Math.max(adoptedAt + spec.productionMs, Math.min(now + spec.productionMs * 5, timestamp(raw.nextProductAt, adoptedAt + spec.productionMs))),
@@ -267,10 +277,16 @@ export function applyFarmAction(state, action, now = Date.now()) {
     Object.assign(target, { crop: "", plantedAt: 0, readyAt: 0, watered: false });
     return result(next, true, `收获了${crop.name}`, `${crop.nameEn} harvested`);
   }
-  if (type === "feed" || type === "pet" || type === "collect") {
+  if (type === "feed" || type === "pet" || type === "collect" || type === "renameAnimal") {
     const target = animal(next, action.animalId);
     if (!target || !ownedPlot(next, target.plotId)) return fail(next, "找不到这只小动物", "This animal could not be found");
     const spec = ANIMAL_TYPES[target.type];
+    if (type === "renameAnimal") {
+      const name = animalName(action.name);
+      if (!name) return fail(next, "取一个 1 到 12 个字的名字吧", "Choose a name with 1 to 12 characters");
+      target.name = name;
+      return result(next, true, `以后就叫你${name}了`, `Your companion is now called ${name}`);
+    }
     if (type === "pet") {
       if (target.lastPettedAt > 0 && time - target.lastPettedAt < PET_COOLDOWN_MS) return fail(next, "让它玩一小会儿再来摸摸吧", "Let it play a moment before petting again");
       if (target.comfort >= 100) return fail(next, "它已经很开心了", "It is already feeling happy");

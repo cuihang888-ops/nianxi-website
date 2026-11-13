@@ -993,7 +993,7 @@ export function createCourtyard(container, callbacks = {}) {
       camera.updateProjectionMatrix();
     }
     animatePerson(player, dt, time, action);
-    farm.animate(dt, time, reducedMotion);
+    farm.animate(dt, time, reducedMotion, player.group.position);
     for (const person of remote.values()) {
       const before = person.group.position.clone();
       person.group.position.lerp(person.target, Math.min(1, dt * 10));
@@ -1167,6 +1167,12 @@ export function createCourtyard(container, callbacks = {}) {
     },
     resize,
     getState() {
+      const farmWorld = farm.getWorld();
+      const projected = new THREE.Vector3();
+      const animals = farmWorld.animals.map(animal => {
+        projected.set(animal.x, animal.type === "sheep" ? 1.4 : .8, animal.z).project(camera);
+        return { ...animal, screenX: +((projected.x + 1) * width / 2).toFixed(1), screenY: +((1 - projected.y) * height / 2).toFixed(1) };
+      });
       return {
         x: +player.group.position.x.toFixed(3),
         z: +player.group.position.z.toFixed(3),
@@ -1178,7 +1184,7 @@ export function createCourtyard(container, callbacks = {}) {
         remoteVisitors: remote.size,
         lightMode,
         area: player.group.position.x > 28 && player.group.position.z < 24 ? "forest" : player.group.position.z > 27 ? "farm" : "courtyard",
-        farm: farm.getWorld(),
+        farm: { ...farmWorld, animals },
         drawCalls: renderer.info.render.calls,
         triangles: renderer.info.render.triangles,
         paths: Object.fromEntries(Object.entries(DESTINATIONS).map(([id, point]) => [id, !blocked(point.x, point.z)])),

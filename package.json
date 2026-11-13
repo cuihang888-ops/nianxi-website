@@ -11,9 +11,9 @@
     "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
     "live": "node service/server.mjs",
     "test:live": "node --test service/*.test.mjs",
-    "test:farm": "node --test tests/farm-state.test.mjs",
+    "test:farm": "node --test tests/farm-state.test.mjs tests/farm-scene.test.mjs",
     "test:ui": "playwright test",
-    "test": "node --test tests/farm-state.test.mjs service/*.test.mjs",
+    "test": "node --test tests/farm-state.test.mjs tests/farm-scene.test.mjs service/*.test.mjs",
     "verify:calendar": "node scripts/verify-calendar.mjs"
   },
   "dependencies": {

@@ -10,8 +10,9 @@ import { createCourtyard } from "./scene.js";
 import { configureAudio, disposeAudio, playBead, playBell, playTea, playWoodfish } from "./audio.js";
 import { connectPresence } from "./presence.js";
 import FarmPanel from "./FarmPanel.jsx";
+import CompanionName from "./CompanionName.jsx";
 import HuntPanel from "./HuntPanel.jsx";
-import { createFarm, loadFarm, saveFarm, advanceFarm, applyFarmAction, FARM_KEY, ANIMAL_TYPES } from "./farm-state.js";
+import { createFarm, loadFarm, saveFarm, advanceFarm, applyFarmAction, FARM_KEY } from "./farm-state.js";
 
 const chinese = new URLSearchParams(location.search).get("locale") !== "en";
 const tr = (zh, en) => chinese ? zh : en;
@@ -176,7 +177,8 @@ export default function Courtyard() {
     try { if (farmSavedRef.current && localStorage.getItem(FARM_KEY)) current = loadFarm(localStorage); } catch {}
     const result = applyFarmAction(current, action, Date.now());
     storeFarm(result.state);
-    flash(tr(result.message, result.messageEn));
+    const message = tr(result.message, result.messageEn);
+    flash(farmSavedRef.current ? message : `${message}${tr(" · 本次进度未保存", " · Progress could not be saved")}`);
     return result.ok;
   };
   const visitFarm = plotId => {
@@ -511,8 +513,9 @@ export default function Courtyard() {
       <IconButton icon={RotateCcw} label={tr("视角归位", "Reset view")} onClick={() => scene.current?.recenter()} />
     </div>
     {companion && <aside className="animal-care" aria-label={tr("照顾小伙伴", "Care for your companion")}>
-      <div className="animal-care-title"><PawPrint size={20} /><strong>{tr(ANIMAL_TYPES[companion.type].name, ANIMAL_TYPES[companion.type].nameEn)} <small>#{companion.id.replace("animal-", "")}</small></strong><IconButton icon={X} label={tr("收起照料", "Close animal care")} onClick={() => setSelectedAnimal("")} /></div>
+      <div className="animal-care-title"><PawPrint size={20} /><CompanionName animal={companion} onAction={farmAction} tr={tr} /><IconButton icon={X} label={tr("收起照料", "Close animal care")} onClick={() => setSelectedAnimal("")} /></div>
       <span className="animal-care-bond"><Heart size={13} />{tr("亲近", "Bond")} {companion.comfort} / 100</span>
+      {!farmSaved && <p className="companion-name-error" role="alert">{tr("本次进度未保存", "Progress could not be saved")}</p>}
       <div className="animal-care-buttons"><button disabled={!farm.inventory.grass} onClick={() => farmAction({ type: "feed", animalId: companion.id, feed: "grass" })}><Wheat size={18} /><span>{tr("喂草", "Feed")}</span><small>{farm.inventory.grass}</small></button><button disabled={now.getTime() - companion.lastPettedAt < 5000} onClick={() => farmAction({ type: "pet", animalId: companion.id })}><Heart size={18} /><span>{tr("摸摸", "Pet")}</span></button><button disabled={!companion.readyProduct} onClick={() => farmAction({ type: "collect", animalId: companion.id })}><Package size={18} /><span>{tr("收获", "Collect")}</span><small>{companion.readyProduct || ""}</small></button></div>
     </aside>}
     <div className="bottom-left">
@@ -531,12 +534,12 @@ export default function Courtyard() {
     </nav>
     <button className="mall-link" onClick={() => navigate("mall")}><ShoppingBag size={15} /><span>{tr("年禧商城", "Nianxi")}</span><ChevronRight size={14} /></button>
     </div>
-    {toast && <div className="toast" role="status">{toast}</div>}
+    {toast && panel !== "farm" && <div className="toast" role="status">{toast}</div>}
     {!ready && !sceneError && <div className="loading-screen"><span className="brand-seal">安</span><h1>{tr("安和里", "ANHELI")}</h1><span className="loading-line" /><small>{tr("庭院正在苏醒", "The courtyard is waking")}</small></div>}
     {sceneError && <div className="loading-screen"><h1>{tr("庭院暂未打开", "The courtyard could not open")}</h1><p>{tr("请使用支持 WebGL 的浏览器重新进入。", "Please reopen in a browser with WebGL support.")}</p><button className="primary" onClick={() => location.reload()}>{tr("重新进入", "Try again")}</button><button className="text-link" onClick={() => navigate("calendar")}>{tr("先看玄枢万年历", "Open the calendar")}</button></div>}
 
     {panel && <Modal title={title} subtitle={panel === "calendar" ? "ANHELI · ORIGINAL CALENDAR" : panel === "farm" ? "ANHELI · VALLEY" : undefined} onClose={closePanel} wide={["calendar", "map", "photo"].includes(panel)} className={panel === "calendar" ? "calendar-modal" : panel === "farm" ? "farm-modal" : ""}>
-      {panel === "farm" && <FarmPanel farm={farm} onAction={farmAction} onGo={visitFarm} tr={tr} now={now.getTime()} selectedPlot={selectedPlot} onSelectPlot={setSelectedPlot} selectedAnimal={selectedAnimal} saved={farmSaved} />}
+      {panel === "farm" && <FarmPanel farm={farm} onAction={farmAction} onGo={visitFarm} tr={tr} now={now.getTime()} selectedPlot={selectedPlot} onSelectPlot={setSelectedPlot} selectedAnimal={selectedAnimal} saved={farmSaved} message={toast} />}
       {panel === "hunt" && <HuntPanel farm={farm} onAction={farmAction} onGo={visitHunt} tr={tr} now={now.getTime()} />}
       {panel === "map" && <><div className="world-links"><button className="secondary" onClick={() => visitFarm()}><PawPrint size={18} />{tr("溪山牧场", "Valley farm")}</button><button className="secondary" onClick={visitHunt}><Mountain size={18} />{tr("远山猎场", "Forest hunt")}</button></div><div className="map-layout"><div className="courtyard-map" role="img" aria-label={tr("庭院地点分布", "Courtyard destinations")}><div className="map-path map-path-vertical" /><div className="map-path map-path-horizontal" /><div className="map-water" />{places.map(place => <button key={place.id} style={{ left: `${place.x}%`, top: `${place.y}%` }} onClick={() => go(place.id)}><place.icon size={17} /><span>{place.name[chinese ? 0 : 1]}</span></button>)}</div><div className="destination-list">{places.map(place => <Destination key={place.id} place={place} onGo={go} />)}</div></div></>}
       {panel === "rooms" && <div className="room-list">{(rooms.length ? rooms : [{ id: "bamboo", name: tr("竹风庭", "Bamboo courtyard"), capacity: 24, count: 0 }]).map(room => <button key={room.id} disabled={status !== "connected" || room.id !== roomId && (room.count ?? room.online ?? 0) >= room.capacity} className={room.id === roomId ? "current-room" : ""} onClick={() => {
