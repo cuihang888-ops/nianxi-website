@@ -36,7 +36,7 @@ Three.js 庭院、六个真实多人房间、仪式活动、邀茶与心灯；�
 
 2026-11-13 平台增量已经提供固定接入口：Muse 在 `wechat/game-entry.js` 导出 `createGame(context)`，由 `wechat/game.js` 创建宿主。使用宿主的 `context.canvas`、`context.input`、`context.viewport` 和 `context.platform`，不要另开主画布或重复启动帧循环；内部游戏返回 `update/render/resize/pause/resume/dispose`。地图重做可在 Muse 自己的目录进行，保留 Codex 的平台层与入口引导。详细约定见 `WECHAT_RUNTIME_CONTRACT.md`。
 
-第七轮累计地图 ZIP 已只读评审，新增竹楼升级与喂食，但仍是旧基线网页入口，尚未合并或运行；最新接入事项见 [第七轮微信接入简评](MUSE_ROUND7_WECHAT_REVIEW_20261113.md)，前轮记录保留在 [第六轮评审](MUSE_ROUND6_WECHAT_REVIEW_20261113.md)、[第五轮评审](MUSE_ROUND5_WECHAT_REVIEW_20261113.md) 和 [第四轮评审](MUSE_ROUND4_WECHAT_REVIEW_20261113.md)。微信平台已提交并推送，且已由 GitHub 公开 API 确认可读；Muse 应从 `codex/dehong-world-framework` 的 `86500727aea4858cd5e4accf8046843b6eca0580` 开始制作增量，不整体覆盖累计包。
+第八轮累计地图 ZIP 已只读评审，新增广场、功德碑和花圃的本机共建，但仍是旧基线网页入口，尚未合并或运行；最新事项见 [第八轮微信接入简评](MUSE_ROUND8_WECHAT_REVIEW_20261113.md)，前轮保留在 [第七轮评审](MUSE_ROUND7_WECHAT_REVIEW_20261113.md)、[第六轮评审](MUSE_ROUND6_WECHAT_REVIEW_20261113.md)、[第五轮评审](MUSE_ROUND5_WECHAT_REVIEW_20261113.md) 和 [第四轮评审](MUSE_ROUND4_WECHAT_REVIEW_20261113.md)。微信平台基线已远端核验；Muse 应从 `codex/dehong-world-framework` 的 `86500727aea4858cd5e4accf8046843b6eca0580` 开始制作增量，不整体覆盖累计包。后续评审文档与平台同分支维护。
 
 本机进度使用 `platform/save-repository.js`，由 Muse 提供纯 JSON 游戏状态及校验函数；保存失败、版本冲突和损坏旧档均须反馈。这里尚无云同步，不能把 `cloudSynced:false` 显示成云端保存成功，见 `WECHAT_SAVE_CONTRACT.md`。打包命令为 `npm run build:wechat`，输出 `dist/wechat`，资产放到 `wechat/assets/`；初始单包超出内部预算时需先商定分包方案，见 `WECHAT_BUILD.md`。
 
