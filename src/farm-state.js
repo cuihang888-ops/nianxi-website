@@ -1,3 +1,5 @@
+import { createWorld, getRegion, getSettlement, HORSE_PRICE, normalizeWorld } from "./world-state.js";
+
 const FARM_KEY = "anheli-farm-v1";
 const VERSION = 1;
 const MAX_COINS = 9_999_999;
@@ -69,6 +71,7 @@ export function createFarm(now = Date.now()) {
   return {
     version: VERSION,
     coins: 1200,
+    world: createWorld(),
     plots,
     animals: [],
     beds: plots.flatMap(plot => emptyBeds(plot.id)),
@@ -149,6 +152,7 @@ export function normalizeFarm(raw, now = Date.now()) {
   return {
     version: VERSION,
     coins: integer(raw.coins, 0, MAX_COINS),
+    world: normalizeWorld(raw.world),
     plots,
     animals,
     beds,
@@ -200,6 +204,28 @@ export function applyFarmAction(state, action, now = Date.now()) {
   const next = advanceFarm(state, time);
   if (!action || typeof action !== "object" || typeof action.type !== "string") return fail(next, "操作无效", "Invalid action");
   const type = action.type;
+  if (type === "settleHome") {
+    if (Object.keys(action).some(key => !["type", "regionId", "settlementId"].includes(key))) return fail(next, "安家信息无效", "Invalid home details");
+    const region = getRegion(action.regionId);
+    const settlement = getSettlement(action.regionId, action.settlementId);
+    if (!region || !settlement) return fail(next, "这处聚落暂不能安家", "This settlement is unavailable");
+    next.world.home = { regionId: region.id, settlementId: settlement.id };
+    return result(next, true, `已在${region.name}·${settlement.name}安家`, `Your home is now in ${settlement.nameEn}, ${region.nameEn}`);
+  }
+  if (type === "buyHorse") {
+    if (Object.keys(action).some(key => key !== "type")) return fail(next, "养马信息无效", "Invalid horse adoption details");
+    if (next.world.horseOwned) return fail(next, "已有一匹马陪你远行", "You already have a horse companion");
+    if (next.coins < HORSE_PRICE) return fail(next, "安币还不够领养马匹", "You need more An coins to adopt a horse");
+    next.coins -= HORSE_PRICE;
+    next.world.horseOwned = true;
+    return result(next, true, "一匹山地马成为了你的伙伴", "A mountain horse has joined you");
+  }
+  if (type === "setTransport") {
+    if (Object.keys(action).some(key => !["type", "transport"].includes(key)) || !["walk", "horse"].includes(action.transport)) return fail(next, "请选择步行或骑马", "Choose walking or horseback");
+    if (action.transport === "horse" && !next.world.horseOwned) return fail(next, "先领养一匹马，再一起远行", "Adopt a horse before riding");
+    next.world.transport = action.transport;
+    return result(next, true, action.transport === "horse" ? "按骑马规划路程" : "按步行规划路程", action.transport === "horse" ? "Route planned on horseback" : "Route planned on foot");
+  }
   if (type === "hunt") {
     if (typeof action.success !== "boolean") return fail(next, "这次狩猎结果无效", "Invalid hunt result");
     if (next.huntStats.attempts > 0 && time - next.lastHuntAt < HUNT_COOLDOWN_MS) return fail(next, "山林需要安静一会儿，再试一次吧", "Let the forest rest before another attempt");
@@ -227,7 +253,7 @@ export function applyFarmAction(state, action, now = Date.now()) {
     const current = next.plots.find(plot => plot.id === action.plotId);
     if (!definition || !current) return fail(next, "这块土地不存在", "That land does not exist");
     if (current.owned) return fail(next, "这块土地已经属于你", "You already own this land");
-    if (next.coins < definition.price) return fail(next, "叶币还不够买下这块地", "You need more leaf coins for this land");
+    if (next.coins < definition.price) return fail(next, "安币还不够买下这块地", "You need more An coins for this land");
     next.coins -= definition.price;
     current.owned = true;
     return result(next, true, `已买下${definition.name}`, `You bought ${definition.nameEn}`);
@@ -238,7 +264,7 @@ export function applyFarmAction(state, action, now = Date.now()) {
     if (!spec) return fail(next, "暂不认识这种小动物", "This animal is unavailable");
     if (!plot) return fail(next, "请先拥有这块土地", "Buy this land first");
     if (next.animals.filter(item => item.plotId === plot.id).length >= plot.capacity) return fail(next, "这块地已经住满了", "This land is full");
-    if (next.coins < spec.price) return fail(next, "叶币还不够领养它", "You need more leaf coins to adopt it");
+    if (next.coins < spec.price) return fail(next, "安币还不够领养它", "You need more An coins to adopt it");
     let id = idFor("animal", next.nextAnimalNumber++);
     while (next.animals.some(item => item.id === id)) id = idFor("animal", next.nextAnimalNumber++);
     next.coins -= spec.price;
@@ -251,7 +277,7 @@ export function applyFarmAction(state, action, now = Date.now()) {
     if (!crop) return fail(next, "这份种子不存在", "This seed is unavailable");
     if (!target || !ownedPlot(next, target.plotId)) return fail(next, "请先拥有这块土地", "Buy this land first");
     if (target.crop) return fail(next, "这块地已经种上东西了", "This bed is already planted");
-    if (next.coins < crop.cost) return fail(next, "叶币还不够买种子", "You need more leaf coins for seeds");
+    if (next.coins < crop.cost) return fail(next, "安币还不够买种子", "You need more An coins for seeds");
     next.coins -= crop.cost;
     target.crop = crop.id;
     target.plantedAt = time;
@@ -318,10 +344,10 @@ export function applyFarmAction(state, action, now = Date.now()) {
     const value = Object.hasOwn(PRODUCT_VALUES, item) ? PRODUCT_VALUES[item] : 0;
     if (!value || quantity < 1) return fail(next, "没有可出售的货物", "There is nothing to sell");
     if (next.inventory[item] < quantity) return fail(next, "库存里的货物不够", "You do not have enough in storage");
-    if (next.coins + value * quantity > MAX_COINS) return fail(next, "叶币已经达到上限", "Your leaf coin balance is full");
+    if (next.coins + value * quantity > MAX_COINS) return fail(next, "安币已经达到上限", "Your An coin balance is full");
     next.inventory[item] -= quantity;
     next.coins += value * quantity;
-    return result(next, true, `卖出${quantity}份货物，收到${value * quantity}叶币`, `Sold ${quantity} items for ${value * quantity} leaf coins`);
+    return result(next, true, `卖出${quantity}份货物，收到${value * quantity}安币`, `Sold ${quantity} items for ${value * quantity} An coins`);
   }
   return fail(next, "还没有这个农场动作", "This farm action is unavailable");
 }

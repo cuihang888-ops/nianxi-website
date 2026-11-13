@@ -12,6 +12,7 @@ import { connectPresence } from "./presence.js";
 import FarmPanel from "./FarmPanel.jsx";
 import CompanionName from "./CompanionName.jsx";
 import HuntPanel from "./HuntPanel.jsx";
+import WorldPanel from "./WorldPanel.jsx";
 import { createFarm, loadFarm, saveFarm, advanceFarm, applyFarmAction, FARM_KEY } from "./farm-state.js";
 
 const chinese = new URLSearchParams(location.search).get("locale") !== "en";
@@ -472,6 +473,7 @@ export default function Courtyard() {
   const self = people.find(person => person.id === selfId);
   const activePlace = places.find(p => p.id === panel);
   const title = {
+    world: tr("德宏 · 安和里", "Dehong · Anheli"),
     map: tr("一庭之间", "Around the courtyard"),
     people: tr("此刻同在", "Here together"),
     rooms: tr("择一庭院", "Choose a courtyard"),
@@ -506,6 +508,7 @@ export default function Courtyard() {
     <aside className="location-label"><span>{tr("风过竹间，茶正温。", "Bamboo in the breeze. Tea on the table.")}</span><time>{now.toLocaleTimeString(chinese ? "zh-CN" : "en-GB", { hour: "2-digit", minute: "2-digit", hour12: false })}</time></aside>
     <button className="valley-entry" onClick={() => { setSelectedAnimal(""); setPanel("farm"); }}><PawPrint size={18} /><span>{tr("溪山牧场", "Valley farm")}</span><small><Leaf size={12} />{farm.coins}</small><ChevronRight size={15} /></button>
     <div className="side-tools">
+      <IconButton icon={Compass} label={tr("德宏世界", "Dehong world")} onClick={() => setPanel("world")} />
       <IconButton icon={Map} label={tr("庭院地图", "Courtyard map")} onClick={() => setPanel("map")} />
       <IconButton icon={Users} label={tr("同庭访客", "Visitors")} onClick={() => setPanel("people")} />
       <IconButton icon={Mountain} label={tr("远山猎场", "Forest hunt")} onClick={visitHunt} />
@@ -534,11 +537,12 @@ export default function Courtyard() {
     </nav>
     <button className="mall-link" onClick={() => navigate("mall")}><ShoppingBag size={15} /><span>{tr("年禧商城", "Nianxi")}</span><ChevronRight size={14} /></button>
     </div>
-    {toast && panel !== "farm" && <div className="toast" role="status">{toast}</div>}
+    {toast && panel !== "farm" && panel !== "world" && <div className="toast" role="status">{toast}</div>}
     {!ready && !sceneError && <div className="loading-screen"><span className="brand-seal">安</span><h1>{tr("安和里", "ANHELI")}</h1><span className="loading-line" /><small>{tr("庭院正在苏醒", "The courtyard is waking")}</small></div>}
     {sceneError && <div className="loading-screen"><h1>{tr("庭院暂未打开", "The courtyard could not open")}</h1><p>{tr("请使用支持 WebGL 的浏览器重新进入。", "Please reopen in a browser with WebGL support.")}</p><button className="primary" onClick={() => location.reload()}>{tr("重新进入", "Try again")}</button><button className="text-link" onClick={() => navigate("calendar")}>{tr("先看玄枢万年历", "Open the calendar")}</button></div>}
 
-    {panel && <Modal title={title} subtitle={panel === "calendar" ? "ANHELI · ORIGINAL CALENDAR" : panel === "farm" ? "ANHELI · VALLEY" : undefined} onClose={closePanel} wide={["calendar", "map", "photo"].includes(panel)} className={panel === "calendar" ? "calendar-modal" : panel === "farm" ? "farm-modal" : ""}>
+    {panel && <Modal title={title} subtitle={panel === "calendar" ? "ANHELI · ORIGINAL CALENDAR" : panel === "farm" ? "ANHELI · VALLEY" : panel === "world" ? "ANHELI · DEHONG" : undefined} onClose={closePanel} wide={["calendar", "map", "photo", "world"].includes(panel)} className={panel === "calendar" ? "calendar-modal" : panel === "farm" ? "farm-modal" : panel === "world" ? "world-modal" : ""}>
+      {panel === "world" && <WorldPanel farm={farm} onAction={farmAction} tr={tr} saved={farmSaved} message={toast} onOpenFarm={() => setPanel("farm")} onVisitTemple={() => go("hall")} />}
       {panel === "farm" && <FarmPanel farm={farm} onAction={farmAction} onGo={visitFarm} tr={tr} now={now.getTime()} selectedPlot={selectedPlot} onSelectPlot={setSelectedPlot} selectedAnimal={selectedAnimal} saved={farmSaved} message={toast} />}
       {panel === "hunt" && <HuntPanel farm={farm} onAction={farmAction} onGo={visitHunt} tr={tr} now={now.getTime()} />}
       {panel === "map" && <><div className="world-links"><button className="secondary" onClick={() => visitFarm()}><PawPrint size={18} />{tr("溪山牧场", "Valley farm")}</button><button className="secondary" onClick={visitHunt}><Mountain size={18} />{tr("远山猎场", "Forest hunt")}</button></div><div className="map-layout"><div className="courtyard-map" role="img" aria-label={tr("庭院地点分布", "Courtyard destinations")}><div className="map-path map-path-vertical" /><div className="map-path map-path-horizontal" /><div className="map-water" />{places.map(place => <button key={place.id} style={{ left: `${place.x}%`, top: `${place.y}%` }} onClick={() => go(place.id)}><place.icon size={17} /><span>{place.name[chinese ? 0 : 1]}</span></button>)}</div><div className="destination-list">{places.map(place => <Destination key={place.id} place={place} onGo={go} />)}</div></div></>}

@@ -1,0 +1,79 @@
+.modal.world-modal { width: min(900px, calc(100vw - 48px)); min-width: 0; }
+.world-modal .modal-content { padding-top: 0; }
+.dehong-world { min-width: 0; }
+.dehong-world button, .dehong-world select { max-width: 100%; }
+.dehong-world button { white-space: normal; overflow-wrap: anywhere; }
+.world-home-line { display: flex; align-items: center; gap: 11px; padding: 18px 0; border-bottom: 1px solid var(--line); }
+.world-home-line > div { min-width: 0; flex: 1; }
+.world-home-line small { display: block; color: var(--muted); font-size: 10px; margin-bottom: 5px; }
+.world-home-line strong { display: block; font-size: 13px; font-weight: 500; overflow-wrap: anywhere; }
+.world-home-line > span { color: var(--muted); font-size: 10px; }
+.world-planning-grid { display: grid; grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr); gap: 28px; padding: 22px 0; }
+.world-section-title { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 27px; margin-bottom: 12px; }
+.world-section-title h3 { display: flex; align-items: center; gap: 7px; margin: 0; font-family: var(--serif); font-size: 17px; font-weight: 500; }
+.world-section-title > span { font-size: 9px; color: var(--muted); text-align: right; }
+.world-atlas { position: relative; aspect-ratio: 1.18; background: #f0f4ef; border: 1px solid #e1e8df; overflow: hidden; }
+.world-atlas-terrain { position: absolute; inset: 0; width: 100%; height: 100%; }
+.world-route-line { stroke: #8c9a8c; stroke-width: .45; stroke-dasharray: 1 1; }
+.world-route-line.selected { stroke: #a7554c; stroke-width: .85; stroke-dasharray: none; }
+.world-north { position: absolute; right: 10px; top: 9px; font-size: 10px; color: #70827b; }
+.world-region { position: absolute; transform: translate(-50%, -50%); width: 78px; height: 54px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 5px; background: #fcfdf8f0; border: 1px solid #d1ddd2; border-radius: 4px; color: #506854; box-shadow: 0 2px 4px #254b3610; }
+.world-region strong { font-size: 12px; font-weight: 500; line-height: 1.2; max-width: 100%; overflow-wrap: normal; white-space: nowrap; }
+.world-region-selected { background: #386d5c; border-color: #386d5c; color: #fff; }
+.world-home-marker { position: absolute; top: 5px; right: 5px; }
+.world-temple-link { display: flex; align-items: center; gap: 10px; background: transparent; width: 100%; padding: 13px 0 0; text-align: left; color: #8b594f; }
+.world-temple-link > span { flex: 1; min-width: 0; }
+.world-temple-link strong { font-size: 12px; font-weight: 500; display: block; }
+.world-temple-link small { display: block; color: var(--muted); font-size: 10px; margin-top: 4px; }
+.world-settlement { min-width: 0; }
+.world-landscape { color: var(--muted); font-size: 12px; line-height: 1.7; margin: 0 0 18px; }
+.world-settlement-options { border: 0; padding: 0; margin: 0; min-width: 0; }
+.world-settlement-options legend { font-size: 11px; color: #74827c; margin-bottom: 9px; }
+.world-settlement-options label { display: flex; align-items: center; gap: 10px; padding: 13px 10px; border: 1px solid #dce4de; border-radius: 4px; margin-bottom: 8px; cursor: pointer; font-size: 12px; }
+.world-settlement-options input { accent-color: #386d5c; width: 15px; height: 15px; margin: 0; flex-shrink: 0; }
+.world-settlement-options label.world-settlement-selected { background: #f0f5ee; border-color: #86a08d; }
+.world-free-settlement { color: var(--muted); font-size: 10px; line-height: 1.8; margin: 13px 0; }
+.world-settle-button { width: 100%; }
+.world-open-farm { display: flex; align-items: center; justify-content: center; width: 100%; font-size: 11px; margin-top: 12px; gap: 6px; }
+.world-journey { border-top: 1px solid var(--line); padding: 20px 0 17px; }
+.world-route-heading { display: flex; align-items: center; gap: 12px; font-size: 13px; margin: 13px 0; }
+.world-route-heading label { min-width: 0; flex: 1; max-width: 180px; }
+.world-route-heading select { width: 100%; min-width: 0; border: 1px solid #d3ddd3; background: #f6f8f3; color: var(--ink); border-radius: 4px; padding: 9px; }
+.world-travel-row { display: flex; align-items: center; gap: 16px; flex-wrap: wrap; }
+.world-transport { display: inline-grid; grid-template-columns: repeat(2,minmax(0,1fr)); background: #eef2ec; padding: 3px; border: 1px solid #dbe2da; border-radius: 4px; }
+.world-transport button { display: flex; justify-content: center; align-items: center; gap: 7px; min-height: 38px; padding: 8px 13px; background: transparent; font-size: 12px; border-radius: 2px; }
+.world-transport button[aria-pressed=true] { background: #fff; box-shadow: 0 1px 3px #244a3420; color: #386d5c; }
+.world-route-duration { color: #8b594f; font-size: 12px; }
+.world-route-stops { margin: 12px 0; color: var(--muted); font-size: 11px; line-height: 1.7; }
+.world-horse-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 16px; }
+.world-horse-row > span { display: flex; align-items: center; gap: 8px; font-size: 12px; }
+.world-horse-row button { padding: 9px 12px; font-size: 11px; }
+.world-horse-row button > span { color: #71817b; font-size: 10px; }
+.world-wallet { display: flex; align-items: center; gap: 12px; padding: 18px 0; border-top: 1px solid var(--line); }
+.world-wallet > div { display: flex; align-items: center; gap: 10px; flex: 1; min-width: 0; }
+.world-wallet strong { font-size: 22px; font-variant-numeric: tabular-nums; display: block; font-weight: 500; }
+.world-wallet small { font-size: 10px; color: var(--muted); }
+.world-wallet .secondary { min-height: 36px; padding: 9px 12px; font-size: 11px; }
+.world-recharge { background: transparent; padding: 5px 0; font-size: 11px; }
+.world-feedback { min-height: 21px; color: #386d5c; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.world-save-state { color: #7a8980; font-size: 10px; line-height: 1.6; }
+.world-save-failed { color: #a04e40; }
+.world-screen-reader { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+@media (max-width: 640px) {
+  .modal.world-modal { width: calc(100vw - 26px); }
+  .world-planning-grid { grid-template-columns: minmax(0,1fr); gap: 23px; }
+  .world-atlas { aspect-ratio: 1.15; }
+  .world-home-line > span { display: none; }
+  .world-section-title h3 { font-size: 16px; }
+  .world-wallet { flex-wrap: wrap; }
+  .world-wallet > div { flex-basis: 45%; }
+  .world-recharge { margin-left: auto; }
+}
+@media (max-width: 360px) {
+  .world-region { width: 66px; height: 49px; padding-inline: 3px; }
+  .world-region strong { font-size: 10px; }
+  .world-section-title > span { max-width: 100px; }
+  .world-transport button { padding: 8px 10px; }
+  .world-horse-row { flex-wrap: wrap; }
+  .world-horse-row button { width: 100%; }
+}
