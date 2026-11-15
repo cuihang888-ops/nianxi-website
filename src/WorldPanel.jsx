@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { ArrowRight, Check, ChessKnight, Coins, Footprints, House, Landmark, MapPin, Mountain, PawPrint, Route, Sprout, Trees, Waves } from "lucide-react";
 import { WORLD_REGIONS, WORLD_ROUTES, TEMPLE, HORSE_PRICE, getRegion, getSettlement, planRoute } from "./world-state.js";
+import { MONETIZATION } from "./economy-config.js";
 import "./world.css";
 
 const landscapeIcons = { yingjiang: Trees, lianghe: Mountain, longchuan: Sprout, mangshi: Trees, ruili: Waves };
@@ -96,7 +97,7 @@ export default function WorldPanel({ farm, onAction, tr, onOpenFarm, onVisitTemp
     <section className="world-wallet" aria-label={tr("安币账户", "An coin balance")}>
       <div><Coins size={21} /><span><strong data-testid="world-coins">{farm.coins}</strong><small>{tr("安币 · 游戏内", "An coins · in game")}</small></span></div>
       <button type="button" className="secondary" onClick={onOpenFarm}>{tr("去集市", "To the market")}<ArrowRight size={15} /></button>
-      <button type="button" className="world-recharge" disabled>{tr("充值未开放", "Top-ups unavailable")}</button>
+      {MONETIZATION.rechargeEnabled && <button type="button" className="world-recharge" disabled>{tr("充值未开放", "Top-ups unavailable")}</button>}
     </section>
     <div className="world-feedback" role="status">{message}</div>
     <footer className={`world-save-state ${saved ? "" : "world-save-failed"}`} role={saved ? undefined : "alert"}>{saved ? tr("家园与安币保存在本机", "Your homestead and coins are saved on this device") : tr("本次进度未保存", "Progress could not be saved")}</footer>

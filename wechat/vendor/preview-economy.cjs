@@ -37,6 +37,12 @@ module.exports = Object.freeze({
   // 本开关保持关闭；日后若用户改口径，先在此打开并在发放处写独立的一次性领取记录，
   // 不得直接改地价或与 registrationGrant 共用幂等标记。
   welcomeGift: Object.freeze({ enabled: false }),
+  // 免费版定版（用户 2026-11-15 拍板“先做免费版本”）：首发只有免费无充值版，
+  // 本开关关闭时，任何界面都不得出现充值/支付/内购入口或付费暗示文案；
+  // 安币只能在游戏内赚取与使用，不与现金挂钩。日后若第三期（版号就绪后）再议充值，
+  // 先在此打开开关并另行评审——且付费永远只许买外观与便利，永不卖玩法资格（用户红线）。
+  // 网页端对应开关在 src/economy-config.js 的 MONETIZATION，两处必须同口径。
+  monetization: Object.freeze({ rechargeEnabled: false }),
   signinCoins: 5,
   questReward: 40,
   milestones: Object.freeze({ 3: 60, 7: 150, 15: 350, 25: 700 }),

@@ -91,3 +91,11 @@ validateEconomyConfig(FREE_ECONOMY);
 export const ECONOMY_CONFIG = deepFreeze(FREE_ECONOMY);
 
 export const PRODUCT_VALUES = ECONOMY_CONFIG.products;
+
+// 免费版定版（用户 2026-11-15 拍板“先做免费版本”）：首发只有免费无充值版。
+// 本开关关闭时，任何界面都不得渲染充值/支付/内购入口或付费暗示文案；安币只能在
+// 游戏内赚取与使用，不与现金挂钩。独立于 FREE_ECONOMY 校验表之外（校验器不支持
+// 布尔字段）。微信端对应开关在 wechat/vendor/preview-economy.cjs 的 monetization，
+// 两处必须同口径。日后若第三期（版号就绪后）再议充值，先在此打开并另行评审——
+// 且付费永远只许买外观与便利，永不卖玩法资格（用户红线）。
+export const MONETIZATION = Object.freeze({ rechargeEnabled: false });

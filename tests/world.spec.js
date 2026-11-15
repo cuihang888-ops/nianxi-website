@@ -30,7 +30,8 @@ test("legacy companions survive settling, moving, horse purchase and sequential 
   await page.getByRole("button", { name: "骑马", exact: true }).click();
   await page.getByRole("combobox", { name: "目的地区域" }).selectOption("ruili");
   await expect(page.getByTestId("world-route-duration")).toHaveText("游戏路程 9 分钟");
-  await expect(page.getByRole("button", { name: "充值未开放", exact: true })).toBeDisabled();
+  // 免费版定版（2026-11-15）：充值开关关闭，钱包区不渲染任何充值入口。
+  await expect(page.getByRole("button", { name: "充值未开放", exact: true })).toHaveCount(0);
   await expect(page.getByTestId("world-coins")).toHaveText(String(seed.coins - 480));
   await page.locator(".modal-content").evaluate(node => { node.scrollTop = 0; });
   await page.screenshot({ path: resolve("reports/dehong-world-desktop.png") });
