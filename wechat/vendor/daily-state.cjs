@@ -16,6 +16,53 @@ const QUEST_KEYS = ["fed", "harvest", "jingxin"];
 const clone = value => JSON.parse(JSON.stringify(value));
 const failure = (code, msg) => ({ ok: false, error: { code, message: msg }, msg });
 
+// —— 玩家登记（注册）与取名规则（2026-11-14 定稿口径，2026-11-15 闭环块落地）——
+// 玩家名与家名共用同一套字面规则：1–10 字、无空格/控制字符、保留名拦截。
+// 本块的登记是本机闭环：playerId 带 local- 前缀，界面文案不得声称已联网/已云存档；
+// Codex 的 C1 接管时以 registerPlayer 为唯一替换点（见 docs/MUSE_PLAYER_LOOP_20261115.md）。
+const RESERVED_NAMES = Object.freeze([
+  "安和里", "安和里大厅", "系统", "管理员", "官方", "客服", "村长", "里正",
+  "Codex", "Muse", "codex", "Muse", "NPC", "npc", "测试", "游客",
+]);
+const NAME_IDEAS = Object.freeze([
+  "归朴", "松岚", "望舒", "听澜", "拾光", "南枝", "清晏", "云汀",
+  "半夏", "栖迟", "若谷", "星野", "沐阳", "静姝", "长乐", "安然",
+  "知遥", "映雪", "临溪", "抱朴", "青禾", "晚晴", "行简", "慕云",
+]);
+const HOME_NAME_IDEAS = Object.freeze([
+  "江边小院", "榕树下的家", "听雨小筑", "山间小院", "临溪人家", "半亩田家",
+  "云边小屋", "竹影小院", "归朴小院", "望舒的院子", "清晏小筑", "南枝小院",
+]);
+const PLAYER_ID_PATTERN = /^local-[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+function nameProblem(name) {
+  if (typeof name !== "string") return "名字要用文字写";
+  const chars = Array.from(name);
+  if (chars.length < 1 || chars.length > 10) return "名字取 1–10 个字就好";
+  if (/\s/.test(name) || /[\x00-\x1f\x7f]/.test(name)) return "名字里不能有空格";
+  if (RESERVED_NAMES.includes(name)) return "这个名字是村里公用的，换一个吧";
+  return null;
+}
+const isValidName = name => nameProblem(name) === null;
+
+function validatePlayer(player) {
+  return fields(player, ["id", "name"])
+    && typeof player.id === "string" && player.id.length <= 64 && PLAYER_ID_PATTERN.test(player.id)
+    && isValidName(player.name);
+}
+
+function validateGrant(grant) {
+  if (!fields(grant, ["registration1000"])) return false;
+  const issued = grant.registration1000;
+  return fields(issued, ["at", "amount"])
+    && validTime(issued.at) && issued.amount === ECONOMY.registrationGrant;
+}
+
+function validateRites(rites) {
+  return fields(rites, [], ["pagodaAt"])
+    && (!Object.hasOwn(rites, "pagodaAt") || validTime(rites.pagodaAt));
+}
+
 function defaultState() {
   return {
     coins: ECONOMY.initialCoins,
@@ -29,6 +76,65 @@ function defaultState() {
     lit: {},
     latestDay: "",
   };
+}
+
+// 新世界新存档（2026-11-15 闭环）：与 defaultState 的区别只有三处——
+// 安币从 0 起（安家金在登记时发放）、带 player 待登记标记、带 grant 空标记。
+// 老存档（含 v1 迁移与此前 v2 存档）没有 player/grant 键，加载时不补、不弹登记、不补发；
+// createPreviewSave 只对“从未有过任何存档”的全新存储种入这份状态。
+function newPlayerState() {
+  return { ...defaultState(), coins: 0, player: null, grant: null };
+}
+
+// 本存档是否在等登记：只有新世界新存档有 player 键且为 null；老存档无此键，视为老住户。
+function registrationPending(state) {
+  return Object.hasOwn(state, "player") && state.player === null;
+}
+
+// 登记入住 + 发放安家金，全游戏唯一的注册发放点（Codex C1 接管时替换本函数即可，
+// 界面与引导都只认 player/grant 两个字段）。幂等：player 已存在或 grant 标记已存在都拒绝再发；
+// 改名、重进、重复触发都不会第二次发放。老存档（无 player 键）在此被明确拒绝，不补发。
+function registerPlayer(state, name, { at, id } = {}) {
+  if (!Object.hasOwn(state, "player")) return failure("REGISTRATION_UNAVAILABLE", "这是老住户的存档，不用再登记");
+  if (state.player) return failure("ALREADY_REGISTERED", "已经登记过了 · " + state.player.name);
+  if (state.grant?.registration1000) return failure("GRANT_ALREADY_ISSUED", "安家金已经发过了");
+  const problem = nameProblem(name);
+  if (problem) return failure("INVALID_NAME", problem);
+  if (typeof id !== "string" || id.length > 64 || !PLAYER_ID_PATTERN.test(id)) {
+    return failure("INVALID_PLAYER_ID", "登记编号无效，请重试");
+  }
+  if (!validTime(at)) return failure("INVALID_TIME", "登记时间无效");
+  const amount = ECONOMY.registrationGrant;
+  if (!validCoins(state.coins + amount)) return balanceFailure();
+  state.player = { id, name };
+  state.grant = { registration1000: { at, amount } };
+  state.coins += amount;
+  return { ok: true, playerId: id, amount, msg: "登记好了 · " + name + "，安家金 +" + amount + " 安币到账了" };
+}
+
+function renamePlayer(state, name) {
+  if (!state.player) return failure("NOT_REGISTERED", "先登记入住，再改名字");
+  const problem = nameProblem(name);
+  if (problem) return failure("INVALID_NAME", problem);
+  state.player = { ...state.player, name };
+  return { ok: true, msg: "名字改好了 · " + name };
+}
+
+function renameHome(state, name) {
+  if (!state.home) return failure("HOME_MISSING", "先选一处地方安家");
+  const problem = nameProblem(name);
+  if (problem) return failure("INVALID_NAME", problem);
+  normalizeHome(state);
+  state.home.name = name;
+  return { ok: true, msg: "家的名字改好了 · " + name };
+}
+
+// 金塔祈福完成标记：只记“来过、走完了一圈”，不发币、不加产量、不影响任何数值。
+function markPagodaPrayer(state, at) {
+  if (!validTime(at)) return failure("INVALID_TIME", "祈福时间无效");
+  const changed = state.rites?.pagodaAt !== at;
+  state.rites = { pagodaAt: at };
+  return { ok: true, changed };
 }
 
 function dataKeys(value, keys) {
@@ -85,7 +191,7 @@ function validDays(days, month) {
 function validateState(state) {
   try {
     const keys = ["coins", "jingxinDate", "signin", "quests", "home", "latestDay"];
-    if (!fields(state, keys, ["horse", "album", "festJoined", "lit"])
+    if (!fields(state, keys, ["horse", "album", "festJoined", "lit", "player", "grant", "rites"])
       || !validCoins(state.coins)
       || !optionalDate(state.jingxinDate) || !optionalDate(state.latestDay)
       || !dataKeys(state.signin, ["month", "days", "last"])
@@ -104,6 +210,13 @@ function validateState(state) {
     if (Object.hasOwn(state, "album") && !validateAlbum(state.album)) return false;
     if (Object.hasOwn(state, "festJoined") && !record(state.festJoined, FESTIVALS.map(fest => fest.id), year => Number.isInteger(year) && year >= 1 && year <= 9999)) return false;
     if (Object.hasOwn(state, "lit") && !record(state.lit, Object.keys(ECONOMY.DAMS), value => value === true)) return false;
+    if (Object.hasOwn(state, "player") && state.player !== null && !validatePlayer(state.player)) return false;
+    if (Object.hasOwn(state, "grant") && state.grant !== null && !validateGrant(state.grant)) return false;
+    // 登记与安家金由 registerPlayer 原子写入：有其一必有其二，半套档案视为伪造。
+    const registered = Object.hasOwn(state, "player") && state.player !== null;
+    const granted = Object.hasOwn(state, "grant") && state.grant !== null;
+    if (registered !== granted) return false;
+    if (Object.hasOwn(state, "rites") && !validateRites(state.rites)) return false;
     return true;
   } catch { return false; }
 }
@@ -126,8 +239,8 @@ function validateHorse(horse) {
 function validateHome(home) {
   const basicKeys = ["site", "plot", "hut", "label"];
   const fullKeys = [...basicKeys, "house", "field", "beds", "harvests", "animals", "produce", "produceNext"];
-  const legacy = fields(home, basicKeys, ["dam", "custom", "basket"]);
-  if (!legacy && !fields(home, fullKeys, ["dam", "custom", "basket"])) return false;
+  const legacy = fields(home, basicKeys, ["dam", "custom", "basket", "name"]);
+  if (!legacy && !fields(home, fullKeys, ["dam", "custom", "basket", "name"])) return false;
   if (Object.hasOwn(home, "basket") && !validateBasket(home.basket)) return false;
   if (Object.hasOwn(home, "dam") && (typeof home.dam !== "string" || !Object.hasOwn(ECONOMY.DAMS, home.dam))) return false;
   const custom = Object.hasOwn(home, "custom");
@@ -137,6 +250,7 @@ function validateHome(home) {
   if (typeof home.hut !== "boolean"
     || typeof home.label !== "string" || !home.label.trim() || home.label.length > 80
     || /[\x00-\x1f\x7f]/.test(home.label)) return false;
+  if (Object.hasOwn(home, "name") && !isValidName(home.name)) return false;
   if (legacy) return true;
   if (!Number.isInteger(home.house) || home.house < 0 || home.house > 2 || home.hut !== (home.house >= 1)
     || typeof home.field !== "boolean" || (home.field && !home.hut)
@@ -242,7 +356,8 @@ function claimHome(state, site, plot, dam = "mangshi") {
   if (state.coins < ECONOMY.plotPrice) return failure("INSUFFICIENT_COINS", "安币不够，还差 " + (ECONOMY.plotPrice - state.coins) + " 安币");
   state.coins -= ECONOMY.plotPrice;
   state.home = createHome(site, plot, ECONOMY.DAMS[dam].name + " · " + ECONOMY.DAMS[dam].sites[site] + " " + (plot + 1) + " 号地", dam);
-  return { ok: true, msg: "安家了 · " + state.home.label };
+  if (state.player?.name) state.home.name = state.player.name + "的家";
+  return { ok: true, msg: "安家了 · " + (state.home.name || state.home.label) };
 }
 
 function buildHomeHut(state) {
@@ -467,7 +582,8 @@ function claimCustomHome(state, x, z, dam = "mangshi") {
   state.coins -= HOME.CUSTOM_PLOT_PRICE;
   state.home = createHome(-1, -1, ECONOMY.DAMS[dam].name + " · 自选之地", dam);
   state.home.custom = { x, z };
-  return { ok: true, msg: "安家了 · 这块自选之地，从此是你的了" };
+  if (state.player?.name) state.home.name = state.player.name + "的家";
+  return { ok: true, msg: state.home.name ? "安家了 · " + state.home.name : "安家了 · 这块自选之地，从此是你的了" };
 }
 
 function normalizeProgress(state) {
@@ -640,7 +756,9 @@ function createStateSession(repository) {
     get revision() { return revision; }, source: loaded.source || "unavailable", cloudSynced: false });
 }
 
-module.exports = { defaultState, refreshDaily, doSignin, doJingxin, markQuest, claimQuest, questAllDone,
+module.exports = { defaultState, newPlayerState, registrationPending, registerPlayer, renamePlayer, renameHome,
+  markPagodaPrayer, nameProblem, isValidName, NAME_IDEAS, HOME_NAME_IDEAS, RESERVED_NAMES,
+  refreshDaily, doSignin, doJingxin, markQuest, claimQuest, questAllDone,
   claimHome, buildHomeHut, validateState, normalizeLegacyState, createStateSession, todayShanghai,
   createHome, normalizeHome, accrueProduce, produceValue, openHomeField, plantCarrots, harvestCarrots,
   buyHomeAnimal, collectHomeProduce, basketValue, basketCount, sellBasket, upgradeHomeBamboo, lightCrystal, payTeleport, buyHorse, setHorsePosition,

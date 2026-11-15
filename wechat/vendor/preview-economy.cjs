@@ -29,6 +29,14 @@ const DAMS = Object.freeze({
 // Muse's free preview balance is separate from the existing farm economy.
 module.exports = Object.freeze({
   initialCoins: 1200,
+  // 新世界注册安家金（用户 2026-11-15 定案）：新存档走登记入住时一次性发放 1000，
+  // 取代新档默认 1200 的旧口径；只发一次，幂等标记在存档 grant.registration1000。
+  // 老存档不补发、余额不动。发放实现集中在 daily-state.cjs 的 registerPlayer。
+  registrationGrant: 1000,
+  // 安家见面礼开关位（2026-11-14 任务书的免费地+首只动物）：与注册安家金默认不叠加，
+  // 本开关保持关闭；日后若用户改口径，先在此打开并在发放处写独立的一次性领取记录，
+  // 不得直接改地价或与 registrationGrant 共用幂等标记。
+  welcomeGift: Object.freeze({ enabled: false }),
   signinCoins: 5,
   questReward: 40,
   milestones: Object.freeze({ 3: 60, 7: 150, 15: 350, 25: 700 }),

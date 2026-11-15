@@ -28,6 +28,7 @@
     let panelOpen = false, sceneName = "", dirty = true;
     let basketText = "";
     let teleportItems = null, teleportCallback = null, extraRow = null;
+    let namePanel = null;
     let albumRowText = "", albumLines = null, albumPage = 0, albumPages = [];
     let albumDetail = null, detailPage = 0, detailPages = 1;
     let hallPage = 0, hallPages = 1;
@@ -151,7 +152,11 @@
       const mark = value => value ? "✓" : "—";
       const footer = "喂动物 " + mark(q.fed) + " · 收获 " + mark(q.harvest) + " · 静心 " + mark(q.jingxin) + "（去牧场摸摸动物、收一畦菜）";
       const lines = wrapText(footer, pw - 36, "12px sans-serif");
-      const rows = 3 + (state.home ? 1 : 0) + (albumRowText ? 1 : 0) + (extraRow ? 1 : 0);
+      const rows = 3
+        + (Daily.registrationPending(state) ? 1 : 0)
+        + (state.player ? 1 : 0)
+        + (state.home ? 2 : 0)
+        + (albumRowText ? 1 : 0) + (extraRow ? 1 : 0);
       const footerH = lines.length * 16 + 8;
       const ph = Math.min(82 + rows * 48 + (rows - 1) * 8 + footerH + 14, safe.height - 24);
       const available = ph - 82 - footerH - 14;
@@ -193,12 +198,18 @@
       const sDone = state.signin.last === day;
       const doneN = [q.fed, q.harvest, q.jingxin].filter(Boolean).length;
       const claimable = Daily.questAllDone(state) && !q.claimed;
-      const entries = [
+      const entries = [];
+      if (Daily.registrationPending(state)) {
+        entries.push(["register", "登记入住 · 给自己取个名字", "领 1000 安币安家金", true, true]);
+      }
+      entries.push(
         ["jingxin", "静坐片刻 · 净心", jDone ? "今日已静心 ✓" : "开始", !jDone, false],
         ["signin", "每日签到", sDone ? "已签 · 本月 " + state.signin.days.length + " 天" : "+5 安币", !sDone, !sDone],
         ["quest", "每日小确幸", q.claimed ? "今日已领" : claimable ? "领取 40 安币" : doneN + " / 3", claimable || !q.claimed, claimable],
-      ];
-      if (state.home) entries.push(["go-home", "我的家园 · " + (state.home.label || ""), "回家", true, true]);
+      );
+      if (state.player) entries.push(["player-name", "我的名字 · " + state.player.name, "改名", true, false]);
+      if (state.home) entries.push(["go-home", "我的家园 · " + (state.home.name || state.home.label || ""), "回家", true, true]);
+      if (state.home) entries.push(["home-name", "家的名字 · " + (state.home.name || "我的家"), "改名", true, false]);
       if (albumRowText) entries.push(["album", "我的图鉴", albumRowText, true, false]);
       if (extraRow) entries.push([extraRow.id, extraRow.label, extraRow.right, extraRow.enabled, extraRow.enabled]);
       for (const entry of entries.slice(hallPage * pageSize, (hallPage + 1) * pageSize)) {
@@ -315,6 +326,61 @@
       text("再想想", x + width / 2, y + height - 24, "13px sans-serif", FAINT, "center");
       addBtn("tp-cancel", x + width / 2 - 60, y + height - 40, 120, 32, true);
     }
+    function closeNamePanel() { if (namePanel) { namePanel = null; dirty = true; } }
+    function drawNamePanel() {
+      btns = [];
+      ctx.fillStyle = "rgba(28,38,32,0.45)";
+      ctx.fillRect(0, 0, W, H);
+      const np = namePanel;
+      const batchSize = 8;
+      const batches = Math.max(1, Math.ceil(np.names.length / batchSize));
+      np.batch = Math.max(0, Math.min(np.batch, batches - 1));
+      const visible = np.names.slice(np.batch * batchSize, (np.batch + 1) * batchSize);
+      const width = Math.min(400, safe.width - 24);
+      const subLines = np.subtitle ? wrapText(np.subtitle, width - 36, "12.5px sans-serif") : [];
+      const chipH = 40, chipGap = 8;
+      const chipRows = Math.max(1, Math.ceil(visible.length / 2));
+      const height = Math.min(64 + subLines.length * 17 + chipRows * (chipH + chipGap) + 84, safe.height - 24);
+      const x = safe.left + (safe.width - width) / 2, y = safe.top + (safe.height - height) / 2;
+      rr(x, y, width, height, 16);
+      ctx.fillStyle = CREAM; ctx.fill();
+      ctx.strokeStyle = BORDER; ctx.lineWidth = 1.5; ctx.stroke();
+      addBtn("name-panel", x, y, width, height, true);
+      text(np.title, x + 18, y + 28, "bold 17px sans-serif", "#7a5c1e");
+      rr(x + width - 48, y + 10, 36, 36, 10);
+      ctx.fillStyle = "#fffdf4"; ctx.fill();
+      ctx.strokeStyle = BORDER; ctx.lineWidth = 1; ctx.stroke();
+      text("×", x + width - 30, y + 28, "19px sans-serif", INK, "center");
+      addBtn("nm-skip", x + width - 48, y + 10, 36, 36, true);
+      subLines.forEach((line, index) => text(line, x + 18, y + 56 + index * 17, "12.5px sans-serif", FAINT));
+      const chipW = (width - 36 - chipGap) / 2;
+      let cy = y + 64 + subLines.length * 17;
+      visible.forEach((name, index) => {
+        const cx = x + 18 + (index % 2) * (chipW + chipGap);
+        const cyy = cy + Math.floor(index / 2) * (chipH + chipGap);
+        const selected = np.selected === name;
+        rr(cx, cyy, chipW, chipH, 10);
+        ctx.fillStyle = selected ? ACCENT : "#fffdf4"; ctx.fill();
+        ctx.strokeStyle = BORDER; ctx.lineWidth = 1; ctx.stroke();
+        text(fitText(name, chipW - 16, "14.5px sans-serif"), cx + chipW / 2, cyy + chipH / 2, "14.5px sans-serif", selected ? "#fff8e6" : INK, "center");
+        addBtn("nm:" + index, cx, cyy, chipW, chipH, true);
+      });
+      cy += chipRows * (chipH + chipGap) + 4;
+      if (batches > 1) {
+        rr(x + 18, cy, 76, 36, 10);
+        ctx.fillStyle = "#fffdf4"; ctx.fill();
+        ctx.strokeStyle = BORDER; ctx.lineWidth = 1; ctx.stroke();
+        text("换一批", x + 18 + 38, cy + 18, "13px sans-serif", INK, "center");
+        addBtn("nm-more", x + 18, cy, 76, 36, true);
+      }
+      const okW = 132;
+      rr(x + width - 18 - okW, cy, okW, 36, 10);
+      ctx.fillStyle = np.selected ? ACCENT : "#e7dfc8"; ctx.fill();
+      text(np.confirmLabel, x + width - 18 - okW / 2, cy + 18, "13.5px sans-serif", np.selected ? "#fff8e6" : DISABLED, "center");
+      addBtn("nm-ok", x + width - 18 - okW, cy, okW, 36, !!np.selected);
+      text(np.skipLabel, x + width / 2, cy + 56, "13px sans-serif", FAINT, "center");
+      addBtn("nm-skip", x + width / 2 - 60, cy + 42, 120, 28, true);
+    }
     function drawToast() {
       if (!toastMsg || now() >= toastUntil) return;
       const font = "13.5px sans-serif";
@@ -378,7 +444,7 @@
         ctx.fillStyle = "rgba(38,52,44,0.55)"; ctx.fill();
         text(label, cx, top + 15, font, "#f2ecd8", "center");
       }
-      if (!panelOpen && !teleportItems && !albumLines) {
+      if (!panelOpen && !teleportItems && !albumLines && !namePanel) {
         const layout = controls(), hall = layout.hall;
         rr(hall.x, hall.y, hall.w, hall.h, 23);
         ctx.fillStyle = CREAM; ctx.fill();
@@ -421,15 +487,51 @@
       if (panelOpen) drawPanel(day);
       if (albumLines) drawAlbum();
       if (teleportItems) drawTeleport();
+      if (namePanel) drawNamePanel();
       drawToast();
       dirty = false;
     }
     function joystickEnd() { joy.active = false; joy.dx = 0; joy.dy = 0; dirty = true; }
     function closeTeleport() { teleportItems = null; teleportCallback = null; dirty = true; }
     function closeAlbum() { albumLines = null; albumPages = []; albumDetail = null; detailPage = 0; dirty = true; }
-    function openPanel() { closeTeleport(); closeAlbum(); hallPage = 0; panelOpen = true; joystickEnd(); dirty = true; }
-    function closePanel() { panelOpen = false; closeTeleport(); closeAlbum(); dirty = true; }
+    function openPanel() { closeTeleport(); closeAlbum(); closeNamePanel(); hallPage = 0; panelOpen = true; joystickEnd(); dirty = true; }
+    function closePanel() { panelOpen = false; closeTeleport(); closeAlbum(); closeNamePanel(); dirty = true; }
     function dispatch(id) {
+      if (id === "register" || id === "player-name" || id === "home-name") {
+        if (opts.onExternal) opts.onExternal(id === "register" ? "register" : id === "player-name" ? "rename-player" : "rename-home");
+        return;
+      }
+      if (id.startsWith("nm:") && id.length > 3) {
+        if (namePanel) {
+          const item = namePanel.names[namePanel.batch * 8 + Number(id.slice(3))];
+          if (item) { namePanel.selected = item; dirty = true; }
+        }
+        return;
+      }
+      if (id === "nm-more") {
+        if (namePanel) {
+          const batches = Math.max(1, Math.ceil(namePanel.names.length / 8));
+          namePanel.batch = (namePanel.batch + 1) % batches;
+          namePanel.selected = null;
+          dirty = true;
+        }
+        return;
+      }
+      if (id === "nm-ok") {
+        const np = namePanel;
+        if (np && np.selected) {
+          const callback = np.onConfirm, name = np.selected;
+          closeNamePanel();
+          if (callback) callback(name);
+        }
+        return;
+      }
+      if (id === "nm-skip") {
+        const np = namePanel;
+        closeNamePanel();
+        if (np && np.onSkip) np.onSkip();
+        return;
+      }
       if (id === "album") { if (opts.onAlbum) opts.onAlbum(); return; }
       if (id === "album-close") { closeAlbum(); return; }
       if (id === "album-back") { albumDetail = null; detailPage = 0; dirty = true; return; }
@@ -471,7 +573,7 @@
       for (let index = btns.length - 1; index >= 0; index--) {
         const b = btns[index];
         if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
-          if (b.id === "panel" || b.id === "teleport-panel" || b.id === "album-panel") return true;
+          if (b.id === "panel" || b.id === "teleport-panel" || b.id === "album-panel" || b.id === "name-panel") return true;
           if (panelOpen && (b.id === "next-scene")) { closePanel(); return true; }
           if (b.enabled) dispatch(b.id);
           else if (b.id === "signin") toast("今天已经签到了 — 明天再来");
@@ -481,6 +583,7 @@
         }
       }
       if (teleportItems) { closeTeleport(); return true; }
+      if (namePanel) { const np = namePanel; closeNamePanel(); if (np.onSkip) np.onSkip(); return true; }
       if (albumLines) {
         if (albumDetail) { albumDetail = null; detailPage = 0; dirty = true; } else closeAlbum();
         return true;
@@ -493,7 +596,7 @@
       return btns.filter(button => !panelOpen || button.id !== "next-scene").map(button => ({ ...button }));
     }
     function containsControl(x, y) {
-      if (panelOpen || teleportItems || albumLines) return true;
+      if (panelOpen || teleportItems || albumLines || namePanel) return true;
       if (getHitRects().some(b => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h)) return true;
       const j = controls().joystick;
       return joyVisible && Math.hypot(x - j.x, y - j.y) <= j.radius + 10;
@@ -518,9 +621,30 @@
 
     return {
       canvas, resize, draw, handleTap, update, toast, containsControl, getHitRects,
-      getJoystickGeometry: () => ({ ...controls().joystick, visible: joyVisible && !panelOpen && !teleportItems && !albumLines }),
-      isPanelOpen: () => panelOpen || !!teleportItems || !!albumLines,
+      getJoystickGeometry: () => ({ ...controls().joystick, visible: joyVisible && !panelOpen && !teleportItems && !albumLines && !namePanel }),
+      isPanelOpen: () => panelOpen || !!teleportItems || !!albumLines || !!namePanel,
       openPanel, closePanel,
+      openNamePanel(config) {
+        closeTeleport(); closeAlbum();
+        panelOpen = false;
+        const names = Array.isArray(config?.names) ? config.names.map(value => String(value)).filter(Boolean) : [];
+        const selected = config?.selected ? String(config.selected) : null;
+        const selectedIndex = selected ? names.indexOf(selected) : -1;
+        namePanel = {
+          title: String(config?.title || "取个名字"),
+          subtitle: String(config?.subtitle || ""),
+          names,
+          batch: selectedIndex >= 0 ? Math.floor(selectedIndex / 8) : 0,
+          selected,
+          confirmLabel: String(config?.confirmLabel || "就这个名字"),
+          skipLabel: String(config?.skipLabel || "先逛逛"),
+          onConfirm: typeof config?.onConfirm === "function" ? config.onConfirm : null,
+          onSkip: typeof config?.onSkip === "function" ? config.onSkip : null,
+        };
+        joystickEnd(); dirty = true;
+      },
+      closeNamePanel,
+      isNamePanelOpen: () => !!namePanel,
       openTeleport(items, callback) {
         closeAlbum();
         teleportItems = items.map(item => ({ id: String(item.id), label: String(item.label), right: String(item.right || "") }));
@@ -559,7 +683,7 @@
         if (!joyVisible) joystickEnd();
       },
       joystickStart(x, y) {
-        if (!joyVisible || panelOpen || teleportItems || albumLines) return false;
+        if (!joyVisible || panelOpen || teleportItems || albumLines || namePanel) return false;
         const j = controls().joystick;
         if (x < safe.left || x > safe.right || y < safe.top || y > safe.bottom || Math.hypot(x - j.x, y - j.y) > j.radius + 10) return false;
         joy.active = true; joyMoveTo(x, y);

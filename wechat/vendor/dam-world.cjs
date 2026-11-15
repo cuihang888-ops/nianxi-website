@@ -74,7 +74,15 @@
     const clearance = 8.5;
     for (const circle of spec.waters || []) if (Math.hypot(x - circle.x, z - circle.z) < circle.r + clearance) return { ok: false, reason: "water" };
     for (const circle of spec.colliders || []) if (Math.hypot(x - circle.x, z - circle.z) < circle.r + clearance) return { ok: false, reason: "solid" };
-    for (const plot of plots) if (Math.hypot(x - plot.x, z - plot.z) < 12) return { ok: false, reason: "taken" };
+    for (const plot of plots) {
+      if (Number.isFinite(plot.padW) && Number.isFinite(plot.padD)) {
+        // 契约垫面是整块矩形：按“点到矩形距离”判占位，避免自选地只按中心距绕开、
+        //  footprint 却压上垫面边角（M1 施工记录 §12 的已知小限，本轮收口）。
+        const rx = Math.max(0, Math.abs(x - plot.x) - plot.padW / 2);
+        const rz = Math.max(0, Math.abs(z - plot.z) - plot.padD / 2);
+        if (Math.hypot(rx, rz) < 8) return { ok: false, reason: "taken" };
+      } else if (Math.hypot(x - plot.x, z - plot.z) < 12) return { ok: false, reason: "taken" };
+    }
     return { ok: true };
   }
 
@@ -374,6 +382,7 @@
             fieldGroup: null, fieldSprouts: null, fieldStage: 0, house: 0, animals: [],
             face: Number.isFinite(lp.face) ? lp.face : Math.atan2(site.x - lp.x, site.z - lp.z),
             reserved: !!lp.reserved,
+            padW: w, padD: d,
             interactR: Number.isFinite(lp.interactR) ? lp.interactR : 10.5,
             decorGroup: null,
           };

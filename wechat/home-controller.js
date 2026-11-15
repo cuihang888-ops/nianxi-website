@@ -87,6 +87,8 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
       if (Math.abs(prayer.swept) >= Math.PI * 2 * 0.98) {
         prayer.stage = "done";
         world.setGuideRingVisible?.(false);
+        // 祈福完成只留一个“来过”的标记（引导线用），不发币、不加产量。
+        commit(draft => Daily.markPagodaPrayer(draft, now()));
         ui.toast("绕塔一周了 · 心里亮堂了些");
         ui.setAction("出塔 · 慢慢回村", () => { endPrayer(world, "出塔了 · 愿这一路都平安"); return true; });
         return true;
@@ -102,6 +104,36 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
   const worldOf = dam => getDamWorld ? getDamWorld(dam || "mangshi") : getMangshi();
   const damOf = active => DESTINATIONS.find(value => value.scene === active)?.id;
   const sceneOf = dam => DESTINATIONS.find(value => value.id === (dam || "mangshi"))?.scene;
+
+  // —— 登记入住（新世界新存档的闭环起点；老存档无 player 键，不弹不补发）——
+  // playerId 是本机登记编号（local- 前缀）；Codex C1 接管后由服务端签发，形状不变。
+  function newPlayerId() {
+    return "local-" + now().toString(36) + "-" + Math.floor(Math.random() * 0xffffff).toString(36).padStart(4, "0");
+  }
+  function openNamePanel(mode) {
+    if (mode === "register") {
+      ui.openNamePanel({
+        title: "登记入住 · 安和里",
+        subtitle: "给自己取个名字，登记后领 1000 安币安家金。名字和安家金先记在这台设备上。",
+        names: Daily.NAME_IDEAS, confirmLabel: "就这个名字", skipLabel: "先逛逛",
+        onConfirm: name => commit(draft => Daily.registerPlayer(draft, name, { at: now(), id: newPlayerId() })),
+      });
+    } else if (mode === "rename-player") {
+      ui.openNamePanel({
+        title: "改个名字",
+        subtitle: "换个称呼而已，安家金和家都不会变。",
+        names: Daily.NAME_IDEAS, selected: state.player?.name, confirmLabel: "就这个名字", skipLabel: "不改了",
+        onConfirm: name => commit(draft => Daily.renamePlayer(draft, name)),
+      });
+    } else if (mode === "rename-home") {
+      ui.openNamePanel({
+        title: "给家改个名",
+        subtitle: "门牌上的名字，村里人路过看得见。",
+        names: Daily.HOME_NAME_IDEAS, selected: state.home?.name, confirmLabel: "就这个名字", skipLabel: "不改了",
+        onConfirm: name => commit(draft => Daily.renameHome(draft, name)),
+      });
+    }
+  }
 
   function restoreVisual(world, dam = "mangshi") {
     if (!world) return;
@@ -208,6 +240,9 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
 
   function handleExternal(id) {
     if (id === "go-home") return goHome();
+    if (id === "register") { openNamePanel("register"); return true; }
+    if (id === "rename-player") { openNamePanel("rename-player"); return true; }
+    if (id === "rename-home") { openNamePanel("rename-home"); return true; }
     if (id === "buy-horse") return commit(Daily.buyHorse);
     if (id === "call-horse") return callHorse();
     return false;
@@ -239,6 +274,10 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
 
   function customAction(world, dam) {
     if (state.home || !world.checkPlotSpot || !world.getPlayerPos) { ui.setAction("", null); return; }
+    if (Daily.registrationPending(state)) {
+      ui.setAction("先登记入住 · 领安家金再安家", () => { openNamePanel("register"); return true; });
+      return;
+    }
     const position = world.getPlayerPos();
     const checked = world.checkPlotSpot(position.x, position.z);
     if (!checked.ok) {
@@ -299,6 +338,14 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
       ui.setAction("种萝卜 · " + cost + " 安币", () => commit(value => Daily.plantCarrots(value, nowSeconds())));
     };
     if (!h.beds.crop && h.harvests === 0) { plant(); return; }
+    // —— 新手引导线（只对新世界已登记玩家；老存档沿用上面既定的动作顺序，不插队）——
+    if (state.player && Daily.basketValue(state) > 0) {
+      ui.setAction("背篓有货了 · 去集市摆摊卖", () => {
+        ui.toast("集市就在坝心 · 走到集市边，摊子自己支起来");
+        return true;
+      });
+      return;
+    }
     for (const kind of KINDS) {
       if (!h.animals[kind]) {
         ui.setAction("领养一只" + ANIMAL_NAMES[kind] + " · " + Daily.HOME.ANIMAL_PRICE[kind] + " 安币", () => commit(value => Daily.buyHomeAnimal(value, kind, nowSeconds())));
@@ -307,6 +354,13 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
     }
     if (h.house === 1) {
       ui.setAction("升级傣家竹楼 · " + Daily.HOME.BAMBOO_PRICE + " 安币", () => commit(Daily.upgradeHomeBamboo));
+      return;
+    }
+    if (state.player && h.harvests > 0 && !state.rites?.pagodaAt) {
+      ui.setAction("去金塔祈福 · 在瑞丽坝东北塔山", () => {
+        ui.toast("姐勒金塔在瑞丽坝东北的塔山上 · 沿古道往东再往北，塔门一直开着");
+        return true;
+      });
       return;
     }
     if (!h.beds.crop) { plant(); return; }
@@ -398,7 +452,11 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
     } else if (target.type === "plot" && !target.claimed && target.reserved) {
       ui.setAction("预留地 · 尚未开放", () => { ui.toast("这块地还在村里预留着 · 开放时会先紧着村里人"); return true; });
     } else if (target.type === "plot" && !target.claimed) {
-      ui.setAction("在此安家 · " + Daily.ECONOMY.plotPrice + " 安币", () => commit(value => Daily.claimHome(value, target.site, target.idx, dam)));
+      if (Daily.registrationPending(state)) {
+        ui.setAction("先登记入住 · 领安家金再安家", () => { openNamePanel("register"); return true; });
+      } else {
+        ui.setAction("在此安家 · " + Daily.ECONOMY.plotPrice + " 安币", () => commit(value => Daily.claimHome(value, target.site, target.idx, dam)));
+      }
     } else if (target.type === "plot" && (state.home?.dam || "mangshi") === dam && state.home?.site === target.site && state.home.plot === target.idx) {
       homeAction(world);
     } else ui.setAction("", null);
