@@ -351,7 +351,7 @@
     root.add(crystal);
     root.add(box(1.6, 0.5, 1.6, M.stoneD, spec.crystalPos.x, 0.25, spec.crystalPos.z));
 
-    // —— 基址地块（引擎统一：中心圆台 + 8 块环地）——
+    // —— 基址地块（引擎统一：中心圆台 + 8 块环地；spec.siteLayouts 可按契约坐标改排某一基址）——
     const plotList = [];
     spec.sites.forEach((site, si) => {
       const g = new THREE.Group();
@@ -360,6 +360,32 @@
       c.position.y = 0.15;
       g.add(c);
       root.add(g);
+      const layout = spec.siteLayouts?.[si];
+      if (layout?.plots?.length) {
+        // 契约排布（共享村落）：地块位/尺寸/朝向/plotId 全由 spec 给定，idx 与启用顺序一一对应；
+        // reserved 地块只作预留视觉与交互锚点，不能被新认领（存量恢复不受此限）。
+        layout.plots.forEach((lp, idx) => {
+          const w = Number.isFinite(lp.w) ? lp.w : 7.6, d = Number.isFinite(lp.d) ? lp.d : 7.6;
+          const mesh = box(w, 0.22, d, M.plot, lp.x, 0.11, lp.z);
+          root.add(mesh);
+          const plot = {
+            site: si, idx, id: lp.id || null, x: lp.x, z: lp.z, mesh,
+            claimed: false, hut: false, hutGroup: null,
+            fieldGroup: null, fieldSprouts: null, fieldStage: 0, house: 0, animals: [],
+            face: Number.isFinite(lp.face) ? lp.face : Math.atan2(site.x - lp.x, site.z - lp.z),
+            reserved: !!lp.reserved,
+            interactR: Number.isFinite(lp.interactR) ? lp.interactR : 10.5,
+            decorGroup: null,
+          };
+          plot.dirX = Math.sin(plot.face); plot.dirZ = Math.cos(plot.face);
+          plotList.push(plot);
+          if (typeof spec.decoratePlot === "function") {
+            const decor = spec.decoratePlot({ ...lp, site: si, idx, x: lp.x, z: lp.z, w, d, face: plot.face }, M, H);
+            if (decor) { plot.decorGroup = decor; root.add(decor); }
+          }
+        });
+        return;
+      }
       for (let idx = 0; idx < 8; idx++) {
         const a = idx / 8 * Math.PI * 2;
         const px = site.x + Math.cos(a) * 11.5;
@@ -391,6 +417,7 @@
     function markClaimedVisual(plot) {
       plot.claimed = true;
       plot.mesh.material = M.warm;
+      if (plot.decorGroup) { removeOwnedGeometry(root, plot.decorGroup); plot.decorGroup = null; }
       const f = new THREE.Group();
       f.position.set(plot.x - plot.dirX * 1.7, 0, plot.z - plot.dirZ * 1.7);
       f.rotation.y = plot.face;
@@ -590,6 +617,24 @@
     const land = createLandResolver({ ...spec, colliders });
     const skyEffects = createSkyEffects(THREE, scene, player);
     const festivalEffects = createFestivalEffects(THREE, scene, player);
+    // —— 引导光环（spec.guideRing：绕行类动作的地面光点环，默认隐藏）——
+    let guideRing = null, guideRingMaterial = null;
+    if (spec.guideRing) {
+      guideRingMaterial = new THREE.MeshBasicMaterial({ color: 0xffca6a, transparent: true, opacity: 0.85, depthWrite: false });
+      guideRing = new THREE.Group();
+      guideRing.name = "guide:ring";
+      const dotGeometry = new THREE.SphereGeometry(0.17, 6, 5);
+      for (let i = 0; i < 28; i++) {
+        const a = i / 28 * Math.PI * 2;
+        const dot = new THREE.Mesh(dotGeometry, guideRingMaterial);
+        dot.position.set(spec.guideRing.x + Math.cos(a) * spec.guideRing.r, 0.35, spec.guideRing.z + Math.sin(a) * spec.guideRing.r);
+        guideRing.add(dot);
+      }
+      guideRing.visible = false;
+      scene.add(guideRing);
+    }
+    // 祈福姿势：0 无 / 1 合掌 / 2 礼拜（通用姿势开关，场景侧流程驱动）
+    let prayerPose = 0;
     let dancing = false, danceAngle = 0, danceAcc = 0, danceDone = false;
     function stopDance() {
       dancing = false; danceDone = false; danceAcc = 0;
@@ -683,9 +728,20 @@
           hLegs[1].rotation.x = -trot; hLegs[2].rotation.x = -trot;
           legL.rotation.x = -0.55; legR.rotation.x = -0.55;
           armL.rotation.x = -0.45; armR.rotation.x = -0.45;
+        } else if (prayerPose === 1) {
+          // 合掌：双臂向前上方收拢，静立
+          armL.rotation.x = -1.22; armR.rotation.x = -1.22;
+          armL.rotation.z = 0.16; armR.rotation.z = -0.16;
+          legL.rotation.x = 0; legR.rotation.x = 0;
+        } else if (prayerPose === 2) {
+          // 礼拜：双臂微伸、上身前俯（俯角在下方 pBody 处叠加）
+          armL.rotation.x = -0.4; armR.rotation.x = -0.4;
+          armL.rotation.z = 0.08; armR.rotation.z = -0.08;
+          legL.rotation.x = 0; legR.rotation.x = 0;
         } else {
           const sw = moving ? Math.sin(walkPhase) * 0.55 : dancing ? Math.sin(t * 7) * 0.5 : 0;
           armL.rotation.x = sw; armR.rotation.x = -sw;
+          armL.rotation.z = 0; armR.rotation.z = 0;
           legL.rotation.x = -sw * 0.8; legR.rotation.x = sw * 0.8;
           if (horseShown) {
             hTail.rotation.z = Math.sin(t * 1.3) * 0.18;
@@ -714,12 +770,13 @@
         if (!resting && restBlend < 0.02) restBlend = 0;
         if (!mounted && !dancing) {
           player.position.y = restBlend ? -0.42 * restBlend : 0;
-          pBody.rotation.x = 0.1 * restBlend;
-          if (restBlend > 0.01) { legL.rotation.x = -1.35 * restBlend; legR.rotation.x = -1.35 * restBlend; }
+          pBody.rotation.x = prayerPose === 2 ? 0.55 : 0.1 * restBlend;
+          if (restBlend > 0.01 && !prayerPose) { legL.rotation.x = -1.35 * restBlend; legR.rotation.x = -1.35 * restBlend; }
         }
         pBody.scale.y = moving ? 1 : 1 + Math.sin(t * 1.6) * 0.012;
         skyEffects.update(dt, t);
         festivalEffects.update(dt);
+        if (guideRing?.visible) guideRingMaterial.opacity = 0.6 + 0.3 * Math.sin(t * 2.4);
         applyCamera(Math.min(1, dt * 5));
       },
       setMoveInput(x, z) {
@@ -736,6 +793,7 @@
       },
       hideHorse() {
         stopDance();
+        prayerPose = 0;
         resting = false; restBlend = 0; pBody.rotation.x = 0;
         player.position.y = 0;
         if (mounted) {
@@ -762,6 +820,7 @@
         if (value && mounted) return false;
         if (value) stopDance();
         resting = !!value;
+        if (resting) prayerPose = 0;
         if (resting) { restAnchor.x = player.position.x; restAnchor.z = player.position.z; moveIn.x = 0; moveIn.z = 0; }
         return true;
       },
@@ -786,6 +845,7 @@
       setMounted(b) {
         if (!horseShown || mounted === !!b) return;
         stopDance();
+        prayerPose = 0;
         resting = false; restBlend = 0; pBody.rotation.x = 0;
         mounted = !!b; moveIn.x = 0; moveIn.z = 0;
         if (mounted) {
@@ -801,7 +861,7 @@
       isMounted: () => mounted,
       getHorsePos: () => horseShown ? { x: horse.position.x, z: horse.position.z } : null,
       debugSetHorse(x, z) { if (Number.isFinite(x) && Number.isFinite(z)) horse.position.set(x, 0, z); },
-      getPlots: () => plotList.map(p => ({ site: p.site, idx: p.idx, x: p.x, z: p.z, claimed: p.claimed, hut: p.hut,
+      getPlots: () => plotList.map(p => ({ site: p.site, idx: p.idx, id: p.id || null, reserved: !!p.reserved, x: p.x, z: p.z, claimed: p.claimed, hut: p.hut,
         house: p.house, field: !!p.fieldGroup, fieldStage: p.fieldStage,
         animals: { chicken: p.animals.filter(a => a.kind === "chicken").length, sheep: p.animals.filter(a => a.kind === "sheep").length, rabbit: p.animals.filter(a => a.kind === "rabbit").length } })),
       getSites: () => spec.sites.map(s => ({ x: s.x, z: s.z })),
@@ -813,6 +873,18 @@
         return land.resolve(x, z, player.position);
       },
       getSpec: () => ({ bounds: { ...spec.bounds }, waters: (spec.waters || []).map(w => ({ ...w })), colliders: colliders.map(w => ({ ...w })), spawn: { ...spec.spawn } }),
+      setPlayerYaw(yaw) { if (Number.isFinite(yaw)) player.rotation.y = yaw; },
+      setPrayerPose(value) {
+        prayerPose = [0, 1, 2].includes(value) ? value : 0;
+        if (prayerPose) { stopDance(); resting = false; }
+      },
+      getPrayerPose: () => prayerPose,
+      setGuideRingVisible(value) { if (guideRing) guideRing.visible = !!value; },
+      isGuideRingVisible: () => !!guideRing?.visible,
+      getPrayerSite: () => spec.prayerSite ? {
+        entry: { ...spec.prayerSite.entry }, spot: { ...spec.prayerSite.spot }, ring: { ...spec.prayerSite.ring },
+      } : null,
+      getMapFeatures: () => spec.mapFeatures || null,
       setFestivalVisible(id) {
         for (const [key, group] of Object.entries(festivalGroups)) group.visible = key === id;
       },
@@ -820,12 +892,12 @@
         if (horseShown && !mounted && Math.hypot(player.position.x - horse.position.x, player.position.z - horse.position.z) < 6.5) return { type: "horse" };
         if (Math.hypot(player.position.x - spec.crystalPos.x, player.position.z - spec.crystalPos.z) < 9.5) return { type: "crystal" };
         if (Math.hypot(player.position.x - spec.hallPos.x, player.position.z - spec.hallPos.z) < 12.5) return { type: "hall" };
-        let best = null, bd = 10.5;
+        let best = null, bd = Infinity;
         for (const p of plotList) {
           const d = Math.hypot(player.position.x - p.x, player.position.z - p.z);
-          if (d < bd) { bd = d; best = p; }
+          if (d < (p.interactR || 10.5) && d < bd) { bd = d; best = p; }
         }
-        return best ? { type: "plot", site: best.site, idx: best.idx, claimed: best.claimed, hut: best.hut } : null;
+        return best ? { type: "plot", site: best.site, idx: best.idx, id: best.id || null, reserved: !!best.reserved, claimed: best.claimed, hut: best.hut } : null;
       },
       markClaimed(site, idx) { const p = findPlot(site, idx); if (p && !p.claimed) markClaimedVisual(p); },
       buildHut(site, idx) { const p = findPlot(site, idx); if (p && p.claimed && !p.hut) buildHutVisual(p); },
@@ -841,6 +913,8 @@
       teleportPlayerTo(x, z) {
         if (!Number.isFinite(x) || !Number.isFinite(z)) return;
         stopDance();
+        prayerPose = 0;
+        if (guideRing) guideRing.visible = false;
         resting = false; restBlend = 0; pBody.rotation.x = 0;
         moveIn.x = 0; moveIn.z = 0;
         const p = land.resolve(x, z, player.position);
