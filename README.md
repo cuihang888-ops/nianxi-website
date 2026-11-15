@@ -1,6 +1,6 @@
 # 年禧 · 安和里
 
-安和里庭院与溪山牧场的独立开发项目。当前包含可运行的 Three.js 世界、个人农场、轻量狩猎，以及庭院多人服务。此仓库不是整个年禧商城的生产源码；线上商城尚未部署这一版。
+安和里独立开发项目，目标是以德宏为灵感的多人共同生活世界：每人有自己的角色，在共享村落安家、种养、经营，到瑞丽总佛寺祈福挂红结。当前已有可玩的本机微信小游戏预览、网页农场与匿名庭院相聚服务；共享地权、云存档和新世界多人尚未实现。此仓库不是整个年禧商城的生产源码。
 
 ![溪山牧场](docs/valley-preview.png)
 
@@ -14,6 +14,14 @@ npm run dev:all
 ```
 
 打开终端显示的本机地址，默认 `http://127.0.0.1:5173/`。此命令同时启动庭院页面与本机多人服务；退出时一起停止。支持中文与 `?locale=en` 英文界面。
+
+小游戏浏览器试玩使用与微信相同的游戏入口：
+
+```sh
+npm run trial:minigame
+```
+
+默认 `http://127.0.0.1:5180/`。微信工程构建使用 `npm run build:wechat`，输出 `dist/wechat`。用户已确认 iPhone 预览可以进入庭院；真实账号与云端经营未接通，尚未正式发布。
 
 Windows 用户的新项目、缓存和产物请放在 D:。本机协作目录是 `D:\CodexStorage\projects\nianxi-website`。安装前可设置：
 
@@ -41,6 +49,7 @@ npm run dev:all
 ```sh
 npm test
 npm run build
+npm run build:wechat
 npm run verify:calendar
 npm run test:ui
 ```
@@ -51,14 +60,14 @@ UI 测试自动启动或复用本机 4107、4173、4183 三个服务。Windows �
 
 ## 协作
 
-大世界与独立微信客户端方向见 [德宏世界框架](docs/DEHONG_WORLD_FRAMEWORK.md)。Codex 负责规则与验收，Muse 负责细节与画面；目前可运行交付仍是网页原型，微信客户端与真实充值尚未接入。
+最新任务见 [2026-11-15 Muse 共享世界交接](docs/MUSE_SHARED_WORLD_HANDOFF_20261115.md)，总体方向见 [德宏世界框架](docs/DEHONG_WORLD_FRAMEWORK.md)。Codex 负责平台、身份、持久资产、联机与验收，Muse 负责地图、角色、细节、画面和客户端流程。首发免费，现数值保持，不充值、不接支付。
 
-先阅读 [产品方向](docs/PRODUCT_INTENT.md)、[Muse 协作交接](docs/MUSE_HANDOFF.md) 与 [开发边界](AGENTS.md)。从 `main` 建分支，通过 Pull Request 合并，避免两位协作者同时覆盖相同文件。使用 ZIP 协作时标注基线提交并返回修改文件清单，合并前比较双方改动。
+先阅读 [产品方向](docs/PRODUCT_INTENT.md)、[Muse 协作交接](docs/MUSE_HANDOFF.md) 与 [开发边界](AGENTS.md)。从 `origin/codex/dehong-world-framework` 最新提交建立各自功能分支，通过 Pull Request 返回；`main` 和 Muse 访问测试分支仍是旧基线。使用 ZIP 协作时标注基线提交并返回修改文件清单，合并前比较双方改动。
 
 `integration/patch/` 仅是现有商城的安和里接入补丁，不可整体覆盖商城。支付、购物车、订单、会员、ERP、全局布局与数据库都不在本次修改范围。
 
 ## 数据说明
 
-农场使用本机浏览器 `anheli-farm-v1` 存档，安币（原叶币）、土地、动物和狩猎奖励都是游戏数据。区域、聚落与马匹资格沿用同一存档，原资产不变。当前不接真实支付、不兑换现金、不跨设备同步，也不与商城会员绑定。清除站点数据会删除存档。多人服务只同步访客活动与庭院互动；个人农场和动物尚未共享给其他玩家。
+网页农场使用本机浏览器 `anheli-farm-v1` 存档；小游戏使用 `anheli-minigame-v2:save`，旧 `anheli-minigame-v1` 在校验后迁入且原数据保留。两者均非云资产，`cloudSynced:false`。当前不接真实支付、不兑换现金、不跨设备同步，也不与商城会员绑定。清除本机数据会删除对应进度。旧多人服务只同步访客活动与庭院互动；个人农场和动物尚未共享给其他玩家。
 
 仓库不含生产凭证、数据库、浏览器登录资料、依赖或构建缓存。保留日历依赖与字体许可证。截图和临时报告在 `reports/`，不提交版本库。
