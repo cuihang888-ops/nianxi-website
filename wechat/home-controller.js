@@ -109,6 +109,152 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
     ui.setAction("出塔 · 慢慢回村", () => { endPrayer(world, "出塔了 · 愿这一路都平安"); return true; });
     return true;
   }
+  // —— 总佛寺内景（仅芒市坝；纯客户端动作序列：不发币、不加产量、不做交易；
+  // 只有祈祷完成在本机存档记一个轻标记 rites.templeAt/templeWish，与金塔 pagodaAt 同族）——
+  let temple = null;
+  const TEMPLE_STAGES = { join: 1500, worship: 3000 };
+  function endTemple(world, quietToast) {
+    if (!temple) return;
+    world?.setPrayerPose?.(0);
+    world?.setResting?.(false);
+    world?.setBeadsPose?.(false);
+    temple = null;
+    if (quietToast) ui.toast(quietToast);
+  }
+  function moveToSpot(world, spot) {
+    world.setMoveInput(0, 0);
+    world.teleportPlayerTo(spot.x, spot.z);
+    world.setPlayerYaw?.(spot.yaw);
+  }
+  function startWorship(world, site) {
+    moveToSpot(world, site.bow);
+    world.setPrayerPose?.(1);
+    temple = { stage: "join", endsAt: now() + TEMPLE_STAGES.join, world, spot: site.bow };
+    ui.toast("走到蒲团前 · 先合掌，把心收回来");
+  }
+  function startPrayWish(world, site) {
+    moveToSpot(world, site.pray);
+    temple = { stage: "wish", world, spot: site.pray, wish: null };
+    ui.openNamePanel({
+      title: "祈祷 · 选一句心愿",
+      subtitle: "只许从五句里选一句，在心里说给佛听。只记在本机存档里，不发币。",
+      names: Daily.TEMPLE_WISHES, confirmLabel: "就这句", skipLabel: "先不祈祷",
+      onConfirm: name => {
+        if (!temple || temple.stage !== "wish") return;
+        temple.stage = "pray";
+        temple.wish = name;
+        temple.endsAt = now() + Daily.ECONOMY.meditationMilliseconds;
+        world.setResting?.(true);
+        world.setPrayerPose?.(1);
+        ui.toast("跪坐下来 · 为「" + name + "」默念一会儿");
+      },
+      onSkip: () => { if (temple?.stage === "wish") temple = null; },
+    });
+  }
+  function startFish(world, site) {
+    moveToSpot(world, site.fish);
+    temple = { stage: "fish", world, spot: site.fish };
+    ui.toast("拿起敲棒 · 点一下，敲一下，慢慢来");
+  }
+  function startBeads(world, site) {
+    moveToSpot(world, site.beads);
+    world.setBeadsPose?.(true);
+    temple = { stage: "beads", world, spot: site.beads };
+    ui.toast("拿起念珠 · 一颗一颗，慢慢捻");
+  }
+  function exitTempleHere(world) {
+    endTemple(world);
+    if (world.exitTemple?.()) ui.toast("出寺了 · 慢走");
+    return true;
+  }
+  // 寺庙进行中或玩家身在殿内时返回 true（本帧动作区由寺庙占用）。
+  function templeAction(world) {
+    if (temple) {
+      if (temple.world !== world) { endTemple(world); return false; }
+      if (!world.isInTemple?.()) { endTemple(world); return false; }
+      const time = now();
+      if (temple.stage === "join" || temple.stage === "worship") {
+        const position = world.getPlayerPos();
+        if (Math.hypot(position.x - temple.spot.x, position.z - temple.spot.z) > temple.spot.r + 3.5) { endTemple(world, "礼拜先停下了 · 想好了再来"); return true; }
+        ui.setAction(temple.stage === "join" ? "合掌 · 把心收回来" : "跪拜 · 愿平安", null);
+        if (time >= temple.endsAt) {
+          if (temple.stage === "join") {
+            temple.stage = "worship"; temple.endsAt = time + TEMPLE_STAGES.worship;
+            world.setPrayerPose?.(2);
+          } else {
+            endTemple(world);
+            ui.toast("拜过了 · 心里安稳些");
+          }
+        }
+        return true;
+      }
+      if (temple.stage === "wish") { ui.setAction("", null); return true; }
+      if (temple.stage === "pray") {
+        ui.setAction("祈祷 · 为「" + temple.wish + "」默念", null);
+        if (world.isResting && !world.isResting()) { temple = null; return true; }
+        if (time >= temple.endsAt) {
+          const wish = temple.wish;
+          commit(draft => Daily.markTemplePrayer(draft, wish, now()));
+          endTemple(world);
+          ui.toast("祈祷过了 · 愿「" + wish + "」");
+        }
+        return true;
+      }
+      if (temple.stage === "fish") {
+        const position = world.getPlayerPos();
+        if (Math.hypot(position.x - temple.spot.x, position.z - temple.spot.z) > temple.spot.r + 3.5) { temple = null; return true; }
+        ui.setAction("敲一下 · 木鱼声慢慢散（走开即停）", () => { world.knockWoodenFish?.(); return true; });
+        return true;
+      }
+      if (temple.stage === "beads") {
+        const position = world.getPlayerPos();
+        if (Math.hypot(position.x - temple.spot.x, position.z - temple.spot.z) > temple.spot.r + 3.5) { endTemple(world, "佛珠放回架上了"); return true; }
+        ui.setAction("盘佛珠 · 一颗一颗（点这里停下）", () => { endTemple(world, "佛珠放回架上了"); return true; });
+        return true;
+      }
+      return true;
+    }
+    const site = world.getTempleSite?.();
+    if (!site) return false;
+    if (world.isInTemple?.()) {
+      // 殿内静坐不建状态：坐下后交给通用「起身」接管，想坐多久坐多久。
+      if (world.isResting?.()) return false;
+      const position = world.getPlayerPos();
+      const anchors = [
+        ["exit", site.exit], ["bow", site.bow], ["pray", site.pray],
+        ["sit", site.sit], ["fish", site.fish], ["beads", site.beads],
+      ];
+      let nearest = null;
+      for (const [id, spot] of anchors) {
+        const dist = Math.hypot(position.x - spot.x, position.z - spot.z);
+        if (dist <= spot.r && (!nearest || dist < nearest.dist)) nearest = { id, spot, dist };
+      }
+      if (!nearest) { ui.setAction("", null); return true; }
+      if (nearest.id === "exit") ui.setAction("出寺", () => exitTempleHere(world));
+      else if (nearest.id === "bow") ui.setAction("礼拜 · 跪拜佛前", () => { startWorship(world, site); return true; });
+      else if (nearest.id === "pray") ui.setAction("祈祷 · 选一句心愿", () => { startPrayWish(world, site); return true; });
+      else if (nearest.id === "sit") ui.setAction("静坐 · 坐一会儿", () => {
+        moveToSpot(world, site.sit);
+        world.setResting?.(true);
+        ui.toast("坐下了 · 跟着呼吸，慢一点");
+        return true;
+      });
+      else if (nearest.id === "fish") ui.setAction("敲木鱼", () => { startFish(world, site); return true; });
+      else if (nearest.id === "beads") ui.setAction("盘佛珠", () => { startBeads(world, site); return true; });
+      return true;
+    }
+    // 寺外：走到寺门出「进寺」；骑马时不占动作区，交给通用「下马」。
+    if (activeDam !== "mangshi" || world.isMounted?.()) return false;
+    const position = world.getPlayerPos();
+    if (Math.hypot(position.x - site.door.x, position.z - site.door.z) > site.door.r) return false;
+    ui.setAction("进寺", () => {
+      if (world.isMounted?.()) { ui.toast("先下马，再进寺"); return false; }
+      roadDraft = null;
+      if (world.enterTemple?.()) ui.toast("进了总佛寺 · 里面请轻声");
+      return true;
+    });
+    return true;
+  }
   const nowSeconds = () => Math.floor(now() / 1000);
   const worldOf = dam => getDamWorld ? getDamWorld(dam || "mangshi") : getMangshi();
   const damOf = active => DESTINATIONS.find(value => value.scene === active)?.id;
@@ -257,11 +403,21 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
     if (id === "rename-home") { openNamePanel("rename-home"); return true; }
     if (id === "buy-horse") return commit(Daily.buyHorse);
     if (id === "call-horse") return callHorse();
+    if (id === "go-temple") {
+      if (activeDam !== "mangshi" || !activeWorld) { ui.toast("总佛寺在芒市坝 · 先回芒市再去"); return true; }
+      if (activeWorld.isInTemple?.()) { ui.closePanel(); ui.toast("已经在寺里了 · 慢慢坐"); return true; }
+      if (activeWorld.isMounted?.()) { ui.toast("先下马，再进寺"); return true; }
+      roadDraft = null;
+      ui.closePanel();
+      if (activeWorld.enterTemple?.()) ui.toast("进了总佛寺 · 里面请轻声");
+      return true;
+    }
     return false;
   }
 
   function canCallHorse() {
     if (!activeDam || !activeWorld || !state.horse?.owned || state.horse.bond < Daily.BOND.CALL_AT || activeWorld.isMounted?.()) return false;
+    if (activeWorld.isInTemple?.()) return false;
     if (state.horse.dam !== activeDam) return true;
     const position = activeWorld.getPlayerPos();
     const horse = activeWorld.getHorsePos() || state.horse;
@@ -287,6 +443,7 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
   // —— 修路模式（两点式）：起点随处可起（孤立路段也行），终点实时报价，确认时校验后记账 ——
   function startRoadMode() {
     if (!activeDam || !activeWorld) return false;
+    if (activeWorld.isInTemple?.()) { ui.toast("先出寺，再修路"); return true; }
     if (Daily.registrationPending(state)) { openNamePanel("register"); return true; }
     roadDraft = { dam: activeDam, start: null };
     ui.closePanel();
@@ -440,6 +597,7 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
   function update(active, world) {
     activeDam = damOf(active); activeWorld = world;
     if (prayer && activeDam !== "ruili") endPrayer(worldOf("ruili"));
+    if (temple && activeDam !== "mangshi") endTemple(worldOf("mangshi"));
     if (activeDam) world.setCrystalLit?.(!!state.lit?.[activeDam]);
     accrue();
     const basketCount = Daily.basketCount(state);
@@ -449,11 +607,13 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
         : { id: "horse-owned", label: "陇川骏马 · 亲密度 " + state.horse.bond, right: Daily.bondTier(state.horse.bond), enabled: false }
       : { id: "buy-horse", label: "陇川骏马 · 领养", right: Daily.HOME.HORSE_PRICE + " 安币", enabled: true });
     ui.setRoadRow?.(!!activeDam);
+    ui.setTempleRow?.(activeDam === "mangshi");
     if (roadDraft && (ui.isPanelOpen() || roadDraft.dam !== activeDam)) roadDraft = null;
     if (ui.isPanelOpen()) { ui.setAction("", null); return; }
     const dam = damOf(active);
     if (!dam || !world) { ui.setAction("", null); return; }
     if (prayerAction(world)) return;
+    if (templeAction(world)) return;
     if (roadAction(world, dam)) return;
     if (world.isDancing?.()) {
       ui.setAction("纵歌中 · 迈步就停", null);

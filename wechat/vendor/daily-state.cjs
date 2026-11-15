@@ -58,9 +58,15 @@ function validateGrant(grant) {
     && validTime(issued.at) && issued.amount === ECONOMY.registrationGrant;
 }
 
+// —— 总佛寺祈祷心愿（固定五句，不许自由输入；用户 2026-11-15 21:33/21:38 口径）——
+const TEMPLE_WISHES = Object.freeze(["平安", "家人", "健康", "学业", "感谢"]);
+
 function validateRites(rites) {
-  return fields(rites, [], ["pagodaAt"])
-    && (!Object.hasOwn(rites, "pagodaAt") || validTime(rites.pagodaAt));
+  return fields(rites, [], ["pagodaAt", "templeAt", "templeWish"])
+    && (!Object.hasOwn(rites, "pagodaAt") || validTime(rites.pagodaAt))
+    && (!Object.hasOwn(rites, "templeAt") || validTime(rites.templeAt))
+    && (!Object.hasOwn(rites, "templeWish") || TEMPLE_WISHES.includes(rites.templeWish))
+    && (Object.hasOwn(rites, "templeAt") === Object.hasOwn(rites, "templeWish"));
 }
 
 function defaultState() {
@@ -134,7 +140,17 @@ function renameHome(state, name) {
 function markPagodaPrayer(state, at) {
   if (!validTime(at)) return failure("INVALID_TIME", "祈福时间无效");
   const changed = state.rites?.pagodaAt !== at;
-  state.rites = { pagodaAt: at };
+  state.rites = { ...state.rites, pagodaAt: at };
+  return { ok: true, changed };
+}
+
+// 总佛寺祈祷轻标记：只记最近一次祈祷的时间与心愿类别（五句固定心愿之一），
+// 不发币、不加产量、不写每日状态；与金塔 pagodaAt 同族，互不覆盖。
+function markTemplePrayer(state, wish, at) {
+  if (!TEMPLE_WISHES.includes(wish)) return failure("INVALID_WISH", "心愿只能从五句里选一句");
+  if (!validTime(at)) return failure("INVALID_TIME", "祈祷时间无效");
+  const changed = state.rites?.templeAt !== at || state.rites?.templeWish !== wish;
+  state.rites = { ...state.rites, templeAt: at, templeWish: wish };
   return { ok: true, changed };
 }
 
@@ -828,7 +844,7 @@ function createStateSession(repository) {
 }
 
 module.exports = { defaultState, newPlayerState, registrationPending, registerPlayer, renamePlayer, renameHome,
-  markPagodaPrayer, nameProblem, isValidName, NAME_IDEAS, HOME_NAME_IDEAS, RESERVED_NAMES,
+  markPagodaPrayer, markTemplePrayer, TEMPLE_WISHES, nameProblem, isValidName, NAME_IDEAS, HOME_NAME_IDEAS, RESERVED_NAMES,
   refreshDaily, doSignin, doJingxin, markQuest, claimQuest, questAllDone,
   claimHome, buildHomeHut, validateState, normalizeLegacyState, createStateSession, todayShanghai,
   createHome, normalizeHome, accrueProduce, produceValue, openHomeField, plantCarrots, harvestCarrots,

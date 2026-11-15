@@ -389,6 +389,10 @@
     const { stall, basket: harvestBasket } = DamWorld.createHomeProps(THREE, M, box);
     root.add(stall, harvestBasket);
     let resting = false, restBlend = 0;
+    // 总佛寺内景状态（大殿建在远置坐标 (600, 0)，详见下方内景块）。状态声明提在这里，
+    // 因为 applyCamera 在工厂执行期就会被调用，晚声明会踩 TDZ。
+    const TEMPLE_CENTER = { x: 600, z: 0 };
+    let insideTemple = false;
     const restAnchor = { x: 0, z: 0 };
     let horseShown = false, mounted = false;
     let bondLevel = 0, careT = 0, followPhase = 0;
@@ -567,12 +571,250 @@
         }
       }
     }
+    // —— 总佛寺内景（用户 2026-11-15 21:38：寺要能进人，进去拜神、祈祷、静坐）——
+    // 大殿落在坝外远置坐标 (600, 0) 的独立室内区，与户外同处一个场景：进/出寺是区内
+    // 位置转移；殿内位置从不落档，世界重建后玩家恒在寺外，不会卡在室内。
+    // 殿内零经济：不发币、不加产量、不做交易、不放充值入口（老规矩）。
+    // 姿态口径（本模块独立实现）：1 合掌 / 2 跪拜——寺内礼拜是跪在蒲团上叩拜、身体有
+    // 起伏，与 dam-world 金塔礼拜庭的站姿礼拜区分；静坐沿用 setResting 坐姿，呼吸起伏
+    // 在 update 里放大到看得见；敲木鱼、盘佛珠都是纯动作，不计数、不发币。
+    const TEMPLE_RECT = { halfX: 14.6, halfZ: 10.6 };
+    const templeColliders = [
+      { x: 600, z: -7.6, r: 3.6 },   // 佛龛台 + 供桌
+      { x: 591, z: -5, r: 0.85 }, { x: 609, z: -5, r: 0.85 },
+      { x: 591, z: 5.5, r: 0.85 }, { x: 609, z: 5.5, r: 0.85 }, // 梁柱
+      { x: 610.8, z: -2.5, r: 1.7 }, // 木鱼案
+      { x: 591.4, z: -4.4, r: 1.5 }, // 佛珠架
+      { x: 593.2, z: -5.8, r: 0.5 }, { x: 606.8, z: -5.8, r: 0.5 }, // 长明灯柱
+    ];
+    function interiorResolve(x, z, previous) {
+      const fallback = previous && Number.isFinite(previous.x) && Number.isFinite(previous.z)
+        ? { x: previous.x, z: previous.z } : { x: TEMPLE_CENTER.x, z: 7.4 };
+      if (!Number.isFinite(x) || !Number.isFinite(z)) return fallback;
+      const p = { x, z };
+      const clampRect = q => {
+        q.x = Math.max(TEMPLE_CENTER.x - TEMPLE_RECT.halfX, Math.min(TEMPLE_CENTER.x + TEMPLE_RECT.halfX, q.x));
+        q.z = Math.max(TEMPLE_CENTER.z - TEMPLE_RECT.halfZ, Math.min(TEMPLE_CENTER.z + TEMPLE_RECT.halfZ, q.z));
+      };
+      clampRect(p);
+      for (let pass = 0; pass < 16; pass++) {
+        let ok = true;
+        for (const c of templeColliders) {
+          let dx = p.x - c.x, dz = p.z - c.z;
+          let d = Math.hypot(dx, dz);
+          if (d >= c.r) continue;
+          ok = false;
+          if (d < 1e-9) { dx = fallback.x - c.x; dz = fallback.z - c.z; d = Math.hypot(dx, dz) || 1; }
+          p.x = c.x + dx / d * (c.r + 1e-6);
+          p.z = c.z + dz / d * (c.r + 1e-6);
+        }
+        clampRect(p);
+        if (ok) break;
+      }
+      return p;
+    }
+    const inTempleRect = (x, z) => Math.abs(x - TEMPLE_CENTER.x) <= 17 && Math.abs(z - TEMPLE_CENTER.z) <= 13;
+    let templeReturn = null;
+    let prayerPose = 0, kneelBlend = 0, bowClock = 0;
+    let beadsPose = false, knockT = 0, rippleT = 0;
+    let baseHemi = 0.95, baseSun = 0.9, lastSky = null;
+    function refreshLights() {
+      // 殿内光偏暖偏静：压低日光与天光、靠殿内点光源提暖；出寺即恢复。雨幕不进殿。
+      hemi.intensity = baseHemi * (insideTemple ? 0.5 : 1);
+      sun.intensity = baseSun * (insideTemple ? 0.3 : 1);
+      if (lastSky) skyEffects.setSky(insideTemple ? { ...lastSky, rain: false } : lastSky);
+    }
+    const templeHall = new THREE.Group();
+    templeHall.position.set(TEMPLE_CENTER.x, 0, TEMPLE_CENTER.z);
+    templeHall.name = "temple:hall";
+    root.add(templeHall);
+    const TB = (w, h, d, mat, x, y, z) => { const m = box(w, h, d, mat, x, y, z); templeHall.add(m); return m; };
+    // 殿外一小片绿地（从殿门往外看不是虚空）
+    const hallGround = new THREE.Mesh(new THREE.CircleGeometry(48, 26), M.meadow2);
+    hallGround.rotation.x = -Math.PI / 2;
+    hallGround.position.set(TEMPLE_CENTER.x, -0.04, TEMPLE_CENTER.z);
+    root.add(hallGround);
+    TB(34.5, 0.5, 26.5, M.stoneD, 0, -0.27, 0);       // 基座
+    TB(32, 0.3, 24, M.stone, 0, -0.12, 0);            // 地板
+    TB(6.5, 0.07, 17.5, M.earth, 0, 0.045, -0.6);     // 中央拜道
+    // 墙体（南墙留门洞，洞宽 4.4、高 4.2）
+    TB(32, 6.4, 0.7, M.cream, 0, 3.2, -11.65);
+    TB(0.7, 6.4, 24, M.cream, -15.65, 3.2, 0);
+    TB(0.7, 6.4, 24, M.cream, 15.65, 3.2, 0);
+    TB(13.8, 6.4, 0.7, M.cream, -9.1, 3.2, 11.65);
+    TB(13.8, 6.4, 0.7, M.cream, 9.1, 3.2, 11.65);
+    TB(4.4, 2.2, 0.7, M.cream, 0, 5.3, 11.65);
+    TB(31.5, 3.0, 0.5, M.cream, 0, 7.7, -11.65);
+    TB(31.5, 3.0, 0.5, M.cream, 0, 7.7, 11.65);
+    // 屋顶（双坡）与脊梁
+    const roofN = TB(34.5, 0.35, 15.8, M.roof, 0, 8.55, -6.2); roofN.rotation.x = 0.42;
+    const roofS = TB(34.5, 0.35, 15.8, M.roof, 0, 8.55, 6.2); roofS.rotation.x = -0.42;
+    TB(34.5, 0.5, 0.7, M.woodDark, 0, 9.85, 0);
+    // 梁柱
+    for (const [px, pz] of [[-9, -5], [9, -5], [-9, 5.5], [9, 5.5]]) {
+      const pillar = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.48, 6.4, 8), M.wood);
+      pillar.position.set(px, 3.2, pz);
+      templeHall.add(pillar);
+    }
+    // 佛龛：台阶、背屏、光背、金身（庄重简净，不做恐怖相）
+    TB(11, 0.5, 4.6, M.stone, 0, 0.25, -8.9);
+    TB(9, 0.5, 3.6, M.stone, 0, 0.75, -9.3);
+    TB(9.5, 5.2, 0.5, M.woodDark, 0, 3.4, -11.15);
+    TB(9.9, 0.35, 0.55, M.gold, 0, 6.05, -11.15);
+    const halo = new THREE.Mesh(new THREE.CircleGeometry(1.5, 20), M.gold);
+    halo.position.set(0, 3.75, -10.85);
+    templeHall.add(halo);
+    const buddha = new THREE.Group();
+    buddha.position.set(0, 1.0, -9.55);
+    templeHall.add(buddha);
+    const bBase = new THREE.Mesh(new THREE.CylinderGeometry(1.45, 1.7, 0.45, 12), M.gold);
+    bBase.position.y = 0.22; buddha.add(bBase);
+    const bLap = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 9), M.gold);
+    bLap.scale.set(1.5, 0.55, 1.0); bLap.position.y = 0.62; buddha.add(bLap);
+    const bTorso = new THREE.Mesh(new THREE.SphereGeometry(1, 12, 9), M.gold);
+    bTorso.scale.set(0.95, 1.15, 0.7); bTorso.position.y = 1.5; buddha.add(bTorso);
+    const bHead = new THREE.Mesh(new THREE.SphereGeometry(0.52, 11, 9), M.gold);
+    bHead.position.y = 2.55; buddha.add(bHead);
+    const bBun = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 7), M.gold);
+    bBun.position.y = 3.02; buddha.add(bBun);
+    buddha.add(box(0.12, 0.34, 0.08, M.gold, -0.55, 2.48, 0));
+    buddha.add(box(0.12, 0.34, 0.08, M.gold, 0.55, 2.48, 0));
+    // 供桌、供碗、长明灯
+    TB(6.4, 0.25, 1.4, M.woodDark, 0, 1.02, -6.4);
+    for (const [lx, lz] of [[-2.9, -0.5], [2.9, -0.5], [-2.9, 0.5], [2.9, 0.5]]) TB(0.22, 1.0, 0.22, M.woodDark, lx, 0.5, -6.4 + lz);
+    for (const [bx, bmat] of [[-1.6, M.gold], [0, M.cream], [1.6, M.gold]]) {
+      const bowl = new THREE.Mesh(new THREE.CylinderGeometry(0.3, 0.2, 0.22, 10), bmat);
+      bowl.position.set(bx, 1.26, -6.4);
+      templeHall.add(bowl);
+    }
+    for (const sx of [-3.9, 3.9]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.13, 2.2, 7), M.wood);
+      pole.position.set(sx, 1.1, -6.4); templeHall.add(pole);
+      const flame = new THREE.Mesh(new THREE.SphereGeometry(0.24, 8, 7), M.gold);
+      flame.position.set(sx, 2.35, -6.4); templeHall.add(flame);
+    }
+    // 蒲团一排（左祈祷 / 中礼拜 / 右静坐，间以素蒲团）
+    for (const [cx, cmat] of [[-5.4, M.saddle], [-2.7, M.hemp], [0, M.saddle], [2.7, M.hemp], [5.4, M.saddle]]) {
+      const cushion = new THREE.Mesh(new THREE.CylinderGeometry(0.85, 0.95, 0.32, 12), cmat);
+      cushion.position.set(cx, 0.16, -4.4);
+      templeHall.add(cushion);
+    }
+    // 蒲团两端的长明灯柱
+    for (const sx of [-6.8, 6.8]) {
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.12, 2.0, 7), M.wood);
+      pole.position.set(sx, 1.0, -5.8); templeHall.add(pole);
+      const flame = new THREE.Mesh(new THREE.SphereGeometry(0.2, 8, 7), M.gold);
+      flame.position.set(sx, 2.12, -5.8); templeHall.add(flame);
+    }
+    // 木鱼案（东侧）：案台、木鱼、敲棒、声波纹（宿主无音频通道，敲击做纯视觉）
+    TB(2.4, 0.9, 1.5, M.wood, 10.8, 0.45, -2.5);
+    const fishBody = new THREE.Mesh(new THREE.SphereGeometry(0.95, 12, 10), M.wood);
+    fishBody.scale.set(1.05, 0.8, 0.85);
+    fishBody.position.set(10.8, 1.32, -2.5);
+    templeHall.add(fishBody);
+    TB(1.15, 0.09, 0.28, M.woodDark, 10.8, 1.98, -2.5);
+    const strikerPivot = new THREE.Group();
+    strikerPivot.position.set(9.72, 1.62, -2.5);
+    templeHall.add(strikerPivot);
+    strikerPivot.add(box(0.85, 0.09, 0.09, M.woodDark, 0.42, 0, 0));
+    const strikerKnob = new THREE.Mesh(new THREE.SphereGeometry(0.13, 8, 7), M.woodDark);
+    strikerKnob.position.set(0.85, 0, 0);
+    strikerPivot.add(strikerKnob);
+    const ripple = new THREE.Mesh(new THREE.RingGeometry(0.85, 1.0, 24),
+      new THREE.MeshBasicMaterial({ color: 0xd9a441, transparent: true, opacity: 0, depthWrite: false }));
+    ripple.rotation.x = -Math.PI / 2;
+    ripple.position.set(10.8, 2.2, -2.5);
+    ripple.visible = false;
+    templeHall.add(ripple);
+    // 佛珠架（西侧）：托台、小架、垂着的一串念珠
+    TB(1.2, 0.55, 1.7, M.wood, -8.6, 0.27, -4.4);
+    TB(0.12, 1.0, 0.12, M.woodDark, -8.6, 1.05, -4.95);
+    TB(0.12, 1.0, 0.12, M.woodDark, -8.6, 1.05, -3.85);
+    TB(0.12, 0.12, 1.3, M.woodDark, -8.6, 1.58, -4.4);
+    const beadLoop = new THREE.Group();
+    beadLoop.position.set(-8.6, 1.08, -4.4);
+    templeHall.add(beadLoop);
+    for (let i = 0; i < 14; i++) {
+      const a = i / 14 * Math.PI * 2;
+      const bead = new THREE.Mesh(new THREE.SphereGeometry(0.085, 7, 6), M.woodDark);
+      bead.position.set(0, Math.cos(a) * 0.42, Math.sin(a) * 0.42);
+      beadLoop.add(bead);
+    }
+    templeHall.add(box(0.07, 0.34, 0.07, M.saddle, -8.6, 0.5, -4.4));
+    // 殿内暖光（点光源带距离衰减，照不到户外）
+    const shrineLight = new THREE.PointLight(0xffbf74, 1.15, 42, 1);
+    shrineLight.position.set(0, 3.4, -7.0);
+    templeHall.add(shrineLight);
+    const hallLight = new THREE.PointLight(0xffd9a0, 0.5, 60, 1);
+    hallLight.position.set(0, 5.2, 2);
+    templeHall.add(hallLight);
+    // 殿门外石台与三棵树
+    root.add(box(7, 0.12, 5, M.stone, TEMPLE_CENTER.x, 0.02, TEMPLE_CENTER.z + 14.2));
+    for (const [tx, tz] of [[-20, 26], [16, 30], [27, 13]]) {
+      const tree = new THREE.Group();
+      const tr = new THREE.Mesh(trunkGeo, M.trunk); tr.position.y = 0.95; tree.add(tr);
+      const cn = new THREE.Mesh(canGeo2, M.leaf); cn.position.y = 3.6; tree.add(cn);
+      tree.position.set(TEMPLE_CENTER.x + tx, 0, TEMPLE_CENTER.z + tz);
+      root.add(tree);
+    }
+    // 玩家手里的念珠（盘佛珠时出现，珠串在 update 里缓缓滚动）
+    const heldBeads = new THREE.Group();
+    heldBeads.position.set(0, 1.12, 0.52);
+    for (let i = 0; i < 12; i++) {
+      const a = i / 12 * Math.PI * 2;
+      const bead = new THREE.Mesh(new THREE.SphereGeometry(0.075, 7, 6), M.woodDark);
+      bead.position.set(Math.cos(a) * 0.3, Math.sin(a) * 0.3, 0);
+      heldBeads.add(bead);
+    }
+    heldBeads.visible = false;
+    player.add(heldBeads);
+    // —— 进出寺与动作锚点 ——
+    const templeSite = {
+      // 寺门锚点：寺体中心 (-58,-58) 沿门向（寺体旋转 0.35）16.5 单位，恰在碰撞圈外缘。
+      door: { x: -58 + Math.sin(0.35) * 16.5, z: -58 + Math.cos(0.35) * 16.5, r: 7 },
+      entry: { x: TEMPLE_CENTER.x, z: TEMPLE_CENTER.z + 7.4, yaw: Math.PI },
+      exit: { x: TEMPLE_CENTER.x, z: TEMPLE_CENTER.z + 10.3, r: 2.6 },
+      bow: { x: TEMPLE_CENTER.x, z: TEMPLE_CENTER.z - 4.4, r: 2.4, yaw: Math.PI },
+      pray: { x: TEMPLE_CENTER.x - 5.4, z: TEMPLE_CENTER.z - 4.4, r: 2.0, yaw: Math.PI },
+      sit: { x: TEMPLE_CENTER.x + 5.4, z: TEMPLE_CENTER.z - 4.4, r: 2.0, yaw: Math.PI },
+      fish: { x: TEMPLE_CENTER.x + 8.4, z: TEMPLE_CENTER.z - 2.5, r: 2.4, yaw: Math.PI / 2 },
+      beads: { x: TEMPLE_CENTER.x - 6.8, z: TEMPLE_CENTER.z - 4.4, r: 2.2, yaw: -Math.PI / 2 },
+    };
+    function enterTemple() {
+      if (insideTemple || mounted) return false;
+      templeReturn = { x: player.position.x, z: player.position.z };
+      insideTemple = true;
+      resting = false; restBlend = 0; pBody.rotation.x = 0;
+      prayerPose = 0; beadsPose = false; heldBeads.visible = false;
+      moveIn.x = 0; moveIn.z = 0;
+      player.position.set(templeSite.entry.x, 0, templeSite.entry.z);
+      player.rotation.y = templeSite.entry.yaw;
+      camPos.set(templeSite.entry.x + radius * Math.sin(polar) * Math.sin(yaw), 14, templeSite.entry.z + radius * Math.sin(polar) * Math.cos(yaw));
+      applyCamera(0);
+      refreshLights();
+      return true;
+    }
+    function exitTemple() {
+      if (!insideTemple) return false;
+      insideTemple = false;
+      prayerPose = 0; beadsPose = false; heldBeads.visible = false;
+      resting = false; restBlend = 0; pBody.rotation.x = 0;
+      moveIn.x = 0; moveIn.z = 0;
+      const target = templeReturn || templeSite.door;
+      const p = land.resolve(target.x, target.z, player.position);
+      player.position.set(p.x, 0, p.z);
+      camPos.set(p.x + radius * Math.sin(polar) * Math.sin(yaw), 14, p.z + radius * Math.sin(polar) * Math.cos(yaw));
+      applyCamera(0);
+      refreshLights();
+      return true;
+    }
+
     const moveIn = { x: 0, z: 0 };
     let walkPhase = 0, moving = false;
     const camPos = new THREE.Vector3(player.position.x, 16, player.position.z + 28);
     function applyCamera(dt) {
       const sp = Math.sin(polar);
-      const cameraRadius = radius * (1 - 0.22 * restBlend);
+      const cameraRadius = (insideTemple ? Math.min(radius, 10.5) : radius) * (1 - 0.22 * restBlend);
       const tx = player.position.x + cameraRadius * sp * Math.sin(yaw);
       const ty = player.position.y + cameraRadius * Math.cos(polar) + 1.6;
       const tz = player.position.z + cameraRadius * sp * Math.cos(yaw);
@@ -580,6 +822,12 @@
       camPos.x += (tx - camPos.x) * k;
       camPos.y += (ty - camPos.y) * k;
       camPos.z += (tz - camPos.z) * k;
+      if (insideTemple) {
+        // 殿内镜头不出墙、不穿顶：位置钳在大殿内腔里。
+        camPos.x = Math.max(TEMPLE_CENTER.x - 15.1, Math.min(TEMPLE_CENTER.x + 15.1, camPos.x));
+        camPos.z = Math.max(TEMPLE_CENTER.z - 11.1, Math.min(TEMPLE_CENTER.z + 11.1, camPos.z));
+        camPos.y = Math.max(1.1, Math.min(6.7, camPos.y));
+      }
       camera.position.copy(camPos);
       camera.lookAt(player.position.x, player.position.y + 1.7, player.position.z);
     }
@@ -594,12 +842,13 @@
       releaseLantern: festivalEffects.releaseLantern,
       setCrystalLit(value) { crystal.material.color.set(value ? 0x9a6ee8 : 0x8a8f96); },
       setSky(sky) {
+        lastSky = sky;
         scene.background.set(sky.bg);
         if (scene.fog) scene.fog.color.set(sky.fog);
-        hemi.intensity = sky.hemi;
-        sun.intensity = sky.sun;
+        baseHemi = sky.hemi;
+        baseSun = sky.sun;
         sun.color.set(sky.sunColor);
-        skyEffects.setSky(sky);
+        refreshLights();
       },
       resize(w, h) { camera.aspect = w / h; camera.updateProjectionMatrix(); },
       handleDrag(dx, dy) {
@@ -617,6 +866,34 @@
         if (Math.hypot(moveIn.x, moveIn.z) > 0.12) resting = false;
       },
       getPlayerPos: () => mounted ? { x: horse.position.x, z: horse.position.z } : { x: player.position.x, z: player.position.z },
+      // —— 总佛寺内景接口（控制器驱动；姿态口径见内景块注释）——
+      getTempleSite: () => ({
+        door: { ...templeSite.door }, entry: { ...templeSite.entry }, exit: { ...templeSite.exit },
+        bow: { ...templeSite.bow }, pray: { ...templeSite.pray }, sit: { ...templeSite.sit },
+        fish: { ...templeSite.fish }, beads: { ...templeSite.beads },
+      }),
+      enterTemple,
+      exitTemple,
+      isInTemple: () => insideTemple,
+      setPlayerYaw(value) { if (!mounted && Number.isFinite(value)) player.rotation.y = value; },
+      setPrayerPose(value) {
+        // 与 setResting 相互独立（祈祷要跪坐+合掌并存），姿态视觉在 update 里合成；
+        // 这点与 dam-world 的互斥口径不同，差异在此注明。
+        prayerPose = [0, 1, 2].includes(value) ? value : 0;
+        if (prayerPose === 2) bowClock = 0;
+      },
+      getPrayerPose: () => prayerPose,
+      setBeadsPose(value) {
+        beadsPose = !!value;
+        heldBeads.visible = beadsPose;
+        if (!beadsPose) heldBeads.rotation.z = 0;
+      },
+      getBeadsPose: () => beadsPose,
+      knockWoodenFish() {
+        if (!insideTemple) return false;
+        knockT = 0.28; rippleT = 0.55; ripple.visible = true;
+        return true;
+      },
       showHorse(x, z) {
         if (!Number.isFinite(x) || !Number.isFinite(z)) return;
         horseShown = true; horse.visible = true;
@@ -624,6 +901,7 @@
       },
       hideHorse() {
         resting = false; restBlend = 0; pBody.rotation.x = 0;
+        prayerPose = 0; beadsPose = false; heldBeads.visible = false;
         player.position.y = 0;
         if (mounted) {
           const p = land.resolve(horse.position.x + 2.2, horse.position.z + 0.6, horse.position);
@@ -740,8 +1018,17 @@
       teleportPlayerTo(x, z) {
         if (!Number.isFinite(x) || !Number.isFinite(z)) return;
         resting = false; restBlend = 0; pBody.rotation.x = 0;
+        prayerPose = 0; beadsPose = false; heldBeads.visible = false;
         moveIn.x = 0; moveIn.z = 0;
-        const p = land.resolve(x, z, player.position);
+        let p;
+        if (inTempleRect(x, z)) {
+          // 殿内落位（拜/祷/坐/敲/盘的站位转移）：走室内解算，保持殿内模式。
+          p = interiorResolve(x, z, player.position);
+        } else {
+          // 任何一次传到殿外都算出寺：模式与灯光随之复位，不会把人卡在室内状态里。
+          if (insideTemple) { insideTemple = false; refreshLights(); }
+          p = land.resolve(x, z, player.position);
+        }
         if (mounted) horse.position.set(p.x, 0, p.z);
         player.position.set(p.x, mounted ? 1.52 : 0, p.z);
         camPos.set(p.x + radius * Math.sin(polar) * Math.sin(yaw), 14, p.z + radius * Math.sin(polar) * Math.cos(yaw));
@@ -772,7 +1059,8 @@
           const mz = fz * moveIn.z + rz * moveIn.x;
           const mm = Math.hypot(mx, mz) || 1;
           const sp = (mounted ? DamWorld.BOND.BASE_SPEED + bondLevel * DamWorld.BOND.SPEED_PER_BOND : 13) * Math.min(1, mag);
-          const next = land.resolve(mover.position.x + mx / mm * sp * dt, mover.position.z + mz / mm * sp * dt, mover.position);
+          const nx = mover.position.x + mx / mm * sp * dt, nz = mover.position.z + mz / mm * sp * dt;
+          const next = insideTemple && !mounted ? interiorResolve(nx, nz, mover.position) : land.resolve(nx, nz, mover.position);
           mover.position.x = next.x; mover.position.z = next.z;
           mover.rotation.y = Math.atan2(mx, mz);
           walkPhase += dt * (mounted ? 13 : 9.5);
@@ -785,9 +1073,24 @@
           hLegs[1].rotation.x = -trot; hLegs[2].rotation.x = -trot;
           legL.rotation.x = -0.55; legR.rotation.x = -0.55;
           armL.rotation.x = -0.45; armR.rotation.x = -0.45;
+        } else if (prayerPose === 1) {
+          // 合掌：双臂向前上方收拢，静立（祈祷时与坐姿叠加，腿由下方坐姿块接管）
+          armL.rotation.x = -1.22; armR.rotation.x = -1.22;
+          armL.rotation.z = 0.16; armR.rotation.z = -0.16;
+          legL.rotation.x = 0; legR.rotation.x = 0;
+        } else if (prayerPose === 2) {
+          // 跪拜：双腿折跪；上身与双臂的叩首起伏在下方 kneel 块里驱动
+          armL.rotation.z = 0.1; armR.rotation.z = -0.1;
+          legL.rotation.x = -1.45; legR.rotation.x = -1.45;
+        } else if (beadsPose) {
+          // 盘佛珠：双手在身前虚持念珠
+          armL.rotation.x = -0.88; armR.rotation.x = -0.88;
+          armL.rotation.z = 0.12; armR.rotation.z = -0.12;
+          legL.rotation.x = 0; legR.rotation.x = 0;
         } else {
           const sw = moving ? Math.sin(walkPhase) * 0.55 : 0;
           armL.rotation.x = sw; armR.rotation.x = -sw;
+          armL.rotation.z = 0; armR.rotation.z = 0;
           legL.rotation.x = -sw * 0.8; legR.rotation.x = sw * 0.8;
           if (horseShown) {
             hTail.rotation.z = Math.sin(t * 1.3) * 0.18;
@@ -815,11 +1118,21 @@
         restBlend += ((resting ? 1 : 0) - restBlend) * Math.min(1, dt * 5);
         if (!resting && restBlend < 0.02) restBlend = 0;
         if (!mounted) {
-          player.position.y = restBlend ? -0.42 * restBlend : 0;
-          pBody.rotation.x = 0.1 * restBlend;
-          if (restBlend > 0.01) { legL.rotation.x = -1.35 * restBlend; legR.rotation.x = -1.35 * restBlend; }
+          // 跪拜起伏：先跪下（kneelBlend 缓动），再随 bowClock 叩首一轮（俯身→起身），
+          // 双臂随俯身前伸触地意象；与静坐坐姿（restBlend 盘腿、身直）明确区分。
+          kneelBlend += ((prayerPose === 2 ? 1 : 0) - kneelBlend) * Math.min(1, dt * 4);
+          if (prayerPose !== 2 && kneelBlend < 0.02) kneelBlend = 0;
+          bowClock = prayerPose === 2 ? bowClock + dt : 0;
+          const dip = prayerPose === 2 ? Math.sin(Math.min(bowClock / 2.6, 1) * Math.PI) : 0;
+          player.position.y = (restBlend ? -0.42 * restBlend : 0) - 0.52 * kneelBlend;
+          pBody.rotation.x = kneelBlend > 0.03 ? kneelBlend * (0.12 + 0.55 * dip) : 0.1 * restBlend;
+          if (prayerPose === 2) { const reach = -0.4 - 1.05 * dip * kneelBlend; armL.rotation.x = reach; armR.rotation.x = reach; }
+          if (restBlend > 0.01 && prayerPose !== 2) { legL.rotation.x = -1.35 * restBlend; legR.rotation.x = -1.35 * restBlend; }
         }
-        pBody.scale.y = moving ? 1 : 1 + Math.sin(t * 1.6) * 0.012;
+        // 呼吸起伏：站立时几乎看不见；坐下（静坐/祈祷跪坐）时放大——胸口随呼吸缓起缓落。
+        const seatedBreath = !mounted && restBlend > 0.4 && !moving;
+        pBody.scale.y = moving ? 1 : 1 + Math.sin(t * (seatedBreath ? 1.3 : 1.6)) * (seatedBreath ? 0.05 : 0.012);
+        pHead.position.y = 2.08 + (seatedBreath ? Math.sin(t * 1.3) * 0.025 : 0);
         skyEffects.update(dt, t);
         festivalEffects.update(dt);
         applyCamera(dt);
@@ -827,6 +1140,22 @@
         lakeWater.material.color.setHSL(0.54, 0.34, 0.65 + Math.sin(t * 0.45) * 0.025);
         crystal.position.y = 3.4 + Math.sin(t * 1.1) * 0.35;
         crystal.rotation.y = t * 0.7;
+        // 木鱼敲击：敲棒落下、鱼身轻颤、一圈淡声波纹散开（纯视觉，无音频通道）。
+        if (knockT > 0) {
+          knockT = Math.max(0, knockT - dt);
+          const dipK = Math.sin((1 - knockT / 0.28) * Math.PI);
+          strikerPivot.rotation.z = -0.42 * dipK;
+          fishBody.scale.set(1.05 * (1 + 0.05 * dipK), 0.8 * (1 - 0.03 * dipK), 0.85 * (1 + 0.05 * dipK));
+        } else strikerPivot.rotation.z = 0;
+        if (rippleT > 0) {
+          rippleT = Math.max(0, rippleT - dt);
+          const rp = 1 - rippleT / 0.55;
+          ripple.scale.setScalar(0.5 + rp * 1.9);
+          ripple.material.opacity = 0.75 * (1 - rp);
+          ripple.visible = rippleT > 0;
+        }
+        // 盘佛珠：手里的珠串缓缓滚动，一颗一颗捻过去。
+        if (beadsPose) heldBeads.rotation.z -= dt * 0.55;
         for (const cl of clouds) {
           cl.position.x += dt * 1.1;
           if (cl.position.x > 250) cl.position.x = -250;
