@@ -103,9 +103,209 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
       ui.setAction("绕塔中 · 顺光点走满一圈（先停下）", () => { endPrayer(world, "先到这里 · 塔门一直开着"); return true; });
       return true;
     }
-    // done
+    // done：与其他阶段同一口径——走远自动出祈福态（此前只有按钮能退，走开会卡住动作区）
+    if (Math.hypot(position.x - prayer.ring.x, position.z - prayer.ring.z) > prayer.ring.r + 24) { endPrayer(world, "出塔了 · 愿这一路都平安"); return true; }
     ui.setAction("出塔 · 慢慢回村", () => { endPrayer(world, "出塔了 · 愿这一路都平安"); return true; });
     return true;
+  }
+  // —— 瑞丽总佛寺（纠偏样板；纯客户端仪式：不发币、不加产量、不写存档标记——
+  //    存档字段与红结记录待 Codex 冻结后接入；静坐不设时限，礼拜可重复/走开即停）——
+  const TEMPLE_WISHES = ["平安顺遂", "家人安康", "心想事成", "学业进步", "事业顺利"];
+  let temple = null;
+  function clearTemplePoses(world) {
+    world.setPrayerPose?.(0);
+    world.setKneeling?.(false);
+    world.setBow?.(false);
+    world.setBeadsHeld?.(false);
+    world.setResting?.(false);
+  }
+  function endTemple(world) {
+    if (!temple) return;
+    clearTemplePoses(world);
+    temple = null;
+  }
+  function leaveTemple(world, toastText) {
+    endTemple(world);
+    world.exitInterior?.();
+    if (toastText) ui.toast(toastText);
+  }
+  function startTempleVisit(world) {
+    world.setMoveInput(0, 0);
+    temple = { stage: "inside", pose: null, poseEndsAt: 0, world, fishCount: 0, beadCount: 0 };
+    world.enterInterior?.();
+    ui.toast("进了大殿 · 香火静静的，先四处看看");
+  }
+  // 在寺内返回 true（本帧动作区由寺院占用）。进出规则：记原位/出寺还原由引擎 interior 承担，殿内不落档。
+  function templeAction(world) {
+    if (!temple) return false;
+    if (temple.world !== world) { endTemple(world); return false; }
+    if (!world.isInteriorActive?.()) { temple = null; return false; }
+    const interior = world.getInterior?.();
+    const site = world.getTempleSite?.();
+    if (!interior?.anchors || !site) { temple = null; return false; }
+    const A = interior.anchors;
+    const position = world.getPlayerPos();
+    const time = now();
+    const distTo = anchor => Math.hypot(position.x - anchor.x, position.z - anchor.z);
+    const faceTo = (x, z) => world.setPlayerYaw?.(Math.atan2(x - position.x, z - position.z));
+    const faceBuddha = () => faceTo(600, -6.8);
+    // —— 姿态进行中 ——
+    if (temple.pose === "bow") {
+      ui.setAction("礼拜中 · 伏身叩首", null);
+      if (time >= temple.poseEndsAt) { world.setBow?.(false); temple.pose = "worship"; }
+      return true;
+    }
+    if (temple.pose === "worship") {
+      if (distTo(A.worship) > 2.6) { clearTemplePoses(world); temple.pose = null; }
+      else {
+        ui.setAction("礼拜 · 再拜一次（走开即起身）", () => {
+          if (temple?.pose !== "worship") return false;
+          temple.pose = "bow"; temple.poseEndsAt = now() + 1100;
+          world.setBow?.(true);
+          return true;
+        });
+        return true;
+      }
+    }
+    if (temple.pose === "pray") {
+      if (distTo(A.pray) > 2.6 || time >= temple.poseEndsAt) { clearTemplePoses(world); temple.pose = null; }
+      else { ui.setAction("祈祷中 · 愿心安", null); return true; }
+    }
+    if (temple.pose === "beads") {
+      if (distTo(A.beads) > 2.6) { clearTemplePoses(world); temple.pose = null; }
+      else {
+        // 逐颗推进：点一下过一颗（珠串位移 + 每颗一次轻响触发点）；计数仅个人可见、
+        // 只在本次停留内，不写存档、不关联任何收益/门槛。盘满 108 颗自动收势，走开即停。
+        ui.setAction("盘佛珠 · 第 " + temple.beadCount + " 颗 / 108", () => {
+          if (temple?.pose !== "beads") return false;
+          temple.beadCount += 1;
+          world.rollBead?.();
+          world.getDecorationApi?.()?.templeFx?.rollBead?.();
+          if (temple.beadCount >= 108) {
+            clearTemplePoses(world);
+            temple.pose = null;
+            temple.beadCount = 0;
+            ui.toast("一串佛珠盘完了 · 心也静下来了");
+          }
+          return true;
+        });
+        return true;
+      }
+    }
+    if (temple.pose === "sit") {
+      if (!world.isResting?.()) temple.pose = null;
+      else return false; // 静坐中：让 update 的「起身」按钮接管（无时限）
+    }
+    // —— 五动作站位 ——
+    if (distTo(A.worship) <= 2.0) {
+      ui.setAction("拜神 · 跪拜礼佛", () => {
+        if (!temple) return false;
+        temple.pose = "bow"; temple.poseEndsAt = now() + 1100;
+        world.setKneeling?.(true);
+        world.setBow?.(true);
+        faceBuddha();
+        ui.toast("跪拜礼佛 · 一拜一起，慢慢来");
+        return true;
+      });
+      return true;
+    }
+    if (distTo(A.pray) <= 2.0) {
+      ui.setAction("祈祷 · 许个心愿", () => {
+        if (!temple) return false;
+        const beginPray = wish => {
+          if (!temple) return;
+          temple.pose = "pray"; temple.poseEndsAt = now() + 2600;
+          world.setKneeling?.(true);
+          world.setPrayerPose?.(1);
+          faceBuddha();
+          ui.toast("愿「" + wish + "」· 心诚则灵");
+        };
+        if (ui.openChoices) ui.openChoices({
+          title: "祈祷 · 许个心愿", hint: "五个心愿，点一个就好",
+          items: TEMPLE_WISHES.map((wish, index) => ({ id: String(index), label: wish, right: "" })),
+        }, id => beginPray(TEMPLE_WISHES[Number(id)] || TEMPLE_WISHES[0]));
+        else beginPray(TEMPLE_WISHES[0]);
+        return true;
+      });
+      return true;
+    }
+    if (distTo(A.sit) <= 2.0) {
+      ui.setAction("静坐 · 坐一会儿（没有时限）", () => {
+        if (!temple) return false;
+        temple.pose = "sit";
+        world.setResting?.(true);
+        faceBuddha();
+        ui.toast("静坐 · 没有时限，坐到想起身为止");
+        return true;
+      });
+      return true;
+    }
+    if (distTo(A.beads) <= 2.0) {
+      ui.setAction("盘佛珠 · 慢慢盘", () => {
+        if (!temple) return false;
+        temple.pose = "beads";
+        temple.beadCount = 0;
+        world.setKneeling?.(true);
+        world.setBeadsHeld?.(true);
+        faceBuddha();
+        ui.toast("盘佛珠 · 点一下过一颗，盘满 108 颗是一串；走开即停");
+        return true;
+      });
+      return true;
+    }
+    if (distTo(A.fish) <= 2.0) {
+      ui.setAction("敲木鱼 · 笃", () => {
+        if (!temple) return false;
+        // 木鱼敲击触发点：动作/槌摆/灯晕在此触发；微信音频由 Codex 在此调用
+        // templeFx.strikeFish() 旁接 InnerAudioContext 播放 wechat/audio/wooden-fish.wav。
+        world.getDecorationApi?.()?.templeFx?.strikeFish?.();
+        temple.fishCount += 1;
+        faceTo(605.3, -3.8);
+        if (temple.fishCount === 1) ui.toast("笃—— · 木鱼声不大，心就静一分");
+        return true;
+      });
+      return true;
+    }
+    const rackIn = (site.knots || []).find(knot => knot.interior);
+    if (rackIn && distTo(rackIn) <= 2.8) {
+      ui.setAction("在红结架前站一站", () => { ui.toast("红结架已立好 · 挂结记录待 Codex 接口接入，本轮先看架子与站位"); return true; });
+      return true;
+    }
+    // 殿内任何位置都能出寺（随时可离开）
+    ui.setAction("出寺 · 回到庭院", () => { leaveTemple(world, "出寺了 · 院里风轻"); return true; });
+    return true;
+  }
+  // —— 样例羊拾掇面板（开发样例预览：只改场景里的样例羊，不接真实动物资产/存档）——
+  function openSheepPanel(api) {
+    const sheep = api?.sampleSheep;
+    if (!sheep?.getState || !ui.openChoices) return;
+    const colorName = { white: "白色", pink: "淡粉", gray: "浅灰", brown: "深棕" };
+    const accessoryName = { hat: "草帽", bell: "小铃铛", none: "无" };
+    const current = sheep.getState();
+    ui.openChoices({
+      title: current.name + " · 样板牧场的羊",
+      hint: "开发样例 · 待字段冻结后接持久化",
+      items: [
+        { id: "rename", label: "给它改个名字", right: current.name },
+        { id: "color", label: "换一身毛色", right: colorName[current.color] || "" },
+        { id: "accessory", label: "换个配饰", right: accessoryName[current.accessory] || "" },
+      ],
+    }, id => {
+      if (id === "rename") {
+        const names = ["小满", "云朵", "糯米", "团团", "阿绒", "慢慢"];
+        ui.openChoices({ title: "给它改个名字", hint: "点一个就定下来（开发样例）",
+          items: names.map(name => ({ id: name, label: name, right: name === sheep.getState().name ? "现在的名字" : "" })) },
+          name => { sheep.setName(name); ui.toast("它现在叫「" + name + "」了"); });
+      } else if (id === "color") {
+        ui.openChoices({ title: "换一身毛色", hint: "毛色只是好看（开发样例）",
+          items: Object.entries(colorName).map(([cid, label]) => ({ id: cid, label, right: cid === sheep.getState().color ? "身上这件" : "" })) },
+          cid => { sheep.setColor(cid); ui.toast("换好了 · 软乎乎的"); });
+      } else if (id === "accessory") {
+        ui.openChoices({ title: "换个配饰", hint: "简单三样（开发样例）",
+          items: Object.entries(accessoryName).map(([aid, label]) => ({ id: aid, label, right: aid === sheep.getState().accessory ? "戴着呢" : "" })) },
+          aid => { sheep.setAccessory(aid); ui.toast("拾掇好了"); });
+      }
+    });
   }
   const nowSeconds = () => Math.floor(now() / 1000);
   const worldOf = dam => getDamWorld ? getDamWorld(dam || "mangshi") : getMangshi();
@@ -389,7 +589,10 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
       const cost = Daily.HOME.CARROT_SEED_PER_BED * Daily.HOME.BEDS;
       ui.setAction("种萝卜 · " + cost + " 安币", () => commit(value => Daily.plantCarrots(value, nowSeconds())));
     };
-    if (!h.beds.crop && h.harvests === 0) { plant(); return; }
+    // 纠偏修复（2026-11-15 审计）：田空着时播种立即可达——排在领养/升楼之前，
+    // 不再被「领养链」挡住首次收获后的补种；种下后作物生长期间，领养/升楼自然顺延可达。
+    // （价格与任何文案的经济含义未动，只拆阻塞。）
+    if (!h.beds.crop) { plant(); return; }
     for (const kind of KINDS) {
       if (!h.animals[kind]) {
         ui.setAction("领养一只" + ANIMAL_NAMES[kind] + " · " + Daily.HOME.ANIMAL_PRICE[kind] + " 安币", () => commit(value => Daily.buyHomeAnimal(value, kind, nowSeconds())));
@@ -400,7 +603,6 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
       ui.setAction("升级傣家竹楼 · " + Daily.HOME.BAMBOO_PRICE + " 安币", () => commit(Daily.upgradeHomeBamboo));
       return;
     }
-    if (!h.beds.crop) { plant(); return; }
     ui.setAction("在屋前歇一歇 · 萝卜还差 " + Math.max(0, Math.ceil(h.beds.readyAt - seconds)) + " 秒", () => {
       const target = world.nearestInteractable();
       if (world.isMounted?.() || target?.type !== "plot" || target.site !== h.site || target.idx !== h.plot) return false;
@@ -422,6 +624,7 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
       : { id: "road-start", label: "修路拓居", right: "按长度计费", enabled: true });
     ui.setWorldRows?.(worldRows);
     if (prayer && activeDam !== "ruili") endPrayer(worldOf("ruili"));
+    if (temple && activeDam !== "ruili") endTemple(worldOf("ruili"));
     if (activeDam) world.setCrystalLit?.(!!state.lit?.[activeDam]);
     accrue();
     const basketCount = Daily.basketCount(state);
@@ -434,6 +637,7 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
     const dam = damOf(active);
     if (!dam || !world) { ui.setAction("", null); return; }
     if (prayerAction(world)) return;
+    if (templeAction(world)) return;
     if (world.isDancing?.()) {
       ui.setAction("纵歌中 · 迈步就停", null);
       return;
@@ -464,6 +668,45 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
     }
     if (marketAction(world, dam)) return;
     if (setFestivalAction(dam, world)) return;
+    if (dam === "ruili" && !temple) {
+      const site = world.getTempleSite?.();
+      if (site) {
+        const position = world.getPlayerPos();
+        if (Math.hypot(position.x - site.entryAnchor.x, position.z - site.entryAnchor.z) <= site.entryAnchor.r) {
+          ui.setAction("进大殿 · 礼佛", () => {
+            const current = world.getTempleSite?.();
+            if (!current || !world.enterInterior) return false;
+            if (world.isMounted?.()) {
+              // 骑马先下马：马留在寺门外等
+              if (!beforeSceneChange()) return false;
+              world.setMounted?.(false);
+              ui.toast("马留在寺门外 · 它会在这里等你");
+            }
+            const pos = world.getPlayerPos();
+            if (Math.hypot(pos.x - current.entryAnchor.x, pos.z - current.entryAnchor.z) > current.entryAnchor.r + 2) return false;
+            startTempleVisit(world);
+            return true;
+          });
+          return;
+        }
+        for (const rack of site.knots || []) {
+          if (rack.interior) continue;
+          if (Math.hypot(position.x - rack.x, position.z - rack.z) <= 2.8) {
+            ui.setAction("在红结架前站一站", () => { ui.toast("红结架已立好 · 挂结记录待 Codex 接口接入，本轮先看架子与站位"); return true; });
+            return;
+          }
+        }
+      }
+      const api = world.getDecorationApi?.();
+      if (api?.sampleSheep?.getState) {
+        const position = world.getPlayerPos();
+        const sheepState = api.sampleSheep.getState();
+        if (Math.hypot(position.x - sheepState.x, position.z - sheepState.z) <= 4.2) {
+          ui.setAction("陪陪" + sheepState.name + " · 给它拾掇拾掇", () => { openSheepPanel(api); return true; });
+          return;
+        }
+      }
+    }
     if (dam === "ruili") {
       const site = world.getPrayerSite?.();
       if (site) {

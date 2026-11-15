@@ -1,15 +1,18 @@
 "use strict";
 
+// 纠偏样板夜光配方（2026-11-16 按 Sansa 实测修正）：深蓝夜底 + 环境光只适度抬底保证辨路，
+// 暖意交给场景里的灯点（石灯/集市/寺院/家门口，见 ruili-scene 的 setNightFactor），不把整夜拉成灰白。
+// 正午/午后关键帧（9.0–16.5）一字未动。雨夜仍按下方雨天系数再压一档。
 const SKY_KEYS = Object.freeze([
-  [0.0, 0x1c2a3e, 0x22334a, 0.34, 0.14, 0x93a7cc, 1],
-  [4.8, 0x1c2a3e, 0x22334a, 0.34, 0.14, 0x93a7cc, 1],
+  [0.0, 0x22334c, 0x2a3f5c, 0.44, 0.2, 0x93a7cc, 1],
+  [4.8, 0x22334c, 0x2a3f5c, 0.44, 0.2, 0x93a7cc, 1],
   [6.8, 0xd9c3a5, 0xe6d6ba, 0.58, 0.5, 0xffb27a, 0.3],
   [9.0, 0xc2dbee, 0xd6e5ee, 0.95, 0.9, 0xffe3b3, 0],
   [16.5, 0xc2dbee, 0xd6e5ee, 0.95, 0.9, 0xffe3b3, 0],
   [18.2, 0xe9b47e, 0xeccfa3, 0.62, 0.62, 0xff9a4d, 0.22],
-  [19.6, 0x596b9e, 0x6b7cab, 0.44, 0.2, 0xb08cc9, 0.68],
-  [21.2, 0x1c2a3e, 0x22334a, 0.34, 0.14, 0x93a7cc, 1],
-  [24.0, 0x1c2a3e, 0x22334a, 0.34, 0.14, 0x93a7cc, 1],
+  [19.6, 0x66799f, 0x7688ad, 0.47, 0.24, 0xb08cc9, 0.68],
+  [21.2, 0x22334c, 0x2a3f5c, 0.44, 0.2, 0x93a7cc, 1],
+  [24.0, 0x22334c, 0x2a3f5c, 0.44, 0.2, 0x93a7cc, 1],
 ].map(Object.freeze));
 const WEATHER = Object.freeze({ seedMultiplier: 2654435761, rainBelow: 18, cloudyBelow: 48 });
 const SHANGHAI_OFFSET_MS = 8 * 60 * 60 * 1000;

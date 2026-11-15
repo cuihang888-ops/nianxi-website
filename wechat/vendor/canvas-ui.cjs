@@ -30,6 +30,7 @@
     let mapFeatures = null, mapPlayer = null, mapOpen = false, mapGesture = null;
     const mapLayouts = new Map();
     let teleportItems = null, teleportCallback = null, extraRow = null;
+    let choiceData = null, choiceCallback = null; // 通用选项面板（祈祷心愿/样例羊衣橱共用，纠偏样板新增）
     let worldRows = [];
     let albumRowText = "", albumLines = null, albumPage = 0, albumPages = [];
     let albumDetail = null, detailPage = 0, detailPages = 1;
@@ -156,7 +157,7 @@
       dirty = true;
     }
     function minimapFrame() {
-      if (!mapFeatures || panelOpen || teleportItems || albumLines) return null;
+      if (!mapFeatures || panelOpen || teleportItems || albumLines || choiceData) return null;
       if (mapOpen) {
         const w = Math.min(580, safe.width - 24), h = Math.min(520, safe.height - 24);
         return { x: safe.left + (safe.width - w) / 2, y: safe.top + (safe.height - h) / 2, w, h };
@@ -280,7 +281,7 @@
         if (mapPoint(exit.from)) points.push(exit.from);
         if (mapPoint(exit.to)) points.push(exit.to);
       }
-      for (const point of [mapFeatures.market, mapFeatures.hall, mapFeatures.pagoda?.center]) if (mapPoint(point)) points.push(point);
+      for (const point of [mapFeatures.market, mapFeatures.hall, mapFeatures.pagoda?.center, mapFeatures.temple]) if (mapPoint(point)) points.push(point);
       const xs = points.map(point => point.x), zs = points.map(point => point.z);
       const minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
       const scale = Math.min(Math.max(1, content.w - 24) / Math.max(1, maxX - minX), Math.max(1, content.h - 24) / Math.max(1, maxZ - minZ));
@@ -291,7 +292,7 @@
         return { id: plot.id, label: String.fromCharCode(65 + index), reserved: !!plot.reserved, x: center.x - plot.w * scale / 2, y: center.y - plot.d * scale / 2, w: plot.w * scale, h: plot.d * scale };
       });
       const landmarks = [];
-      for (const [kind, point, name] of [["hall", mapFeatures.hall, "大厅"], ["market", mapFeatures.market, "集市"], ["pagoda", mapFeatures.pagoda?.center, mapOpen ? "姐勒金塔" : "金塔"]]) {
+      for (const [kind, point, name] of [["hall", mapFeatures.hall, "大厅"], ["market", mapFeatures.market, "集市"], ["pagoda", mapFeatures.pagoda?.center, mapOpen ? "姐勒金塔" : "金塔"], ["temple", mapFeatures.temple, "总佛寺"]]) {
         if (mapPoint(point)) landmarks.push({ kind, name, ...project(point) });
       }
       const exits = (mapFeatures.exits || []).filter(exit => mapPoint(exit.from) && mapPoint(exit.to)).map(exit => ({ id: exit.id, name: exit.name, from: project(exit.from), to: project(exit.to) }));
@@ -387,6 +388,10 @@
         } else if (landmark.kind === "hall") {
           ctx.fillStyle = "#71688a"; ctx.fillRect(landmark.x - 3, landmark.y - 3, 6, 6);
           label(landmark.name, landmark.x - 5, landmark.y - 9, "right");
+        } else if (landmark.kind === "temple") {
+          path([{ x: landmark.x, y: landmark.y - 5 }, { x: landmark.x - 4, y: landmark.y + 3 }, { x: landmark.x + 4, y: landmark.y + 3 }], true);
+          ctx.fillStyle = "#a8563c"; ctx.fill();
+          label(landmark.name, landmark.x + 7, landmark.y - 6);
         } else {
           ctx.beginPath(); ctx.arc(landmark.x, landmark.y, 3, 0, Math.PI * 2);
           ctx.fillStyle = "#b66b58"; ctx.fill();
@@ -611,6 +616,28 @@
       text("再想想", x + width / 2, y + height - 24, "13px sans-serif", FAINT, "center");
       addBtn("tp-cancel", x + width / 2 - 60, y + height - 40, 120, 32, true);
     }
+    // 通用选项面板：标题/小字/若干行 + 底部取消；行 id 以 "ch:" 派发给 openChoices 的回调。
+    function drawChoices() {
+      btns = [];
+      ctx.fillStyle = "rgba(28,38,32,0.45)";
+      ctx.fillRect(0, 0, W, H);
+      const items = choiceData.items;
+      const width = Math.min(360, safe.width - 24);
+      const height = Math.min(130 + items.length * 52, safe.height - 24);
+      const rowHeight = Math.min(46, (height - 130 - Math.max(0, items.length - 1) * 6) / Math.max(1, items.length));
+      const x = safe.left + (safe.width - width) / 2, y = safe.top + (safe.height - height) / 2;
+      rr(x, y, width, height, 16);
+      ctx.fillStyle = CREAM; ctx.fill();
+      ctx.strokeStyle = BORDER; ctx.lineWidth = 1.5; ctx.stroke();
+      addBtn("choices-panel", x, y, width, height, true);
+      text(fitText(choiceData.title, width - 36, "bold 17px sans-serif"), x + 18, y + 28, "bold 17px sans-serif", "#7a5c1e");
+      text(fitText(choiceData.hint, width - 36, "12.5px sans-serif"), x + 18, y + 54, "12.5px sans-serif", FAINT);
+      items.forEach((item, index) => {
+        drawRow(x + 16, y + 76 + index * (rowHeight + 6), width - 32, rowHeight, "ch:" + item.id, item.label, item.right || "", true, true);
+      });
+      text("再想想", x + width / 2, y + height - 24, "13px sans-serif", FAINT, "center");
+      addBtn("ch-cancel", x + width / 2 - 60, y + height - 40, 120, 32, true);
+    }
     function drawToast() {
       if (!toastMsg || now() >= toastUntil) return;
       const font = "13.5px sans-serif";
@@ -680,7 +707,7 @@
           text(label, cx, top + 15, font, "#f2ecd8", "center");
         }
       }
-      if (!panelOpen && !teleportItems && !albumLines && !mapOpen) {
+      if (!panelOpen && !teleportItems && !albumLines && !mapOpen && !choiceData) {
         const layout = controls(), hall = layout.hall;
         rr(hall.x, hall.y, hall.w, hall.h, 23);
         ctx.fillStyle = CREAM; ctx.fill();
@@ -724,14 +751,16 @@
       if (panelOpen) drawPanel(day);
       if (albumLines) drawAlbum();
       if (teleportItems) drawTeleport();
+      if (choiceData) drawChoices();
       drawToast();
       dirty = false;
     }
     function joystickEnd() { joy.active = false; joy.dx = 0; joy.dy = 0; dirty = true; }
     function closeTeleport() { teleportItems = null; teleportCallback = null; dirty = true; }
+    function closeChoices() { choiceData = null; choiceCallback = null; dirty = true; }
     function closeAlbum() { albumLines = null; albumPages = []; albumDetail = null; detailPage = 0; dirty = true; }
-    function openPanel() { closeTeleport(); closeAlbum(); cancelMinimapInput(); mapOpen = false; hallPage = 0; panelOpen = true; joystickEnd(); dirty = true; }
-    function closePanel() { panelOpen = false; closeTeleport(); closeAlbum(); cancelMinimapInput(); mapOpen = false; dirty = true; }
+    function openPanel() { closeTeleport(); closeChoices(); closeAlbum(); cancelMinimapInput(); mapOpen = false; hallPage = 0; panelOpen = true; joystickEnd(); dirty = true; }
+    function closePanel() { panelOpen = false; closeTeleport(); closeChoices(); closeAlbum(); cancelMinimapInput(); mapOpen = false; dirty = true; }
     function dispatch(id) {
       if (id === "minimap") { mapOpen = true; joystickEnd(); dirty = true; return; }
       if (id === "minimap-close") { mapOpen = false; dirty = true; return; }
@@ -751,6 +780,14 @@
         const callback = teleportCallback, destination = id.slice(3);
         const result = callback ? callback(destination) : undefined;
         if (result?.ok !== false) closeTeleport();
+        return;
+      }
+      if (id === "ch-cancel") { closeChoices(); return; }
+      if (id.startsWith("ch:")) {
+        // 先关再回调：回调里可以再开一层选项面板（改名/毛色/配饰的二级选择）
+        const callback = choiceCallback, choiceId = id.slice(3);
+        closeChoices();
+        if (callback) callback(choiceId);
         return;
       }
       if ((extraRow && id === extraRow.id) || worldRows.some(row => row.id === id)) { if (opts.onExternal) opts.onExternal(id); return; }
@@ -776,7 +813,7 @@
       for (let index = btns.length - 1; index >= 0; index--) {
         const b = btns[index];
         if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
-          if (b.id === "panel" || b.id === "teleport-panel" || b.id === "album-panel" || b.id === "minimap-panel") return true;
+          if (b.id === "panel" || b.id === "teleport-panel" || b.id === "choices-panel" || b.id === "album-panel" || b.id === "minimap-panel") return true;
           if (panelOpen && (b.id === "next-scene")) { closePanel(); return true; }
           if (b.enabled) dispatch(b.id);
           else if (b.id === "signin") toast("今天已经签到了 — 明天再来");
@@ -786,6 +823,7 @@
         }
       }
       if (mapOpen) { mapOpen = false; dirty = true; return true; }
+      if (choiceData) { closeChoices(); return true; }
       if (teleportItems) { closeTeleport(); return true; }
       if (albumLines) {
         if (albumDetail) { albumDetail = null; detailPage = 0; dirty = true; } else closeAlbum();
@@ -799,7 +837,7 @@
       return btns.filter(button => !panelOpen || button.id !== "next-scene").map(button => ({ ...button }));
     }
     function containsControl(x, y) {
-      if (panelOpen || teleportItems || albumLines || mapOpen) return true;
+      if (panelOpen || teleportItems || choiceData || albumLines || mapOpen) return true;
       if (getHitRects().some(b => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h)) return true;
       const j = controls().joystick;
       return joyVisible && Math.hypot(x - j.x, y - j.y) <= j.radius + 10;
@@ -825,15 +863,16 @@
     return {
       canvas, resize, draw, handleTap, update, toast, containsControl, getHitRects,
       handleMinimapInput, cancelMinimapInput,
-      getJoystickGeometry: () => ({ ...controls().joystick, visible: joyVisible && !panelOpen && !teleportItems && !albumLines && !mapOpen }),
+      getJoystickGeometry: () => ({ ...controls().joystick, visible: joyVisible && !panelOpen && !teleportItems && !choiceData && !albumLines && !mapOpen }),
       getMinimapGeometry: () => {
         const geometry = minimapGeometry();
         return geometry ? JSON.parse(JSON.stringify(geometry)) : null;
       },
-      isPanelOpen: () => panelOpen || !!teleportItems || !!albumLines || mapOpen,
+      isPanelOpen: () => panelOpen || !!teleportItems || !!choiceData || !!albumLines || mapOpen,
       openPanel, closePanel,
       openTeleport(items, callback) {
         closeAlbum();
+        closeChoices();
         cancelMinimapInput();
         mapOpen = false;
         teleportItems = items.map(item => ({ id: String(item.id), label: String(item.label), right: String(item.right || "") }));
@@ -843,9 +882,26 @@
       },
       closeTeleport,
       isTeleportOpen: () => !!teleportItems,
+      openChoices(data, callback) {
+        closeTeleport();
+        closeAlbum();
+        cancelMinimapInput();
+        mapOpen = false;
+        choiceData = {
+          title: String(data?.title || "请选择"),
+          hint: String(data?.hint || ""),
+          items: (data?.items || []).map(item => ({ id: String(item.id), label: String(item.label), right: String(item.right || "") })),
+        };
+        choiceCallback = callback;
+        panelOpen = false;
+        joystickEnd(); dirty = true;
+      },
+      closeChoices,
+      isChoicesOpen: () => !!choiceData,
       setAlbumRow(value) { if ((value || "") !== albumRowText) { albumRowText = String(value || ""); dirty = true; } },
       openAlbum(lines) {
         closeTeleport();
+        closeChoices();
         cancelMinimapInput();
         mapOpen = false;
         albumLines = lines.map((line, index) => line.type === "group" ? { type: "group", text: String(line.text || "") }

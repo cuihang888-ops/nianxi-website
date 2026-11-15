@@ -302,12 +302,22 @@ test("home actions keep Muse order and restore only committed visual changes", (
   assert.equal(f.state.home.basket.carrot, 8);
   assert.equal(f.state.quests.harvest, true);
   assert.equal(f.plot.fieldStage, 0);
+  // 纠偏修复（2026-11-15）：首次收获后播种立即可达，不再被领养链挡住；
+  // 种下后作物生长期间，领养/升楼顺延可达。本断言随修复同步更新（原顺序即被审计的阻塞）。
+  f.act("种萝卜");
+  assert.equal(f.state.coins, 456);
+  assert.equal(f.plot.fieldStage, 1);
   f.act("领养一只鸡");
   f.act("领养一只羊");
-  // Sell the first harvest before adding the third companion.
+  f.advance(60000);
+  f.act("把出产收进背篓");
+  f.act("收获萝卜");
+  assert.equal(f.state.home.basket.carrot, 16);
+  // Sell the second harvest before adding the third companion.
   f.session.transact(Daily.sellBasket);
+  f.act("种萝卜"); // 田空着时播种仍优先（同一修复口径）
   f.act("领养一只兔");
-  assert.equal(f.state.coins, 68);
+  assert.equal(f.state.coins, 60);
   const before = f.visuals.length;
   f.act("升级傣家竹楼");
   assert.equal(f.state.home.house, 1);

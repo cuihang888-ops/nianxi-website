@@ -137,7 +137,13 @@ test("map features expose same-source bounds, plots, roads, landmarks and actual
   assert.equal(features.exits[0].to.x, Village.toDamCoords(Village.ROAD_APPROACH_WEST).x);
   assert.equal(features.exits[1].id, Village.TEMPLE_ID);
   assert.equal(features.exits[1].to.x, Village.toDamCoords(Village.TEMPLE_EXIT.milestone).x);
-  assert.equal(features.temple, undefined, "总佛寺只标方向，不能虚构本场景已有寺院");
+  // 纠偏样板（2026-11-15）：总佛寺已在瑞丽坝内建成（105,-25），features 如实给出寺院点；
+  // 此前 M1 阶段「只标方向、不得虚构」的断言随纠偏落位同步更新。
+  assert.equal(features.temple.id, "ruili-zongfosi");
+  assert.equal(features.temple.x, 105);
+  assert.equal(features.temple.z, -25);
+  assert.equal(features.pasture.x, -10);
+  assert.equal(features.pasture.z, 90);
 });
 
 test("minimap forward follows actual avatar or mount rotation and stays independent of camera orbit", () => {

@@ -459,7 +459,7 @@ test("failed teleport stays open for retry and tap hit testing keeps texture upd
   assert.equal(ui.update(), true);
 });
 
-test("minimap shows the eight real plots, landmarks and route exits without inventing a temple", () => {
+test("minimap shows the eight real plots, landmarks and route exits (temple now built in Ruili)", () => {
   const { ui, calls } = fixture();
   assert.equal(ui.getMinimapGeometry(), null);
   ui.setMinimapFeatures(MAP);
@@ -469,16 +469,17 @@ test("minimap shows the eight real plots, landmarks and route exits without inve
   assert.equal(map.plots.length, 8);
   assert.deepEqual(map.plots.map(plot => plot.id), MAP.plots.map(plot => plot.id));
   assert.deepEqual(map.plots.map(plot => plot.reserved), [false, false, true, true, true, true, true, true]);
-  assert.deepEqual(map.landmarks.map(point => point.kind), ["hall", "market", "pagoda"]);
+  // 纠偏样板（2026-11-15）：总佛寺已在瑞丽坝内建成落位，小地图如实给出寺院点（此前未建时不得虚构）。
+  assert.deepEqual(map.landmarks.map(point => point.kind), ["hall", "market", "pagoda", "temple"]);
   assert.deepEqual(map.exits.map(exit => exit.id), ["west-road", "ruili-temple"]);
-  assert.equal(map.landmarks.some(point => point.kind === "temple"), false);
+  assert.equal(map.landmarks.some(point => point.kind === "temple"), true);
   assert.equal(ui.containsControl(map.x + map.w / 2, map.y + map.h / 2), true);
   tap(ui, "minimap");
   assert.equal(ui.isPanelOpen(), true);
   assert.equal(ui.getMinimapGeometry().expanded, true);
   ui.draw();
   const labels = calls.filter(call => call.type === "text").map(call => call.value);
-  for (const label of ["A", "B", "C", "D", "E", "F", "G", "H", "大厅", "集市", "姐勒金塔", "西古道", "往总佛寺"]) assert.ok(labels.includes(label), label);
+  for (const label of ["A", "B", "C", "D", "E", "F", "G", "H", "大厅", "集市", "姐勒金塔", "总佛寺", "西古道", "往总佛寺"]) assert.ok(labels.includes(label), label);
   assert.equal(ui.containsControl(0, 0), true);
   tap(ui, "minimap-close");
   assert.equal(ui.isPanelOpen(), false);

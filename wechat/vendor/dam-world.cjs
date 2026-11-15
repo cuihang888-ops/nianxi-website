@@ -126,7 +126,7 @@
     const commons = features?.commons;
     if (commons && polygonsOverlap(footprint, rectangle(0, 0, commons.minX, commons.maxX, commons.minZ, commons.maxZ))) return { ok: false, reason: "site" };
     const ring = spec.prayerSite?.ring;
-    for (const area of [features?.commonPoint, features?.market?.area, features?.pagoda?.court, spec.prayerSite?.entry,
+    for (const area of [features?.commonPoint, features?.market?.area, features?.pagoda?.court, features?.temple?.area, features?.pasture?.area, spec.prayerSite?.entry,
       ring && { x: ring.x, z: ring.z, radius: ring.r + 3 }].filter(Boolean)) {
       if (pointPolygonDistance(area, footprint) <= (area.radius ?? area.r)) return { ok: false, reason: "site" };
     }
@@ -388,9 +388,19 @@
       },
     };
 
+    // —— 家园布局（纠偏复查 2026-11-15）：房子占地与田块沿朝向轴（dir）一前一后排布，
+    // 平台前缘与最近一畦田后缘之间留 0.38 单位空隙，零重叠；数值是唯一来源，
+    // getHomeLayout() 把同一组数算成矩形供回归测试断言。——
+    const HOME_BACK = 1.9;        // 房子组中心相对地块中心向后（-dir）的偏移
+    const FIELD_FORWARD = 3.0;    // 田组中心相对地块中心向前（+dir）的偏移
+    const PLATFORM_HALF = 2.95;   // 认领平台（房子最大地面占地）半宽
+    const BED_EXTENT = 1.57;      // 田组四畦的外接半宽（畦心 ±0.82 + 畦半宽 0.75）
+
     // —— 本坝的静态世界（地貌/江河/地标/集市/大厅由各坝 decorate 画）——
     const decoration = spec.decorate(root, M, H);
     const animate = typeof decoration === "function" ? decoration : decoration?.animate || null;
+    // 场景侧可选接口（样板羊、寺院动效等）：引擎只透传并逐帧喂玩家位置，不预设形状。
+    const decorationApi = decoration?.api || null;
     const colliders = (spec.colliders || []).concat(decoration?.colliders || []);
     const publicRoads = [...(spec.mapFeatures?.roads || []), ...(decoration?.placement?.roads || [])];
     const rootRoad = decoration?.placement?.roads?.[0];
@@ -504,7 +514,7 @@
         protected: commons ? [rectangle(0, 0, commons.minX, commons.maxX, commons.minZ, commons.maxZ)] : [],
         areas: [
           ...spec.sites.map(site => ({ ...site, r: 3.4 })), { ...spec.hallPos, r: 8 }, { ...spec.crystalPos, r: 3 },
-          features?.commonPoint, features?.market?.area, features?.pagoda?.court, spec.prayerSite?.entry,
+          features?.commonPoint, features?.market?.area, features?.pagoda?.court, features?.temple?.area, features?.pasture?.area, spec.prayerSite?.entry,
           ring && { x: ring.x, z: ring.z, r: ring.r + 3 },
         ].filter(Boolean),
       };
@@ -568,7 +578,7 @@
       plot.mesh.material = M.warm;
       if (plot.decorGroup) { removeOwnedGeometry(root, plot.decorGroup); plot.decorGroup = null; }
       const f = new THREE.Group();
-      f.position.set(plot.x - plot.dirX * 1.7, 0, plot.z - plot.dirZ * 1.7);
+      f.position.set(plot.x - plot.dirX * HOME_BACK, 0, plot.z - plot.dirZ * HOME_BACK);
       f.rotation.y = plot.face;
       f.add(box(5.9, 0.35, 5.9, M.wood, 0, 0.35, 0));
       f.add(box(0.28, 2.2, 0.28, M.woodDark, 3.2, 1.3, 3.2));
@@ -578,7 +588,7 @@
     function buildHutVisual(plot) {
       plot.hut = true; plot.house = 1;
       const g = new THREE.Group();
-      g.position.set(plot.x - plot.dirX * 1.7, 0, plot.z - plot.dirZ * 1.7);
+      g.position.set(plot.x - plot.dirX * HOME_BACK, 0, plot.z - plot.dirZ * HOME_BACK);
       g.rotation.y = plot.face;
       const y0 = 0.52;
       g.add(box(5.6, 2.5, 0.28, M.tunic, 0, y0 + 1.25, -2.66));
@@ -594,7 +604,7 @@
     function buildBambooVisual(plot) {
       plot.hut = true; plot.house = 2;
       const g = new THREE.Group();
-      g.position.set(plot.x - plot.dirX * 1.7, 0, plot.z - plot.dirZ * 1.7);
+      g.position.set(plot.x - plot.dirX * HOME_BACK, 0, plot.z - plot.dirZ * HOME_BACK);
       g.rotation.y = plot.face;
       for (const [px, pz] of [[-2.3, -2.3], [2.3, -2.3], [-2.3, 2.3], [2.3, 2.3], [-2.3, 0], [2.3, 0]]) {
         g.add(box(0.3, 2.1, 0.3, M.bamboo, px, 1.05, pz));
@@ -640,7 +650,7 @@
     }
     function openFieldVisual(plot, stage) {
       const g = new THREE.Group();
-      g.position.set(plot.x + plot.dirX * 2.6, 0, plot.z + plot.dirZ * 2.6);
+      g.position.set(plot.x + plot.dirX * FIELD_FORWARD, 0, plot.z + plot.dirZ * FIELD_FORWARD);
       g.rotation.y = plot.face;
       for (const [bx, bz] of [[-0.82, -0.82], [0.82, -0.82], [-0.82, 0.82], [0.82, 0.82]]) {
         g.add(box(1.5, 0.26, 1.5, M.soil, bx, 0.13, bz));
@@ -649,32 +659,55 @@
       plot.fieldGroup = g;
       setFieldStageVisual(plot, stage || 0);
     }
+    // —— 柔和接地阴影（纠偏样板：动物与人物脚下不再悬空）——
+    const shadowMaterial = new THREE.MeshBasicMaterial({ color: 0x22301e, transparent: true, opacity: 0.15, depthWrite: false });
+    function softShadow(r) {
+      const m = new THREE.Mesh(new THREE.CircleGeometry(r, 14), shadowMaterial);
+      m.rotation.x = -Math.PI / 2;
+      m.position.y = 0.055;
+      return m;
+    }
+    function puff(r, mat, x, y, z) {
+      const m = new THREE.Mesh(new THREE.SphereGeometry(r, 9, 7), mat);
+      m.position.set(x, y, z);
+      return m;
+    }
     function miniChicken() {
       const g = new THREE.Group();
-      const b = new THREE.Mesh(new THREE.SphereGeometry(0.34, 8, 6), M.wool);
-      b.position.y = 0.42; b.scale.set(1, 0.9, 1.2); g.add(b);
-      const h = new THREE.Mesh(new THREE.SphereGeometry(0.17, 7, 6), M.wool);
-      h.position.set(0, 0.72, 0.34); g.add(h);
+      const b = puff(0.34, M.wool, 0, 0.42, 0);
+      b.scale.set(1, 0.9, 1.2); g.add(b);
+      for (const s of [-1, 1]) { const w = puff(0.17, M.wool, 0.3 * s, 0.45, -0.05); w.scale.set(0.5, 0.8, 1.1); g.add(w); }
+      const tail = new THREE.Mesh(new THREE.ConeGeometry(0.16, 0.42, 5), M.wool);
+      tail.position.set(0, 0.62, -0.42); tail.rotation.x = -0.7; g.add(tail);
+      const h = puff(0.17, M.wool, 0, 0.72, 0.34); g.add(h);
       const beak = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.2, 4), M.orange);
       beak.position.set(0, 0.7, 0.55); beak.rotation.x = 1.4; g.add(beak);
-      const comb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 6, 5), M.pink);
-      comb.position.set(0, 0.88, 0.32); g.add(comb);
+      const comb = puff(0.09, M.pink, 0, 0.88, 0.32); g.add(comb);
       return g;
     }
     function miniSheep() {
       const g = new THREE.Group();
-      const b = new THREE.Mesh(new THREE.SphereGeometry(0.62, 9, 7), M.wool);
-      b.position.y = 0.78; b.scale.set(1, 0.85, 1.25); g.add(b);
-      const h = box(0.34, 0.4, 0.5, M.dark, 0, 0.95, 0.78); g.add(h);
-      for (const [lx, lz] of [[-0.3, 0.4], [0.3, 0.4], [-0.3, -0.45], [0.3, -0.45]]) g.add(box(0.13, 0.55, 0.13, M.dark, lx, 0.27, lz));
+      // 云朵状羊毛：多团柔和球体叠出蓬松层次（纠偏样板口径，取代旧单球体）
+      const wool = [[0, 0.84, 0, 0.6], [0.36, 0.94, 0.26, 0.42], [-0.37, 0.92, -0.18, 0.44], [0.08, 1.06, -0.36, 0.4],
+        [-0.16, 1.04, 0.36, 0.38], [0.44, 0.78, -0.36, 0.35], [-0.45, 0.76, 0.3, 0.35], [0, 0.66, 0.5, 0.34], [0.02, 0.68, -0.56, 0.36]];
+      for (const [x, y, z, r] of wool) g.add(puff(r, M.wool, x, y, z));
+      const head = new THREE.Group();
+      head.position.set(0, 0.98, 0.62);
+      const face = puff(0.27, M.dark, 0, 0, 0.1); face.scale.set(0.92, 1, 1.15); head.add(face);
+      head.add(puff(0.19, M.wool, 0, 0.24, -0.02));
+      for (const s of [-1, 1]) { const ear = puff(0.1, M.dark, 0.26 * s, 0.05, 0.02); ear.scale.set(1.3, 0.55, 0.8); head.add(ear); }
+      g.add(head);
+      g.userData.head = head;
+      for (const [lx, lz] of [[-0.3, 0.38], [0.3, 0.38], [-0.3, -0.42], [0.3, -0.42]]) g.add(box(0.13, 0.55, 0.13, M.dark, lx, 0.27, lz));
+      g.add(puff(0.2, M.wool, 0, 0.98, -0.78));
       return g;
     }
     function miniRabbit() {
       const g = new THREE.Group();
-      const b = new THREE.Mesh(new THREE.SphereGeometry(0.3, 8, 6), M.wool);
-      b.position.y = 0.3; b.scale.set(1, 0.9, 1.25); g.add(b);
-      const h = new THREE.Mesh(new THREE.SphereGeometry(0.19, 7, 6), M.wool);
-      h.position.set(0, 0.55, 0.3); g.add(h);
+      const b = puff(0.3, M.wool, 0, 0.3, 0);
+      b.scale.set(1, 0.9, 1.25); g.add(b);
+      const h = puff(0.19, M.wool, 0, 0.55, 0.3); g.add(h);
+      g.add(puff(0.13, M.wool, 0, 0.42, -0.36));
       for (const s of [-1, 1]) {
         const ear = box(0.08, 0.42, 0.05, M.wool, 0.09 * s, 0.85, 0.28);
         ear.rotation.x = -0.15; g.add(ear);
@@ -683,11 +716,13 @@
     }
     function addAnimalVisual(plot, kind) {
       const g = kind === "chicken" ? miniChicken() : kind === "sheep" ? miniSheep() : miniRabbit();
+      const shadow = softShadow(kind === "sheep" ? 0.72 : 0.36);
+      g.add(shadow);
       const a = rnd() * Math.PI * 2;
       g.position.set(plot.x + Math.cos(a) * 2.4, 0, plot.z + Math.sin(a) * 2.4);
       root.add(g);
       plot.animals.push({
-        g, kind, cx: plot.x, cz: plot.z,
+        g, kind, head: g.userData.head || null, shadow, cx: plot.x, cz: plot.z,
         tx: g.position.x, tz: g.position.z,
         wait: 1 + rnd() * 3, phase: rnd() * 6,
       });
@@ -714,8 +749,25 @@
     const armR = limb(M.skin, 0.52, 1.72, 0.17, 0.82);
     const legL = limb(M.skin, -0.2, 0.92, 0.19, 0.9);
     const legR = limb(M.skin, 0.2, 0.92, 0.19, 0.9);
+    // —— 佛珠串（总佛寺盘佛珠用；平时收起，setBeadsHeld 后虚持身前缓缓滚动）——
+    const beadGroup = new THREE.Group();
+    beadGroup.name = "player:beads";
+    {
+      const beadMat = new THREE.MeshLambertMaterial({ color: 0x6e4e30 });
+      for (let i = 0; i < 12; i++) {
+        const a = i / 12 * Math.PI * 2;
+        const bead = new THREE.Mesh(new THREE.SphereGeometry(i % 4 === 0 ? 0.062 : 0.052, 7, 6), i === 0 ? M.gold : beadMat);
+        bead.position.set(Math.cos(a) * 0.19, Math.sin(a) * 0.23, 0);
+        beadGroup.add(bead);
+      }
+    }
+    beadGroup.position.set(0, 1.24, 0.5);
+    beadGroup.visible = false;
+    player.add(beadGroup);
     player.position.set(spec.spawn.x, 0, spec.spawn.z);
     root.add(player);
+    const playerShadow = softShadow(0.55);
+    root.add(playerShadow);
 
     // —— 坐骑（本坝的马，领养后由宿主 showHorse）——
     const horse = new THREE.Group();
@@ -737,9 +789,16 @@
     }
     horse.visible = false;
     root.add(horse);
+    const horseShadow = softShadow(1.35);
+    horseShadow.visible = false;
+    root.add(horseShadow);
     const { stall, basket: harvestBasket } = createHomeProps(THREE, M, box);
     root.add(stall, harvestBasket);
     let resting = false, restBlend = 0;
+    // —— 寺院姿态与室内状态（纠偏样板）：跪姿/叩首缓动、持珠、spec.interior 室内模式 ——
+    let kneelTarget = 0, kneelBlend = 0, bowTarget = 0, bowBlend = 0, beadsHeld = false;
+    let beadAngle = 0, beadShown = 0, beadPulse = 0; // 念珠逐颗步进：rollBead() 推进一颗，缓动跟上
+    let interiorActive = false, interiorReturn = null, lastSky = null;
     const restAnchor = { x: 0, z: 0 };
     let horseShown = false, mounted = false;
     let bondLevel = 0, careT = 0, followPhase = 0;
@@ -794,12 +853,19 @@
     function applyCamera(k) {
       const tx = player.position.x, ty = player.position.y + 1.7, tz = player.position.z;
       const sp = Math.sin(polar);
-      const cameraRadius = radius * (1 - 0.22 * restBlend);
+      const cappedRadius = interiorActive && spec.interior ? Math.min(radius, spec.interior.maxRadius || 11) : radius;
+      const cameraRadius = cappedRadius * (1 - 0.22 * restBlend);
       const dx = tx + cameraRadius * sp * Math.sin(yaw);
       const dy = ty + cameraRadius * Math.cos(polar);
       const dz = tz + cameraRadius * sp * Math.cos(yaw);
       if (k === 0 || camPos.lengthSq() === 0) camPos.set(dx, dy, dz);
       else camPos.x += (dx - camPos.x) * k, camPos.y += (dy - camPos.y) * k, camPos.z += (dz - camPos.z) * k;
+      if (interiorActive && spec.interior) {
+        const rect = spec.interior.rect;
+        camPos.x = Math.max(rect.minX - 2.5, Math.min(rect.maxX + 2.5, camPos.x));
+        camPos.z = Math.max(rect.minZ - 2.5, Math.min(rect.maxZ + 2.5, camPos.z));
+        camPos.y = Math.min(camPos.y, 10.5);
+      }
       camera.position.copy(camPos);
       camera.lookAt(tx, ty, tz);
       clearCameraCanopies(tx, ty, tz);
@@ -809,6 +875,50 @@
     const moveIn = { x: 0, z: 0 };
     let walkPhase = 0, moving = false;
     const land = createLandResolver({ ...spec, colliders });
+    // —— 室内模式（spec.interior）：独立矩形小世界，墙内钳制 + 室内碰撞圆，与坝面椭圆互不干扰 ——
+    function resolveInterior(x, z, previous) {
+      const rect = spec.interior.rect, solids = spec.interior.colliders || [];
+      const clampRect = p => {
+        p.x = Math.max(rect.minX + 0.7, Math.min(rect.maxX - 0.7, p.x));
+        p.z = Math.max(rect.minZ + 0.7, Math.min(rect.maxZ - 0.7, p.z));
+      };
+      const p = { x, z };
+      clampRect(p);
+      for (let pass = 0; pass < 12; pass++) {
+        let settled = true;
+        for (const w of solids) {
+          let dx = p.x - w.x, dz = p.z - w.z, distance = Math.hypot(dx, dz);
+          if (distance >= w.r) continue;
+          settled = false;
+          if (distance < 1e-9) {
+            dx = (previous?.x ?? p.x) - w.x; dz = (previous?.z ?? p.z) - w.z;
+            distance = Math.hypot(dx, dz) || 1;
+          }
+          p.x = w.x + dx / distance * (w.r + 1e-6);
+          p.z = w.z + dz / distance * (w.r + 1e-6);
+        }
+        clampRect(p);
+        if (settled) break;
+      }
+      return p;
+    }
+    function insideInteriorRect(x, z) {
+      if (!spec.interior) return false;
+      const rect = spec.interior.rect;
+      return x >= rect.minX - 0.5 && x <= rect.maxX + 0.5 && z >= rect.minZ - 0.5 && z <= rect.maxZ + 0.5;
+    }
+    function applySkyState(sky) {
+      lastSky = sky;
+      scene.background.set(sky.bg);
+      if (scene.fog) scene.fog.color.set(sky.fog);
+      // 殿内由暖色点光接管：环境/日光压暗（与 17e23f0 内景口径一致），出殿自动恢复。
+      hemi.intensity = interiorActive ? sky.hemi * 0.5 : sky.hemi;
+      sun.intensity = interiorActive ? sky.sun * 0.3 : sky.sun;
+      sun.color.set(sky.sunColor);
+      skyEffects.setSky(sky);
+      // 夜光配方：把夜幕系数递给场景，灯点（石灯/灯晕）只在夜里亮起
+      decorationApi?.setNightFactor?.(Number.isFinite(sky.night) ? sky.night : 0);
+    }
     const skyEffects = createSkyEffects(THREE, scene, player);
     const festivalEffects = createFestivalEffects(THREE, scene, player);
     // —— 引导光环（spec.guideRing：绕行类动作的地面光点环，默认隐藏）——
@@ -840,14 +950,7 @@
       scene,
       camera,
       setCrystalLit(value) { crystal.material.color.set(value ? 0x9a6ee8 : 0x8a8f96); },
-      setSky(sky) {
-        scene.background.set(sky.bg);
-        if (scene.fog) scene.fog.color.set(sky.fog);
-        hemi.intensity = sky.hemi;
-        sun.intensity = sky.sun;
-        sun.color.set(sky.sunColor);
-        skyEffects.setSky(sky);
-      },
+      setSky: applySkyState,
       resize(w, h) { camera.aspect = w / h; camera.updateProjectionMatrix(); },
       handleDrag(dx, dy) {
         if (!Number.isFinite(dx) || !Number.isFinite(dy)) return;
@@ -887,6 +990,17 @@
             if (a.kind === "rabbit" && d >= 0.4 && a.wait <= 0.1) a.g.position.y = Math.abs(Math.sin(t * 9 + a.phase)) * 0.3;
             else if (a.kind === "chicken") a.g.rotation.x = Math.max(0, Math.sin(t * 2.2 + a.phase)) * 0.28;
             else a.g.position.y = 0;
+            // 接地阴影抵消啄食俯身/兔跳离地，始终平贴地面
+            if (a.shadow) {
+              a.shadow.rotation.x = -Math.PI / 2 - a.g.rotation.x;
+              a.shadow.position.y = 0.055 - a.g.position.y;
+            }
+            // 羊吃草：停留或慢走时低头啃草，周期末抬头张望
+            if (a.kind === "sheep" && a.head) {
+              const cycle = (t * 0.45 + a.phase) % 3.4;
+              const target = (d < 0.4 || a.wait > 0.15) && cycle < 2 ? 0.72 : 0.05;
+              a.head.rotation.x += (target - a.head.rotation.x) * Math.min(1, dt * 3.5);
+            }
           }
         }
         const mag = Math.hypot(moveIn.x, moveIn.z);
@@ -909,7 +1023,10 @@
           const mz = fz * moveIn.z + rz * moveIn.x;
           const mm = Math.hypot(mx, mz) || 1;
           const sp = (mounted ? BOND.BASE_SPEED + bondLevel * BOND.SPEED_PER_BOND : 13) * Math.min(1, mag);
-          const next = land.resolve(mover.position.x + mx / mm * sp * dt, mover.position.z + mz / mm * sp * dt, mover.position);
+          const rawX = mover.position.x + mx / mm * sp * dt, rawZ = mover.position.z + mz / mm * sp * dt;
+          const next = interiorActive && mover === player
+            ? resolveInterior(rawX, rawZ, mover.position)
+            : land.resolve(rawX, rawZ, mover.position);
           mover.position.x = next.x; mover.position.z = next.z;
           mover.rotation.y = Math.atan2(mx, mz);
           walkPhase += dt * (mounted ? 13 : 9.5);
@@ -962,12 +1079,40 @@
         if (resting && (moving || Math.hypot(player.position.x - restAnchor.x, player.position.z - restAnchor.z) > 0.9)) resting = false;
         restBlend += ((resting ? 1 : 0) - restBlend) * Math.min(1, dt * 5);
         if (!resting && restBlend < 0.02) restBlend = 0;
+        // 跪姿/叩首缓动（寺院动作驱动，与坐姿互斥：setter 侧进入任一姿态即清掉其他）
+        kneelBlend += (kneelTarget - kneelBlend) * Math.min(1, dt * 4);
+        if (Math.abs(kneelTarget - kneelBlend) < 0.002) kneelBlend = kneelTarget;
+        bowBlend += (bowTarget - bowBlend) * Math.min(1, dt * 3.2);
+        if (Math.abs(bowTarget - bowBlend) < 0.002) bowBlend = bowTarget;
         if (!mounted && !dancing) {
-          player.position.y = restBlend ? -0.42 * restBlend : 0;
-          pBody.rotation.x = prayerPose === 2 ? 0.55 : 0.1 * restBlend;
+          const sink = 0.42 * restBlend + 0.52 * kneelBlend + 0.08 * bowBlend;
+          player.position.y = sink > 0 ? -sink : 0; // 全零时落回精确 0（避免 -0）
+          pBody.rotation.x = prayerPose === 2 ? 0.55 : 0.62 * bowBlend + 0.1 * restBlend;
           if (restBlend > 0.01 && !prayerPose) { legL.rotation.x = -1.35 * restBlend; legR.rotation.x = -1.35 * restBlend; }
+          if (kneelBlend > 0.01 && !moving) { legL.rotation.x = -1.45 * kneelBlend; legR.rotation.x = -1.32 * kneelBlend; }
+          if (kneelBlend > 0.5 && !prayerPose && !beadsHeld) { armL.rotation.x = -0.55 * kneelBlend; armR.rotation.x = -0.55 * kneelBlend; }
+          if (beadsHeld) {
+            armL.rotation.x = -0.92; armR.rotation.x = -0.92;
+            armL.rotation.z = 0.26; armR.rotation.z = -0.26;
+            // 逐颗步进：珠串向目标角缓动，过一颗时轻微一胀（逐颗反馈的位移部分）
+            beadShown += (beadAngle - beadShown) * Math.min(1, dt * 9);
+            beadGroup.rotation.z = beadShown;
+            beadPulse = Math.max(0, beadPulse - dt * 3);
+            const beadScale = 1 + 0.07 * beadPulse;
+            beadGroup.scale.set(beadScale, beadScale, beadScale);
+          }
         }
-        pBody.scale.y = moving ? 1 : 1 + Math.sin(t * 1.6) * 0.012;
+        // 呼吸：站立极轻，坐下后放大到看得见的胸廓起伏（头部同相位微浮）
+        const breathAmp = 0.012 + 0.038 * restBlend;
+        pBody.scale.y = moving ? 1 : 1 + Math.sin(t * 1.6) * breathAmp;
+        pHead.position.y = 2.05 + (moving ? 0 : Math.sin(t * 1.6) * 0.03 * restBlend);
+        playerShadow.position.set(player.position.x, 0.055, player.position.z);
+        playerShadow.visible = !mounted;
+        horseShadow.visible = horseShown;
+        if (horseShown) horseShadow.position.set(horse.position.x, 0.055, horse.position.z);
+        decorationApi?.setPlayerPosition?.(player.position.x, player.position.z);
+        // 静坐呼吸光：与呼吸同周期（t*1.6），仅室内且坐姿混合时发光，其余时刻为 0
+        decorationApi?.setBreathGlow?.(interiorActive ? restBlend * (0.55 + 0.45 * Math.sin(t * 1.6)) : 0);
         skyEffects.update(dt, t);
         festivalEffects.update(dt);
         if (guideRing?.visible) guideRingMaterial.opacity = 0.6 + 0.3 * Math.sin(t * 2.4);
@@ -992,6 +1137,9 @@
       hideHorse() {
         stopDance();
         prayerPose = 0;
+        kneelTarget = 0; kneelBlend = 0; bowTarget = 0; bowBlend = 0;
+        if (beadsHeld) { beadsHeld = false; beadGroup.visible = false; }
+        if (interiorActive) { interiorActive = false; interiorReturn = null; if (lastSky) applySkyState(lastSky); }
         resting = false; restBlend = 0; pBody.rotation.x = 0;
         player.position.y = 0;
         if (mounted) {
@@ -1017,6 +1165,7 @@
       setResting(value) {
         if (value && mounted) return false;
         if (value) stopDance();
+        if (value) { kneelTarget = 0; bowTarget = 0; if (beadsHeld) { beadsHeld = false; beadGroup.visible = false; } }
         resting = !!value;
         if (resting) prayerPose = 0;
         if (resting) { restAnchor.x = player.position.x; restAnchor.z = player.position.z; moveIn.x = 0; moveIn.z = 0; }
@@ -1049,6 +1198,7 @@
       clearRoadPreview,
       setMounted(b) {
         if (!horseShown || mounted === !!b) return;
+        if (interiorActive && b) return; // 殿内不上马（进寺前已在门外下马）
         stopDance();
         prayerPose = 0;
         resting = false; restBlend = 0; pBody.rotation.x = 0;
@@ -1089,6 +1239,62 @@
       getPrayerSite: () => spec.prayerSite ? {
         entry: { ...spec.prayerSite.entry }, spot: { ...spec.prayerSite.spot }, ring: { ...spec.prayerSite.ring },
       } : null,
+      // —— 总佛寺（纠偏样板）：姿态与室内接口 ——
+      setKneeling(value) {
+        kneelTarget = value ? 1 : 0;
+        if (value) { resting = false; if (dancing) stopDance(); }
+      },
+      isKneeling: () => kneelTarget > 0,
+      setBow(value) { bowTarget = value ? 1 : 0; },
+      setBeadsHeld(value) {
+        beadsHeld = !!value;
+        beadGroup.visible = beadsHeld;
+        if (beadsHeld) resting = false;
+      },
+      isBeadsHeld: () => beadsHeld,
+      // 念珠过一颗：目标角步进一颗（2π/12），update 里缓动到位；声音触发点在场景 templeFx.rollBead。
+      rollBead() { beadAngle -= Math.PI * 2 / 12; beadPulse = 1; },
+      enterInterior() {
+        if (!spec.interior || mounted || interiorActive) return false;
+        stopDance();
+        prayerPose = 0; resting = false; restBlend = 0; pBody.rotation.x = 0;
+        moveIn.x = 0; moveIn.z = 0;
+        interiorReturn = { x: player.position.x, z: player.position.z };
+        interiorActive = true;
+        player.position.set(spec.interior.entry.x, 0, spec.interior.entry.z);
+        if (Number.isFinite(spec.interior.entry.yaw)) player.rotation.y = spec.interior.entry.yaw;
+        if (lastSky) applySkyState(lastSky);
+        camPos.set(player.position.x + radius * Math.sin(polar) * Math.sin(yaw), 14, player.position.z + radius * Math.sin(polar) * Math.cos(yaw));
+        applyCamera(0);
+        return true;
+      },
+      exitInterior() {
+        if (!interiorActive) return false;
+        interiorActive = false;
+        prayerPose = 0;
+        kneelTarget = 0; kneelBlend = 0; bowTarget = 0; bowBlend = 0;
+        if (beadsHeld) { beadsHeld = false; beadGroup.visible = false; }
+        resting = false; restBlend = 0; pBody.rotation.x = 0;
+        moveIn.x = 0; moveIn.z = 0;
+        const back = interiorReturn || spec.interior.gate;
+        interiorReturn = null;
+        const p = land.resolve(back.x, back.z, player.position);
+        player.position.set(p.x, 0, p.z);
+        if (lastSky) applySkyState(lastSky);
+        camPos.set(p.x + radius * Math.sin(polar) * Math.sin(yaw), 14, p.z + radius * Math.sin(polar) * Math.cos(yaw));
+        applyCamera(0);
+        return true;
+      },
+      isInteriorActive: () => interiorActive,
+      getInterior: () => spec.interior || null,
+      getTempleSite: () => spec.templeSite || null,
+      getDecorationApi: () => decorationApi,
+      getHomeLayout: () => ({
+        houseAlong: [-HOME_BACK - PLATFORM_HALF, -HOME_BACK + PLATFORM_HALF],
+        bedsAlong: [FIELD_FORWARD - BED_EXTENT, FIELD_FORWARD + BED_EXTENT],
+        houseLat: [-PLATFORM_HALF, PLATFORM_HALF],
+        bedsLat: [-BED_EXTENT, BED_EXTENT],
+      }),
       getMapFeatures,
       setFestivalVisible(id) {
         for (const [key, group] of Object.entries(festivalGroups)) group.visible = key === id;
@@ -1119,9 +1325,19 @@
         if (!Number.isFinite(x) || !Number.isFinite(z)) return;
         stopDance();
         prayerPose = 0;
+        kneelTarget = 0; kneelBlend = 0; bowTarget = 0; bowBlend = 0;
+        if (beadsHeld) { beadsHeld = false; beadGroup.visible = false; }
         if (guideRing) guideRing.visible = false;
         resting = false; restBlend = 0; pBody.rotation.x = 0;
         moveIn.x = 0; moveIn.z = 0;
+        if (interiorActive && insideInteriorRect(x, z)) {
+          const inner = resolveInterior(x, z, player.position);
+          player.position.set(inner.x, 0, inner.z);
+          camPos.set(inner.x + radius * Math.sin(polar) * Math.sin(yaw), 14, inner.z + radius * Math.sin(polar) * Math.cos(yaw));
+          applyCamera(0);
+          return;
+        }
+        if (interiorActive) { interiorActive = false; interiorReturn = null; if (lastSky) applySkyState(lastSky); }
         const p = land.resolve(x, z, player.position);
         if (mounted) horse.position.set(p.x, 0, p.z);
         player.position.set(p.x, mounted ? 1.52 : 0, p.z);
@@ -1130,6 +1346,7 @@
       },
       debugSetPlayer(x, z) {
         if (!Number.isFinite(x) || !Number.isFinite(z)) return;
+        if (interiorActive && !insideInteriorRect(x, z)) { interiorActive = false; interiorReturn = null; if (lastSky) applySkyState(lastSky); }
         player.position.set(x, 0, z);
         camPos.set(x + radius * Math.sin(polar) * Math.sin(yaw), 14, z + radius * Math.sin(polar) * Math.cos(yaw));
         applyCamera(0);
