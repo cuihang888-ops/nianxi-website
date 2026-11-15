@@ -565,3 +565,179 @@ test("minimap respects safe areas and controls, and expanded map traps movement"
     assert.equal(ui.getMinimapGeometry(), null);
   }
 });
+
+test("minimap drag moves the floating frame and preserves it through expand and scene changes", () => {
+  const { ui, calls } = fixture();
+  ui.setBasket("背篓 999 件");
+  ui.setSceneName("瑞丽坝 · 傍晚");
+  ui.setJoystickVisible(true);
+  ui.setMinimapFeatures(MAP);
+  const original = ui.getMinimapGeometry();
+  const joy = ui.getJoystickGeometry();
+  ui.joystickStart(joy.x, joy.y);
+  const start = { id: 1, x: original.x + 20, y: original.y + 20 };
+  const moved = { ...start, x: start.x - 90, y: start.y + 70 };
+  assert.equal(ui.handleMinimapInput({ type: "start", touches: [start], changedTouches: [start] }), true);
+  assert.equal(ui.getMove().active, false);
+  assert.equal(ui.handleMinimapInput({ type: "move", touches: [moved], changedTouches: [moved] }), true);
+  assert.equal(ui.handleMinimapInput({ type: "end", touches: [], changedTouches: [moved] }), true);
+  const after = ui.getMinimapGeometry();
+  assert.equal(after.expanded, false);
+  assert.equal(after.x, original.x - 90);
+  assert.equal(after.y, original.y + 70);
+  assert.equal(after.w, original.w);
+  assert.equal(after.h, original.h);
+  ui.draw();
+  for (const call of calls.filter(call => call.type === "text" && (/^(背篓|瑞丽坝 ·)/).test(call.value))) {
+    assert.equal(overlaps(after, { x: call.left, y: call.top, w: call.right - call.left, h: call.bottom - call.top }), false);
+  }
+  tap(ui, "minimap");
+  tap(ui, "minimap-close");
+  assert.deepEqual(ui.getMinimapGeometry(), after);
+  ui.setMinimapFeatures(null);
+  ui.setMinimapFeatures(MAP);
+  assert.deepEqual(ui.getMinimapGeometry(), after);
+  assert.equal(ui.handleMinimapInput({ type: "start", touches: [{ id: 2, x: 0, y: 0 }], changedTouches: [{ id: 2, x: 0, y: 0 }] }), false);
+});
+
+test("minimap handle resizes both dimensions within the safe content band without hiding controls", () => {
+  for (const [width, height, insets] of [
+    [320, 568, { safeLeft: 12, safeRight: 12, safeTop: 44, safeBottom: 34 }],
+    [667, 375, { safeLeft: 44, safeRight: 44, safeTop: 20, safeBottom: 24 }],
+  ]) {
+    const { ui, calls } = fixture();
+    ui.resize(width, height, 1, insets);
+    ui.setJoystickVisible(true);
+    ui.setAction("在此安家", () => {});
+    ui.setBasket("背篓 999 件");
+    ui.setSceneName("瑞丽坝 · 傍晚");
+    ui.setMinimapFeatures(MAP);
+    const frame = ui.getMinimapGeometry();
+    assert.deepEqual({ w: frame.resizeHandle.w, h: frame.resizeHandle.h }, { w: 36, h: 36 });
+    const start = { id: 1, x: frame.x + frame.w - 10, y: frame.y + frame.h - 10 };
+    const end = { ...start, x: width * 3, y: height * 3 };
+    ui.handleMinimapInput({ type: "start", touches: [start], changedTouches: [start] });
+    ui.handleMinimapInput({ type: "move", touches: [end], changedTouches: [end] });
+    ui.handleMinimapInput({ type: "end", touches: [], changedTouches: [end] });
+    const enlarged = ui.getMinimapGeometry();
+    assert.ok(enlarged.w > frame.w);
+    assert.ok(enlarged.h >= frame.h);
+    assert.equal(enlarged.x, insets.safeLeft + 12);
+    assert.equal(enlarged.y, insets.safeTop + 54);
+    assert.equal(enlarged.x + enlarged.w, width - insets.safeRight - 12);
+    ui.draw();
+    const controls = ui.getHitRects().filter(rect => rect.id !== "minimap");
+    for (const control of controls) assert.equal(overlaps(enlarged, control), false, control.id);
+    const joy = ui.getJoystickGeometry();
+    assert.equal(overlaps(enlarged, { x: joy.x - joy.radius, y: joy.y - joy.radius, w: joy.radius * 2, h: joy.radius * 2 }), false);
+    assertTextWithin(calls, { left: insets.safeLeft, top: insets.safeTop, right: width - insets.safeRight, bottom: height - insets.safeBottom });
+    const smallStart = { id: 2, x: enlarged.x + enlarged.w - 10, y: enlarged.y + enlarged.h - 10 };
+    const smallEnd = { ...smallStart, x: -width, y: -height };
+    ui.handleMinimapInput({ type: "start", touches: [smallStart], changedTouches: [smallStart] });
+    ui.handleMinimapInput({ type: "move", touches: [smallEnd], changedTouches: [smallEnd] });
+    ui.handleMinimapInput({ type: "end", touches: [], changedTouches: [smallEnd] });
+    const small = ui.getMinimapGeometry();
+    assert.equal(small.w, 116);
+    assert.equal(small.h, 96);
+    assert.equal(small.expanded, false);
+    ui.draw();
+    assertTextWithin(calls, { left: insets.safeLeft, top: insets.safeTop, right: width - insets.safeRight, bottom: height - insets.safeBottom });
+  }
+});
+
+test("minimap pinch scales and moves the frame then captures every remaining finger", () => {
+  const { ui } = fixture();
+  ui.resize(667, 568, 1);
+  ui.setMinimapFeatures(MAP);
+  const before = ui.getMinimapGeometry();
+  const a = { id: 1, x: before.x + 50, y: before.y + 50 };
+  const b = { id: 2, x: before.x + 100, y: before.y + 50 };
+  ui.handleMinimapInput({ type: "start", touches: [a], changedTouches: [a] });
+  ui.handleMinimapInput({ type: "start", touches: [a, b], changedTouches: [b] });
+  const nextA = { ...a, x: a.x - 80, y: a.y + 40 };
+  const nextB = { ...b, x: b.x - 30, y: b.y + 40 };
+  assert.equal(ui.handleMinimapInput({ type: "move", touches: [nextA, nextB], changedTouches: [nextA, nextB] }), true);
+  const after = ui.getMinimapGeometry();
+  assert.ok(after.w > before.w);
+  assert.ok(after.h > before.h);
+  assert.ok(after.x < before.x);
+  assert.equal(ui.handleMinimapInput({ type: "end", touches: [nextB], changedTouches: [nextA] }), true);
+  const last = { ...nextB, x: 4, y: 400 };
+  assert.equal(ui.handleMinimapInput({ type: "move", touches: [last], changedTouches: [last] }), true);
+  assert.equal(ui.handleMinimapInput({ type: "end", touches: [], changedTouches: [last] }), true);
+  assert.equal(ui.getMinimapGeometry().expanded, false);
+  assert.equal(ui.handleMinimapInput({ type: "move", touches: [last], changedTouches: [last] }), false);
+});
+
+test("minimap taps expand while edge releases, resize taps and cancellation never do", () => {
+  const { ui } = fixture();
+  ui.setMinimapFeatures(MAP);
+  let frame = ui.getMinimapGeometry();
+  const edge = { id: 1, x: frame.x + 2, y: frame.y + 40 };
+  const outside = { ...edge, x: frame.x - 2 };
+  ui.handleMinimapInput({ type: "start", touches: [edge], changedTouches: [edge] });
+  ui.handleMinimapInput({ type: "end", touches: [], changedTouches: [outside] });
+  assert.equal(ui.getMinimapGeometry().expanded, false);
+  const handle = { id: 2, x: frame.x + frame.w - 10, y: frame.y + frame.h - 10 };
+  ui.handleMinimapInput({ type: "start", touches: [handle], changedTouches: [handle] });
+  ui.handleMinimapInput({ type: "end", touches: [], changedTouches: [handle] });
+  assert.equal(ui.getMinimapGeometry().expanded, false);
+  const center = { id: 3, x: frame.x + frame.w / 2, y: frame.y + frame.h / 2 };
+  ui.handleMinimapInput({ type: "start", touches: [center], changedTouches: [center] });
+  assert.equal(ui.handleMinimapInput({ type: "cancel" }), true);
+  assert.equal(ui.handleMinimapInput({ type: "end", touches: [], changedTouches: [center] }), false);
+  ui.handleMinimapInput({ type: "start", touches: [center], changedTouches: [center] });
+  ui.handleMinimapInput({ type: "end", touches: [], changedTouches: [center] });
+  frame = ui.getMinimapGeometry();
+  assert.equal(frame.expanded, true);
+  assert.equal(ui.handleMinimapInput({ type: "start", touches: [center], changedTouches: [center] }), false, "expanded map keeps its existing modal input");
+});
+
+test("minimap resize and drag survive orientation changes with all buttons reachable", () => {
+  const { ui } = fixture();
+  ui.setMinimapFeatures(MAP);
+  const frame = ui.getMinimapGeometry();
+  const start = { id: 1, x: frame.x + 20, y: frame.y + 20 };
+  const moved = { ...start, x: 12, y: 260 };
+  ui.handleMinimapInput({ type: "start", touches: [start], changedTouches: [start] });
+  ui.handleMinimapInput({ type: "move", touches: [moved], changedTouches: [moved] });
+  ui.handleMinimapInput({ type: "end", touches: [], changedTouches: [moved] });
+  ui.resize(667, 375, 1, { safeLeft: 44, safeRight: 44, safeTop: 20, safeBottom: 24 });
+  const landscape = ui.getMinimapGeometry();
+  assert.ok(landscape.x >= 56 && landscape.x + landscape.w <= 611);
+  assert.ok(landscape.y >= 74);
+  for (const rect of ui.getHitRects().filter(rect => !rect.id.startsWith("minimap"))) assert.equal(overlaps(landscape, rect), false);
+  ui.resize(320, 568, 1);
+  const portrait = ui.getMinimapGeometry();
+  assert.ok(portrait.x >= 12 && portrait.x + portrait.w <= 308);
+  assert.ok(portrait.y >= 54);
+});
+
+test("hall world rows lead the fixed actions, paginate and leave the extra row independent", () => {
+  for (const [width, height] of [[320, 568], [667, 375]]) {
+    const external = [];
+    const { ui, calls } = fixture({ onExternal: id => external.push(id) });
+    ui.resize(width, height, 1, { safeLeft: 12, safeRight: 12, safeTop: 30, safeBottom: 20 });
+    ui.setWorldRows([
+      { id: "trial-supply", label: "试玩补给", right: "+3000 安币", enabled: true },
+      { id: "road-start", label: "开始修路", right: "瑞丽坝", enabled: true },
+      { id: "road-cancel", label: "取消修路", right: "", enabled: false },
+    ]);
+    ui.setExtraRow({ id: "horse", label: "我的马", right: "召唤", enabled: true });
+    ui.openPanel();
+    assert.equal(ui.getHitRects().filter(rect => ["trial-supply", "road-start", "jingxin"].includes(rect.id))[0].id, "trial-supply");
+    tap(ui, "trial-supply");
+    findHallControl(ui, "road-start");
+    tap(ui, "road-start");
+    findHallControl(ui, "road-cancel");
+    tap(ui, "road-cancel");
+    findHallControl(ui, "horse");
+    tap(ui, "horse");
+    assert.deepEqual(external, ["trial-supply", "road-start", "horse"]);
+    assertTextWithin(calls, { left: 12, top: 30, right: width - 12, bottom: height - 20 });
+    ui.setWorldRows([]);
+    ui.setExtraRow(null);
+    ui.draw();
+    assert.equal(ui.getHitRects().some(rect => ["trial-supply", "road-start", "road-cancel", "horse"].includes(rect.id)), false);
+  }
+});

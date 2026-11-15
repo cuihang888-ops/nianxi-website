@@ -60,6 +60,7 @@ export function createGame(context) {
   }
 
   function clearInput() {
+    ui?.cancelMinimapInput?.();
     gesture = null; joyId = null; pinch = 0; pinchBlocked = false;
     keyboard = { x: 0, y: 0 };
     ui?.joystickEnd();
@@ -151,6 +152,13 @@ export function createGame(context) {
   function input(event) {
     if (disposed || paused) return;
     if (event.type === "cancel") { clearInput(); return; }
+    if (ui.handleMinimapInput?.(event)) {
+      gesture = null; joyId = null; pinch = 0; pinchBlocked = false;
+      keyboard = { x: 0, y: 0 };
+      ui.joystickEnd();
+      world?.setMoveInput?.(0, 0);
+      return;
+    }
     const touches = event.touches || [], changed = event.changedTouches || [];
     if (event.type === "start") {
       for (const point of changed) {
@@ -217,7 +225,26 @@ export function createGame(context) {
       onNextScene: () => setScene((active + 1) % SCENE_NAMES.length) });
     discoveryController = createDiscoveryController({ state, transact: session.transact, ui, today, now: clock });
     homeController = createHomeController({ state, transact: session.transact, ui, getDamWorld: dam => getWorld(DAMS.indexOf(dam)),
-      setScene, now: clock, today, setFestivalAction: discoveryController.setAction });
+      setScene, now: clock, today, setFestivalAction: discoveryController.setAction,
+      onHomeRelocated(dam) {
+        const index = DAMS.indexOf(dam);
+        if (index < 2 || !worlds.has(index)) return world;
+        const previous = worlds.get(index);
+        const position = index === active ? previous.getPlayerPos() : null;
+        if (index === active) clearInput();
+        worlds.delete(index);
+        if (index === active) {
+          world = getWorld(index);
+          if (viewport) world.resize(viewport.width, viewport.height);
+          if (position) world.teleportPlayerTo(position.x, position.z);
+          ui.setMinimapFeatures(world.getMapFeatures?.() || null);
+          ui.setMinimapPlayer(world.getPlayerPos?.(), world.getPlayerForward?.());
+          discoveryController.syncWorld(dam, world);
+          applySky(true);
+        }
+        disposeScene(previous);
+        return world;
+      } });
     overlayScene = new THREE.Scene();
     const overlayCamera = new THREE.OrthographicCamera(-1, 1, 1, -1, -1, 1);
     texture = new THREE.CanvasTexture(uiCanvas);

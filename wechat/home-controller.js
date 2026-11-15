@@ -1,5 +1,6 @@
 import Daily from "./vendor/daily-state.cjs";
 import Discovery from "./vendor/preview-discovery.cjs";
+import Roads from "./vendor/preview-roads.cjs";
 
 const KINDS = ["chicken", "sheep", "rabbit"];
 const ANIMAL_NAMES = { chicken: "鸡", sheep: "羊", rabbit: "兔" };
@@ -15,10 +16,18 @@ const SPOT_REASON = {
   hall: "离大厅太近，给来往的人留些空间", crystal: "离传送点太近", taken: "离已有地块太近",
   bounds: "离地图边缘太近", invalid: "这里暂时不能安家",
 };
+const ROAD_REASON = {
+  ...SPOT_REASON, water: "路线经过水面，换个方向或分段绕行", solid: "路线经过山石建筑，请分段绕行",
+  taken: "路线经过现有或预留地块，请绕行", site: "路线经过公共区域，请绕行",
+  "road-disconnected": "先走到已经接通的道路旁", "road-too-short": "再走远一点，选这段路的终点",
+  "road-too-long": "这一段太长了，先分段修路", "road-limit": "本次试玩的道路数量已到上限",
+  "road-duplicate": "这里已经有路了，换个方向延伸", invalid: "这里暂时不能修路",
+};
 
-export function createHomeController({ state, transact, ui, getMangshi, getDamWorld, setScene, now = Date.now, today, setFestivalAction = () => false }) {
+export function createHomeController({ state, transact, ui, getMangshi, getDamWorld, setScene, now = Date.now, today, setFestivalAction = () => false, onHomeRelocated = () => {} }) {
   let lastAccrualAt = -Infinity;
   let activeDam = null, activeWorld = null;
+  let roadPlan = null;
   // —— 姐勒金塔祈福（仅瑞丽坝；纯客户端动作序列：不发币、不加产量、不挂红结、不写存档）——
   let prayer = null;
   const PRAYER_STAGES = { join: 1600, bow: 1800 };
@@ -105,6 +114,7 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
 
   function restoreVisual(world, dam = "mangshi") {
     if (!world) return;
+    if (dam === "ruili") world.restorePlayerRoads?.(state.playerRoads?.ruili || []);
     world.setCrystalLit?.(!!state.lit?.[dam]);
     if (state.horse?.owned && (state.horse.dam || "mangshi") === dam && !world.isMounted?.()) {
       const position = world.getHorsePos?.();
@@ -142,7 +152,7 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
       ui.toast(code.startsWith("SAVE_") || code.startsWith("STORAGE_") ? "本机保存失败，请重试" : result.msg || result.error?.message || "这次操作未完成，请重试");
       return result;
     }
-    for (const dam of new Set([state.home?.dam || "mangshi", state.horse?.dam || "mangshi"])) restoreVisual(worldOf(dam), dam);
+    for (const dam of new Set([state.home?.dam || "mangshi", state.horse?.dam || "mangshi", ...Object.keys(state.playerRoads || {})])) restoreVisual(worldOf(dam), dam);
     if (after) after(result.result);
     else if (result.result?.msg) ui.toast(result.result.msg);
     return result;
@@ -168,6 +178,7 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
   }
 
   function beforeSceneChange() {
+    cancelRoad();
     if (!state.horse?.owned) return true;
     const world = worldOf(state.horse.dam);
     const position = world.getHorsePos();
@@ -210,10 +221,70 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
   }
 
   function handleExternal(id) {
+    if (id === "trial-supply") return commit(Daily.claimTrialSupply);
+    if (id === "road-start") {
+      if (activeDam !== "ruili" || !activeWorld?.quotePlayerRoad) return false;
+      cancelRoad();
+      roadPlan = { dam: activeDam, world: activeWorld, start: null };
+      activeWorld.setMoveInput(0, 0);
+      ui.closePanel();
+      ui.toast("沿已有道路选起点，再向想安家的地方修路");
+      return true;
+    }
+    if (id === "road-cancel") { cancelRoad(); ui.closePanel(); return true; }
     if (id === "go-home") return goHome();
     if (id === "buy-horse") return commit(Daily.buyHorse);
     if (id === "call-horse") return callHorse();
     return false;
+  }
+
+  function cancelRoad() {
+    roadPlan?.world.setRoadPreview?.(null);
+    roadPlan = null;
+  }
+
+  function roadAction(world, dam) {
+    if (!roadPlan) return false;
+    if (roadPlan.world !== world || roadPlan.dam !== dam) { cancelRoad(); return false; }
+    const position = world.getPlayerPos();
+    if (!roadPlan.start) {
+      const connected = Roads.nearestRoadPoint(position, world.getRoadNetwork());
+      if (!connected || connected.distance > Roads.SNAP_DISTANCE) {
+        ui.setAction("走到已有道路旁 · 选择修路起点", () => ui.toast(ROAD_REASON["road-disconnected"]));
+      } else ui.setAction("从这里修路 · 选定起点", () => {
+        const current = Roads.nearestRoadPoint(world.getPlayerPos(), world.getRoadNetwork());
+        if (!current || current.distance > Roads.SNAP_DISTANCE) return false;
+        roadPlan.start = { ...current.point };
+        ui.toast("起点选好了 · 走到终点查看修路费用");
+        return true;
+      });
+      return true;
+    }
+    const quote = world.quotePlayerRoad(roadPlan.start, position);
+    world.setRoadPreview?.(quote.road?.a || roadPlan.start, position, quote.ok);
+    if (!quote.ok) {
+      ui.setAction(ROAD_REASON[quote.reason] || ROAD_REASON.invalid, () => ui.toast(ROAD_REASON[quote.reason] || ROAD_REASON.invalid));
+      return true;
+    }
+    const cost = Roads.roadCost(quote.road);
+    ui.setAction("修建这段路 · " + cost + " 安币", () => {
+      if (!roadPlan || roadPlan.world !== world) return false;
+      const current = world.getPlayerPos();
+      if (Math.hypot(current.x - position.x, current.z - position.z) > 0.1) {
+        ui.toast("位置变了，请查看新的修路报价"); return false;
+      }
+      const checked = world.quotePlayerRoad(roadPlan.start, current);
+      if (!checked.ok || Roads.roadCost(checked.road) !== cost) {
+        ui.toast(ROAD_REASON[checked.reason] || "报价变了，请重新选择"); return false;
+      }
+      return commit(draft => Daily.buildPlayerRoad(draft, checked.road, dam), result => {
+        roadPlan.start = { ...checked.road.b };
+        world.setRoadPreview?.(null);
+        ui.setMinimapFeatures?.(world.getMapFeatures?.());
+        ui.toast(result.msg + " · 可继续延伸，或到大厅结束修路");
+      });
+    });
+    return true;
   }
 
   function canCallHorse() {
@@ -241,18 +312,35 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
   }
 
   function customAction(world, dam) {
-    if (state.home || !world.checkPlotSpot || !world.getPlayerPos) { ui.setAction("", null); return; }
+    const relocating = !!state.home;
+    if (!world.checkPlotSpot || !world.getPlayerPos) { ui.setAction("", null); return; }
     const position = world.getPlayerPos();
     const checked = world.checkPlotSpot(position.x, position.z);
     if (!checked.ok) {
       ui.setAction("换个开阔处安家", () => ui.toast(SPOT_REASON[checked.reason] || "这里不合适，换个地方走走"));
       return;
     }
-    ui.setAction("在此安家 · " + Daily.HOME.CUSTOM_PLOT_PRICE + " 安币（自选）", () => {
+    ui.setAction(relocating ? "把家搬到这里 · 免费保留家当" : "在此安家 · " + Daily.HOME.CUSTOM_PLOT_PRICE + " 安币（自选）", () => {
       const current = world.getPlayerPos();
       const next = world.checkPlotSpot(current.x, current.z);
       if (!next.ok) { ui.toast(SPOT_REASON[next.reason] || "这里暂时不能安家"); return false; }
+      if (world.isMounted?.()) return false;
+      if (relocating) return moveHome({ site: -1, plot: -1, dam, custom: { x: current.x, z: current.z } });
       return commit(draft => Daily.claimCustomHome(draft, current.x, current.z, dam));
+    });
+  }
+
+  function moveHome(destination) {
+    const previousDam = state.home?.dam || "mangshi";
+    return commit(draft => {
+      const saved = saveHorse(draft, draft.horse?.owned ? worldOf(draft.horse.dam) : null);
+      return saved.ok ? Daily.relocateHome(draft, destination) : saved;
+    }, result => {
+      cancelRoad();
+      activeWorld = onHomeRelocated(previousDam) || worldOf(destination.dam);
+      ui.setAction("", null);
+      ui.setMinimapFeatures?.(activeWorld.getMapFeatures?.());
+      ui.toast(result.msg);
     });
   }
 
@@ -327,6 +415,12 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
 
   function update(active, world) {
     activeDam = damOf(active); activeWorld = world;
+    const worldRows = [];
+    if (!state.trialSupplyClaimed) worldRows.push({ id: "trial-supply", label: "试玩安家补给 · 仅领一次", right: "+" + Daily.ECONOMY.trialSupplyCoins + " 安币", enabled: true });
+    if (activeDam === "ruili") worldRows.push(roadPlan
+      ? { id: "road-cancel", label: "结束本次修路", right: "已修道路保留", enabled: true }
+      : { id: "road-start", label: "修路拓居", right: "按长度计费", enabled: true });
+    ui.setWorldRows?.(worldRows);
     if (prayer && activeDam !== "ruili") endPrayer(worldOf("ruili"));
     if (activeDam) world.setCrystalLit?.(!!state.lit?.[activeDam]);
     accrue();
@@ -354,6 +448,7 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
       });
       return;
     }
+    if (roadAction(world, dam)) return;
     const target = world.nearestInteractable();
     if (target?.type === "horse" && state.horse?.owned && (state.horse.dam || "mangshi") === dam) {
       const count = state.horse.careDate === today() ? state.horse.careCount : 0;
@@ -401,7 +496,12 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
     } else if (target.type === "plot" && !target.claimed && target.reserved) {
       ui.setAction("预留地 · 尚未开放", () => { ui.toast("这块地还在村里预留着 · 开放时会先紧着村里人"); return true; });
     } else if (target.type === "plot" && !target.claimed) {
-      ui.setAction("在此安家 · " + Daily.ECONOMY.plotPrice + " 安币", () => commit(value => Daily.claimHome(value, target.site, target.idx, dam)));
+      const relocating = !!state.home;
+      ui.setAction(relocating ? "把家搬到这里 · 免费保留家当" : "在此安家 · " + Daily.ECONOMY.plotPrice + " 安币", () => {
+        const current = world.nearestInteractable();
+        if (current?.type !== "plot" || current.site !== target.site || current.idx !== target.idx || current.claimed || current.reserved || world.isMounted?.()) return false;
+        return relocating ? moveHome({ site: target.site, plot: target.idx, dam }) : commit(value => Daily.claimHome(value, target.site, target.idx, dam));
+      });
     } else if (target.type === "plot" && (state.home?.dam || "mangshi") === dam && state.home?.site === target.site && state.home.plot === target.idx) {
       homeAction(world);
     } else ui.setAction("", null);

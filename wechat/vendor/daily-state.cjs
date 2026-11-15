@@ -1,6 +1,7 @@
 "use strict";
 
 const ECONOMY = require("./preview-economy.cjs");
+const Roads = require("./preview-roads.cjs");
 const { FESTIVALS, ALBUM_CATALOG } = require("./preview-discovery.cjs");
 const { computeSky } = require("./preview-sky.cjs");
 const BOND = ECONOMY.BOND;
@@ -88,7 +89,7 @@ function validDays(days, month) {
 function validateState(state) {
   try {
     const keys = ["coins", "jingxinDate", "signin", "quests", "home", "latestDay"];
-    if (!fields(state, keys, ["horse", "album", "festJoined", "lit"])
+    if (!fields(state, keys, ["horse", "album", "festJoined", "lit", "trialSupplyClaimed", "playerRoads"])
       || !validCoins(state.coins)
       || !optionalDate(state.jingxinDate) || !optionalDate(state.latestDay)
       || !dataKeys(state.signin, ["month", "days", "last"])
@@ -107,6 +108,8 @@ function validateState(state) {
     if (Object.hasOwn(state, "album") && !validateAlbum(state.album)) return false;
     if (Object.hasOwn(state, "festJoined") && !record(state.festJoined, FESTIVALS.map(fest => fest.id), year => Number.isInteger(year) && year >= 1 && year <= 9999)) return false;
     if (Object.hasOwn(state, "lit") && !record(state.lit, Object.keys(ECONOMY.DAMS), value => value === true)) return false;
+    if (Object.hasOwn(state, "trialSupplyClaimed") && state.trialSupplyClaimed !== true) return false;
+    if (Object.hasOwn(state, "playerRoads") && !record(state.playerRoads, ["ruili"], Roads.validateRoads)) return false;
     return true;
   } catch { return false; }
 }
@@ -187,6 +190,28 @@ function refreshDaily(state, today) {
 
 const dateFailure = () => failure("CLOCK_ROLLBACK", "日期尚未同步，请恢复正确时间后再试");
 const balanceFailure = () => failure("BALANCE_LIMIT", "安币已达到存档上限");
+
+function claimTrialSupply(state) {
+  if (state.trialSupplyClaimed) return failure("TRIAL_SUPPLY_CLAIMED", "试玩安家补给已经领过了");
+  if (!validCoins(state.coins + ECONOMY.trialSupplyCoins)) return balanceFailure();
+  state.coins += ECONOMY.trialSupplyCoins;
+  state.trialSupplyClaimed = true;
+  return { ok: true, msg: "试玩安家补给 +" + ECONOMY.trialSupplyCoins + " 安币 · 可用于安家、种养和修路" };
+}
+
+function buildPlayerRoad(state, road, dam = "ruili") {
+  if (dam !== "ruili" || !Roads.validateRoads([road])) return failure("INVALID_ROAD", "这段路暂时不能修建");
+  const previous = state.playerRoads?.[dam] || [];
+  const next = [...previous, clone(road)];
+  if (!Roads.validateRoads(next)) return failure("ROAD_LIMIT", "本次试玩的道路数量已到上限");
+  if (previous.some(value => JSON.stringify(value) === JSON.stringify(road))) return failure("ROAD_EXISTS", "这段路已经修好了");
+  const cost = Roads.roadCost(road);
+  if (!Number.isSafeInteger(cost) || cost <= 0) return failure("INVALID_ROAD", "修路报价无效");
+  if (state.coins < cost) return failure("INSUFFICIENT_COINS", "安币不够，还差 " + (cost - state.coins) + " 安币");
+  state.coins -= cost;
+  state.playerRoads = { ...state.playerRoads, [dam]: next };
+  return { ok: true, cost, msg: "路修好了 · 花费 " + cost + " 安币" };
+}
 
 function doSignin(state, today) {
   if (!refreshDaily(state, today)) return dateFailure();
@@ -473,6 +498,23 @@ function claimCustomHome(state, x, z, dam = "mangshi") {
   return { ok: true, msg: "安家了 · 这块自选之地，从此是你的了" };
 }
 
+function relocateHome(state, destination) {
+  if (!state.home) return failure("HOME_MISSING", "先选一处地方安家");
+  const target = destination;
+  if (!target || typeof target.dam !== "string" || !Object.hasOwn(ECONOMY.DAMS, target.dam)) return failure("INVALID_DAM", "这处坝子暂时不能安家");
+  const custom = target.custom;
+  if (custom ? (target.site !== -1 || target.plot !== -1 || !dataKeys(custom, ["x", "z"]) || !validHorsePosition(custom.x, custom.z, target.dam))
+    : (!Number.isInteger(target.site) || target.site < 0 || target.site > 1 || !Number.isInteger(target.plot) || target.plot < 0 || target.plot > 7)) return failure("INVALID_PLOT", "这处土地暂时不能安家");
+  if ((state.home.dam || "mangshi") === target.dam && state.home.site === target.site && state.home.plot === target.plot
+    && (!custom || (state.home.custom?.x === custom.x && state.home.custom?.z === custom.z))) return failure("HOME_SAME_PLOT", "这里已经是你的家了");
+  normalizeHome(state);
+  Object.assign(state.home, { site: target.site, plot: target.plot, dam: target.dam,
+    label: ECONOMY.DAMS[target.dam].name + (custom ? " · 自选之地" : " · " + ECONOMY.DAMS[target.dam].sites[target.site] + " " + (target.plot + 1) + " 号地") });
+  if (custom) state.home.custom = { ...custom };
+  else delete state.home.custom;
+  return { ok: true, msg: "搬家了 · 房屋、田地、动物和背篓都一起带来了" };
+}
+
 function normalizeProgress(state) {
   normalizeHome(state);
   if (!state.album) state.album = { landmarks: {}, animals: {}, festivals: {} };
@@ -644,6 +686,7 @@ function createStateSession(repository) {
 }
 
 module.exports = { defaultState, refreshDaily, doSignin, doJingxin, markQuest, claimQuest, questAllDone,
+  claimTrialSupply, buildPlayerRoad, relocateHome,
   claimHome, buildHomeHut, validateState, normalizeLegacyState, createStateSession, todayShanghai,
   createHome, normalizeHome, accrueProduce, produceValue, openHomeField, plantCarrots, harvestCarrots,
   buyHomeAnimal, collectHomeProduce, basketValue, basketCount, sellBasket, upgradeHomeBamboo, lightCrystal, payTeleport, buyHorse, setHorsePosition,

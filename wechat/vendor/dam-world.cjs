@@ -4,12 +4,13 @@
 //                    decorate(root, M, H) -> animate(dt,t)|null }
 // 芒市坝仍用自己的 mangshi-scene.js（同接口鸭子类型），本引擎供瑞丽/盈江/陇川/梁河共用。
 (function (global, factory) {
-  if (typeof module === "object" && module.exports) module.exports = factory(require("./preview-economy.cjs"));
-  else global.AnheliDamWorld = factory(global.AnheliPreviewEconomy);
-})(typeof self !== "undefined" ? self : this, function (Economy) {
+  if (typeof module === "object" && module.exports) module.exports = factory(require("./preview-economy.cjs"), require("./preview-roads.cjs"));
+  else global.AnheliDamWorld = factory(global.AnheliPreviewEconomy, global.AnheliPreviewRoads);
+})(typeof self !== "undefined" ? self : this, function (Economy, RoadModule) {
   "use strict";
 
   const BOND = Economy.BOND;
+  const Roads = typeof RoadModule?.connectedNetwork === "function" ? RoadModule : null;
 
   function createLandResolver(spec) {
     const bounds = spec.bounds || { rx: 250, rz: 205 };
@@ -391,7 +392,13 @@
     const decoration = spec.decorate(root, M, H);
     const animate = typeof decoration === "function" ? decoration : decoration?.animate || null;
     const colliders = (spec.colliders || []).concat(decoration?.colliders || []);
-    const placementSpec = { ...spec, colliders, placement: decoration?.placement };
+    const publicRoads = [...(spec.mapFeatures?.roads || []), ...(decoration?.placement?.roads || [])];
+    const rootRoad = decoration?.placement?.roads?.[0];
+    const roadRoots = rootRoad?.points?.length ? [rootRoad.points[0]]
+      : (spec.mapFeatures?.exits || []).filter(exit => exit.id === "west-road").map(exit => exit.from);
+    let playerRoads = [], playerRoadGroup = null, roadPreview = null;
+    let roadNetwork = Roads ? Roads.connectedNetwork(publicRoads, [], roadRoots) : [];
+    const placementSpec = { ...spec, colliders, placement: { ...decoration?.placement, roads: [...(decoration?.placement?.roads || [])] } };
     const festivalGroups = decoration?.festivalGroups || {};
     for (const [id, group] of Object.entries(festivalGroups)) {
       group.name = "festival:" + id;
@@ -457,6 +464,90 @@
       }
     });
     function findPlot(site, idx) { return plotList.find(p => p.site === site && p.idx === idx); }
+    function getRoadNetwork() { return roadNetwork.map(road => ({ ...road, a: { ...road.a }, b: { ...road.b } })); }
+
+    function restorePlayerRoads(roads) {
+      if (!Roads || !Roads.validatePlayerRoads(roads)) return { ok: false, reason: "invalid" };
+      if (JSON.stringify(roads) === JSON.stringify(playerRoads)) return { ok: true, changed: false };
+      const next = roads.map(road => ({ a: { ...road.a }, b: { ...road.b } }));
+      if (playerRoadGroup) removeOwnedGeometry(root, playerRoadGroup);
+      playerRoadGroup = new THREE.Group();
+      playerRoadGroup.name = "roads:player";
+      for (const road of next) {
+        const segment = box(Roads.WIDTH, 0.06, Roads.length(road), M.road,
+          (road.a.x + road.b.x) / 2, 0.12, (road.a.z + road.b.z) / 2);
+        segment.rotation.y = Math.atan2(road.b.x - road.a.x, road.b.z - road.a.z);
+        playerRoadGroup.add(segment);
+        for (const p of [road.a, road.b]) playerRoadGroup.add(H.disc(M.road, Roads.WIDTH / 2, p.x, p.z, 0.155));
+      }
+      root.add(playerRoadGroup);
+      playerRoads = next;
+      roadNetwork = Roads.connectedNetwork(publicRoads, playerRoads, roadRoots);
+      placementSpec.placement.roads = [...(decoration?.placement?.roads || []),
+        ...next.map(road => ({ points: [road.a, road.b], width: Roads.WIDTH }))];
+      return { ok: true, changed: true };
+    }
+
+    function roadEnvironment() {
+      const features = spec.mapFeatures, commons = features?.commons, ring = spec.prayerSite?.ring;
+      const plots = [];
+      for (const plot of plotList.concat(features?.plots || [])) {
+        const width = plot.w || 7.6, depth = plot.d || 7.6;
+        plots.push(rectangle(plot.x, plot.z, -width / 2, width / 2, -depth / 2, depth / 2));
+        plots.push(homeFootprint(plot.x, plot.z, plot.face || 0));
+      }
+      return {
+        bounds: spec.bounds || { rx: 250, rz: 205 },
+        waters: [...(spec.waters || []), ...(decoration?.placement?.waters || [])],
+        solids: [...colliders, ...(decoration?.placement?.solids || [])],
+        plots,
+        protected: commons ? [rectangle(0, 0, commons.minX, commons.maxX, commons.minZ, commons.maxZ)] : [],
+        areas: [
+          ...spec.sites.map(site => ({ ...site, r: 3.4 })), { ...spec.hallPos, r: 8 }, { ...spec.crystalPos, r: 3 },
+          features?.commonPoint, features?.market?.area, features?.pagoda?.court, spec.prayerSite?.entry,
+          ring && { x: ring.x, z: ring.z, r: ring.r + 3 },
+        ].filter(Boolean),
+      };
+    }
+
+    function quotePlayerRoad(start, end) {
+      return Roads ? Roads.quoteRoad(start, end, roadNetwork, playerRoads, roadEnvironment()) : { ok: false, reason: "invalid" };
+    }
+
+    function clearRoadPreview() {
+      if (roadPreview) roadPreview.visible = false;
+    }
+
+    function setRoadPreview(start, end, valid = false) {
+      if (!Roads || ![start, end].every(p => Number.isFinite(p?.x) && Number.isFinite(p?.z))) { clearRoadPreview(); return false; }
+      const length = Math.hypot(end.x - start.x, end.z - start.z);
+      if (!Number.isFinite(length) || length < 1e-7) { clearRoadPreview(); return false; }
+      if (!roadPreview) {
+        roadPreview = new THREE.Mesh(new THREE.BoxGeometry(1, 0.06, 1),
+          new THREE.MeshBasicMaterial({ color: 0x4ba56d, transparent: true, opacity: 0.5, depthWrite: false }));
+        roadPreview.name = "roads:preview";
+        root.add(roadPreview);
+      }
+      roadPreview.position.set((start.x + end.x) / 2, 0.25, (start.z + end.z) / 2);
+      roadPreview.rotation.y = Math.atan2(end.x - start.x, end.z - start.z);
+      roadPreview.scale.set(Roads.WIDTH, 1, length);
+      roadPreview.material.color.set(valid ? 0x4ba56d : 0xcc5050);
+      roadPreview.visible = true;
+      return true;
+    }
+
+    function checkHomeRoadAccess(x, z) {
+      if (!Roads || !Number.isFinite(x) || !Number.isFinite(z)) return { ok: false, reason: "invalid" };
+      const angle = Math.atan2(spec.hallPos.x - x, spec.hallPos.z - z);
+      return Roads.homeRoadAccess(homeFootprint(x, z, angle), roadNetwork);
+    }
+
+    function getMapFeatures() {
+      if (!spec.mapFeatures) return null;
+      return { ...spec.mapFeatures, roads: [...publicRoads,
+        ...playerRoads.map(road => ({ points: [{ ...road.a }, { ...road.b }], width: Roads.WIDTH, source: "player" }))] };
+    }
+
     function addCustomPlot(x, z, restoring) {
       if (!landBoundsContain(spec, x, z)) return null;
       const existing = findPlot(-1, -1);
@@ -656,6 +747,50 @@
     // —— 跟随镜头 ——
     let yaw = 0, polar = 1.06, radius = 17;
     const camPos = new THREE.Vector3();
+    const canopies = [];
+    root.updateMatrixWorld(true);
+    root.traverse(mesh => {
+      const geometry = mesh.geometry, parameters = geometry?.parameters;
+      if (!mesh.isMesh || !mesh.visible || (mesh.material !== M.leaf && mesh.material !== M.leaf2)
+        || !/^(Sphere|Cone)(Buffer)?Geometry$/.test(geometry?.type || "") || !(parameters?.radius >= 2)) return;
+      if (!geometry.boundingSphere) geometry.computeBoundingSphere();
+      const inverse = new THREE.Matrix4();
+      if (inverse.invert) inverse.copy(mesh.matrixWorld).invert();
+      else inverse.getInverse(mesh.matrixWorld);
+      canopies.push({ mesh, inverse, sphere: geometry.boundingSphere.clone().applyMatrix4(mesh.matrixWorld), hidden: false });
+    });
+    const sightTarget = new THREE.Vector3(), sightDirection = new THREE.Vector3(), localCamera = new THREE.Vector3();
+    const sightRay = new THREE.Raycaster(), sightHits = [];
+    function clearCameraCanopies(tx, ty, tz) {
+      sightTarget.set(tx, ty, tz);
+      const distance = sightDirection.subVectors(sightTarget, camera.position).length();
+      if (distance < 1e-6) return;
+      sightDirection.multiplyScalar(1 / distance);
+      sightRay.set(camera.position, sightDirection);
+      sightRay.far = distance;
+      for (const canopy of canopies) {
+        const { mesh, sphere } = canopy;
+        if (canopy.hidden) { mesh.visible = true; canopy.hidden = false; }
+        if (!mesh.visible) continue;
+        let ancestor = mesh.parent;
+        while (ancestor && ancestor.visible) ancestor = ancestor.parent;
+        if (ancestor) continue;
+        const dx = sphere.center.x - camera.position.x, dy = sphere.center.y - camera.position.y, dz = sphere.center.z - camera.position.z;
+        const along = Math.max(0, Math.min(distance, dx * sightDirection.x + dy * sightDirection.y + dz * sightDirection.z));
+        if ((dx - along * sightDirection.x) ** 2 + (dy - along * sightDirection.y) ** 2
+          + (dz - along * sightDirection.z) ** 2 > sphere.radius * sphere.radius) continue;
+        // Front-sided foliage raycasts miss when the camera starts inside a crown.
+        localCamera.copy(camera.position).applyMatrix4(canopy.inverse);
+        const parameters = mesh.geometry.parameters;
+        const inside = mesh.geometry.type.startsWith("Sphere")
+          ? localCamera.lengthSq() < parameters.radius * parameters.radius
+          : Math.abs(localCamera.y) < parameters.height / 2
+            && Math.hypot(localCamera.x, localCamera.z) < parameters.radius * (0.5 - localCamera.y / parameters.height);
+        sightHits.length = 0;
+        if (!inside) mesh.raycast(sightRay, sightHits);
+        if (inside || sightHits.length) { mesh.visible = false; canopy.hidden = true; }
+      }
+    }
     function applyCamera(k) {
       const tx = player.position.x, ty = player.position.y + 1.7, tz = player.position.z;
       const sp = Math.sin(polar);
@@ -667,6 +802,7 @@
       else camPos.x += (dx - camPos.x) * k, camPos.y += (dy - camPos.y) * k, camPos.z += (dz - camPos.z) * k;
       camera.position.copy(camPos);
       camera.lookAt(tx, ty, tz);
+      clearCameraCanopies(tx, ty, tz);
     }
     applyCamera(0);
 
@@ -905,6 +1041,12 @@
       claimCustomPlot,
       restoreCustomPlot,
       checkPlotSpot(x, z) { return checkCustomPlotSpot(placementSpec, plotList, x, z); },
+      getRoadNetwork,
+      restorePlayerRoads,
+      quotePlayerRoad,
+      checkHomeRoadAccess,
+      setRoadPreview,
+      clearRoadPreview,
       setMounted(b) {
         if (!horseShown || mounted === !!b) return;
         stopDance();
@@ -947,7 +1089,7 @@
       getPrayerSite: () => spec.prayerSite ? {
         entry: { ...spec.prayerSite.entry }, spot: { ...spec.prayerSite.spot }, ring: { ...spec.prayerSite.ring },
       } : null,
-      getMapFeatures: () => spec.mapFeatures || null,
+      getMapFeatures,
       setFestivalVisible(id) {
         for (const [key, group] of Object.entries(festivalGroups)) group.visible = key === id;
       },

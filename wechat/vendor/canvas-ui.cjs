@@ -27,8 +27,10 @@
     let safe = { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
     let panelOpen = false, sceneName = "", dirty = true;
     let basketText = "";
-    let mapFeatures = null, mapPlayer = null, mapOpen = false;
+    let mapFeatures = null, mapPlayer = null, mapOpen = false, mapGesture = null;
+    const mapLayouts = new Map();
     let teleportItems = null, teleportCallback = null, extraRow = null;
+    let worldRows = [];
     let albumRowText = "", albumLines = null, albumPage = 0, albumPages = [];
     let albumDetail = null, detailPage = 0, detailPages = 1;
     let hallPage = 0, hallPages = 1;
@@ -72,6 +74,7 @@
       canvas.width = Math.round(W * DPR);
       canvas.height = Math.round(H * DPR);
       joystickEnd();
+      cancelMinimapInput();
       btns = [];
       dirty = true;
     }
@@ -130,15 +133,142 @@
     }
     const mapPoint = point => point && Number.isFinite(point.x) && Number.isFinite(point.z);
     const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    const inside = (point, frame) => point && point.x >= frame.x && point.x <= frame.x + frame.w && point.y >= frame.y && point.y <= frame.y + frame.h;
+    const touchPoint = point => point && Number.isFinite(point.x) && Number.isFinite(point.y);
+    function minimapArea() {
+      const layout = controls(), top = safe.top + 54;
+      const bottom = Math.min(layout.action.y, joyVisible ? layout.joystick.y - layout.joystick.radius : layout.action.y) - 12;
+      return { x: safe.left + 12, y: top, w: Math.max(1, safe.width - 24), h: bottom - top };
+    }
+    function fitMinimap(frame) {
+      const area = minimapArea();
+      const w = clamp(frame.w, Math.min(116, area.w), area.w);
+      const h = clamp(frame.h, Math.min(96, area.h), area.h);
+      return { x: clamp(frame.x, area.x, area.x + area.w - w), y: clamp(frame.y, area.y, area.y + area.h - h), w, h };
+    }
+    function rememberMinimap(frame) {
+      const area = minimapArea(), fitted = fitMinimap(frame);
+      mapLayouts.set(mapFeatures.villageId || "default", {
+        w: fitted.w, h: fitted.h,
+        horizontal: area.w > fitted.w ? (fitted.x - area.x) / (area.w - fitted.w) : 0.5,
+        vertical: area.h > fitted.h ? (fitted.y - area.y) / (area.h - fitted.h) : 0.5,
+      });
+      dirty = true;
+    }
     function minimapFrame() {
       if (!mapFeatures || panelOpen || teleportItems || albumLines) return null;
       if (mapOpen) {
         const w = Math.min(580, safe.width - 24), h = Math.min(520, safe.height - 24);
         return { x: safe.left + (safe.width - w) / 2, y: safe.top + (safe.height - h) / 2, w, h };
       }
+      const area = minimapArea();
+      if (area.h < 72) return null;
+      const saved = mapLayouts.get(mapFeatures.villageId || "default");
+      if (saved) {
+        const w = clamp(saved.w, Math.min(116, area.w), area.w);
+        const h = clamp(saved.h, Math.min(96, area.h), area.h);
+        return { x: area.x + (area.w - w) * saved.horizontal, y: area.y + (area.h - h) * saved.vertical, w, h };
+      }
       const w = Math.min(176, Math.max(116, Math.floor((safe.width - 36) / 2)));
-      const y = safe.top + 54, h = Math.min(176, controls().action.y - 12 - y);
-      return h >= 72 ? { x: safe.right - w - 12, y, w, h } : null;
+      return { x: safe.right - w - 12, y: area.y, w, h: Math.min(176, area.h) };
+    }
+    function minimapResizeHandle(frame) {
+      return { x: frame.x + frame.w - 36, y: frame.y + frame.h - 36, w: 36, h: 36 };
+    }
+    function cancelMinimapInput() { mapGesture = null; }
+    function beginMinimapPinch(gesture, touches) {
+      const points = gesture.ids.map(id => touches.find(point => point.id === id)).filter(Boolean);
+      if (points.length < 2) return;
+      const [a, b] = points;
+      gesture.pinch = {
+        ids: [a.id, b.id], frame: minimapFrame(),
+        x: (a.x + b.x) / 2, y: (a.y + b.y) / 2, distance: Math.hypot(a.x - b.x, a.y - b.y),
+      };
+      gesture.multiple = true;
+      gesture.moved = true;
+    }
+    function handleMinimapInput(event) {
+      const touches = (event.touches || []).filter(touchPoint), changed = (event.changedTouches || []).filter(touchPoint);
+      if (event.type === "cancel") {
+        const captured = !!mapGesture;
+        cancelMinimapInput();
+        return captured;
+      }
+      if (!mapGesture) {
+        const frame = !mapOpen && minimapFrame();
+        if (event.type !== "start" || !frame) return false;
+        const point = changed.find(value => inside(value, frame));
+        if (!point) return false;
+        joystickEnd();
+        mapGesture = {
+          ids: [point.id], pointerId: point.id, start: { x: point.x, y: point.y }, frame,
+          resize: inside(point, minimapResizeHandle(frame)), moved: false, multiple: false, time: now(), pinch: null,
+        };
+        for (const value of touches) if (value.id !== point.id && inside(value, frame)) mapGesture.ids.push(value.id);
+        beginMinimapPinch(mapGesture, touches);
+        return true;
+      }
+      const gesture = mapGesture;
+      if (event.type === "start") {
+        const frame = minimapFrame();
+        if (touches.length > 1) { gesture.multiple = true; gesture.tap = false; }
+        for (const point of changed) if (inside(point, frame) && !gesture.ids.includes(point.id)) gesture.ids.push(point.id);
+        beginMinimapPinch(gesture, touches);
+      } else if (event.type === "move") {
+        if (gesture.pinch) {
+          const points = gesture.pinch.ids.map(id => touches.find(point => point.id === id));
+          if (points.every(Boolean)) {
+            const [a, b] = points, initial = gesture.pinch, area = minimapArea();
+            const minScale = Math.max(Math.min(116, area.w) / initial.frame.w, Math.min(96, area.h) / initial.frame.h);
+            const maxScale = Math.min(area.w / initial.frame.w, area.h / initial.frame.h);
+            const scale = clamp(initial.distance >= 1 ? Math.hypot(a.x - b.x, a.y - b.y) / initial.distance : 1, minScale, maxScale);
+            const w = initial.frame.w * scale, h = initial.frame.h * scale;
+            rememberMinimap({
+              x: initial.frame.x + initial.frame.w / 2 + (a.x + b.x) / 2 - initial.x - w / 2,
+              y: initial.frame.y + initial.frame.h / 2 + (a.y + b.y) / 2 - initial.y - h / 2, w, h,
+            });
+          }
+        } else {
+          const point = touches.find(value => value.id === gesture.pointerId);
+          if (point) {
+            const dx = point.x - gesture.start.x, dy = point.y - gesture.start.y;
+            gesture.moved ||= Math.hypot(dx, dy) > 6;
+            if (gesture.moved) rememberMinimap(gesture.resize
+              ? { ...gesture.frame, w: gesture.frame.w + dx, h: gesture.frame.h + dy }
+              : { ...gesture.frame, x: gesture.frame.x + dx, y: gesture.frame.y + dy });
+          }
+        }
+      } else if (event.type === "end") {
+        const point = changed.find(value => value.id === gesture.pointerId);
+        if (point && !gesture.moved && !gesture.multiple && !gesture.resize) {
+          gesture.tap = Math.hypot(point.x - gesture.start.x, point.y - gesture.start.y) <= 8
+            && now() - gesture.time < 500 && inside(point, minimapFrame());
+        }
+        if (!touches.length) {
+          mapGesture = null;
+          if (gesture.tap) { mapOpen = true; dirty = true; }
+        } else if (gesture.pinch) {
+          const remaining = touches.filter(value => gesture.ids.includes(value.id));
+          if (remaining.length < 2) {
+            gesture.pinch = null;
+            if (remaining.length) {
+              gesture.pointerId = remaining[0].id;
+              gesture.start = { x: remaining[0].x, y: remaining[0].y };
+              gesture.frame = minimapFrame();
+              gesture.resize = false;
+            }
+          }
+        }
+      }
+      return true;
+    }
+    function statusSpace(top, height) {
+      const map = minimapFrame();
+      const full = { x: safe.left + 12, w: safe.width - 24 };
+      if (!map || mapOpen || top >= map.y + map.h || top + height <= map.y) return full;
+      const left = { x: full.x, w: Math.max(0, map.x - 8 - full.x) };
+      const right = { x: map.x + map.w + 8, w: Math.max(0, safe.right - 12 - map.x - map.w - 8) };
+      return left.w >= right.w ? left : right;
     }
     function minimapGeometry() {
       const frame = minimapFrame();
@@ -182,6 +312,7 @@
       }
       return {
         ...frame, expanded: mapOpen, content, scale, plots, landmarks, exits, player,
+        resizeHandle: mapOpen ? null : minimapResizeHandle(frame),
         bounds: mapFeatures.boundsPolygon.map(project),
         commons: mapFeatures.commons ? [
           project({ x: mapFeatures.commons.minX, z: mapFeatures.commons.minZ }),
@@ -280,6 +411,16 @@
         ctx.fillStyle = "#d45d45"; ctx.fill();
         ctx.strokeStyle = "#8b392d"; ctx.lineWidth = 0.8; ctx.stroke();
       }
+      if (!map.expanded) {
+        ctx.strokeStyle = "#5d7867"; ctx.lineWidth = 1.5;
+        for (const offset of [7, 12, 17]) {
+          path([
+            { x: map.x + map.w - offset, y: map.y + map.h - 5 },
+            { x: map.x + map.w - 5, y: map.y + map.h - offset },
+          ]);
+          ctx.stroke();
+        }
+      }
     }
     function drawRow(x, y, w, h, id, label, right, enabled, accent) {
       rr(x, y, w, h, 10);
@@ -305,7 +446,7 @@
       const mark = value => value ? "✓" : "—";
       const footer = "喂动物 " + mark(q.fed) + " · 收获 " + mark(q.harvest) + " · 静心 " + mark(q.jingxin) + "（去牧场摸摸动物、收一畦菜）";
       const lines = wrapText(footer, pw - 36, "12px sans-serif");
-      const rows = 3 + (state.home ? 1 : 0) + (albumRowText ? 1 : 0) + (extraRow ? 1 : 0);
+      const rows = worldRows.length + 3 + (state.home ? 1 : 0) + (albumRowText ? 1 : 0) + (extraRow ? 1 : 0);
       const footerH = lines.length * 16 + 8;
       const ph = Math.min(82 + rows * 48 + (rows - 1) * 8 + footerH + 14, safe.height - 24);
       const available = ph - 82 - footerH - 14;
@@ -348,6 +489,7 @@
       const doneN = [q.fed, q.harvest, q.jingxin].filter(Boolean).length;
       const claimable = Daily.questAllDone(state) && !q.claimed;
       const entries = [
+        ...worldRows.map(row => [row.id, row.label, row.right, row.enabled, row.enabled]),
         ["jingxin", "静坐片刻 · 净心", jDone ? "今日已静心 ✓" : "开始", !jDone, false],
         ["signin", "每日签到", sDone ? "已签 · 本月 " + state.signin.days.length + " 天" : "+5 安币", !sDone, !sDone],
         ["quest", "每日小确幸", q.claimed ? "今日已领" : claimable ? "领取 40 安币" : doneN + " / 3", claimable || !q.claimed, claimable],
@@ -513,27 +655,30 @@
       }
       if (basketText) {
         const font = "12px sans-serif";
-        const map = minimapFrame();
-        const label = fitText(basketText, map && !mapOpen ? map.x - safe.left - 52 : safe.width - 52, font);
-        ctx.font = font;
-        const width = ctx.measureText(label).width + 28;
-        rr(safe.left + 12, safe.top + 52, width, 26, 13);
-        ctx.fillStyle = CREAM; ctx.fill();
-        ctx.strokeStyle = BORDER; ctx.lineWidth = 1; ctx.stroke();
-        text(label, safe.left + 26, safe.top + 65, font, INK);
+        const space = statusSpace(safe.top + 52, 26);
+        if (space.w >= 68) {
+          const label = fitText(basketText, space.w - 28, font);
+          ctx.font = font;
+          const width = ctx.measureText(label).width + 28;
+          rr(space.x, safe.top + 52, width, 26, 13);
+          ctx.fillStyle = CREAM; ctx.fill();
+          ctx.strokeStyle = BORDER; ctx.lineWidth = 1; ctx.stroke();
+          text(label, space.x + 14, safe.top + 65, font, INK);
+        }
       }
       if (sceneName) {
         const font = "12.5px sans-serif";
-        const map = minimapFrame();
-        const leftWidth = map && !mapOpen ? map.x - safe.left - 12 : safe.width;
-        const label = fitText(sceneName, leftWidth - 26, font);
-        ctx.font = font;
-        const sw = ctx.measureText(label).width + 26;
-        const cx = safe.left + leftWidth / 2;
         const top = safe.top + (basketText ? 84 : 54);
-        rr(cx - sw / 2, top, sw, 30, 15);
-        ctx.fillStyle = "rgba(38,52,44,0.55)"; ctx.fill();
-        text(label, cx, top + 15, font, "#f2ecd8", "center");
+        const space = statusSpace(top, 30);
+        if (space.w >= 68) {
+          const label = fitText(sceneName, space.w - 26, font);
+          ctx.font = font;
+          const sw = ctx.measureText(label).width + 26;
+          const cx = space.x + space.w / 2;
+          rr(cx - sw / 2, top, sw, 30, 15);
+          ctx.fillStyle = "rgba(38,52,44,0.55)"; ctx.fill();
+          text(label, cx, top + 15, font, "#f2ecd8", "center");
+        }
       }
       if (!panelOpen && !teleportItems && !albumLines && !mapOpen) {
         const layout = controls(), hall = layout.hall;
@@ -585,8 +730,8 @@
     function joystickEnd() { joy.active = false; joy.dx = 0; joy.dy = 0; dirty = true; }
     function closeTeleport() { teleportItems = null; teleportCallback = null; dirty = true; }
     function closeAlbum() { albumLines = null; albumPages = []; albumDetail = null; detailPage = 0; dirty = true; }
-    function openPanel() { closeTeleport(); closeAlbum(); mapOpen = false; hallPage = 0; panelOpen = true; joystickEnd(); dirty = true; }
-    function closePanel() { panelOpen = false; closeTeleport(); closeAlbum(); mapOpen = false; dirty = true; }
+    function openPanel() { closeTeleport(); closeAlbum(); cancelMinimapInput(); mapOpen = false; hallPage = 0; panelOpen = true; joystickEnd(); dirty = true; }
+    function closePanel() { panelOpen = false; closeTeleport(); closeAlbum(); cancelMinimapInput(); mapOpen = false; dirty = true; }
     function dispatch(id) {
       if (id === "minimap") { mapOpen = true; joystickEnd(); dirty = true; return; }
       if (id === "minimap-close") { mapOpen = false; dirty = true; return; }
@@ -608,7 +753,7 @@
         if (result?.ok !== false) closeTeleport();
         return;
       }
-      if (extraRow && id === extraRow.id) { if (opts.onExternal) opts.onExternal(id); return; }
+      if ((extraRow && id === extraRow.id) || worldRows.some(row => row.id === id)) { if (opts.onExternal) opts.onExternal(id); return; }
       if (id === "open-hall") { openPanel(); return; }
       if (id === "close") { closePanel(); return; }
       if (id === "next-scene") { joystickEnd(); opts.onNextScene(); return; }
@@ -679,6 +824,7 @@
 
     return {
       canvas, resize, draw, handleTap, update, toast, containsControl, getHitRects,
+      handleMinimapInput, cancelMinimapInput,
       getJoystickGeometry: () => ({ ...controls().joystick, visible: joyVisible && !panelOpen && !teleportItems && !albumLines && !mapOpen }),
       getMinimapGeometry: () => {
         const geometry = minimapGeometry();
@@ -688,6 +834,7 @@
       openPanel, closePanel,
       openTeleport(items, callback) {
         closeAlbum();
+        cancelMinimapInput();
         mapOpen = false;
         teleportItems = items.map(item => ({ id: String(item.id), label: String(item.label), right: String(item.right || "") }));
         teleportCallback = callback;
@@ -699,6 +846,7 @@
       setAlbumRow(value) { if ((value || "") !== albumRowText) { albumRowText = String(value || ""); dirty = true; } },
       openAlbum(lines) {
         closeTeleport();
+        cancelMinimapInput();
         mapOpen = false;
         albumLines = lines.map((line, index) => line.type === "group" ? { type: "group", text: String(line.text || "") }
           : { type: "item", index, name: String(line.name || ""), hint: String(line.hint || ""), note: String(line.note || ""), got: !!line.got });
@@ -710,8 +858,15 @@
         const next = row ? { id: String(row.id), label: String(row.label), right: String(row.right), enabled: !!row.enabled } : null;
         if (JSON.stringify(next) !== JSON.stringify(extraRow)) { extraRow = next; dirty = true; }
       },
+      setWorldRows(rows) {
+        const next = (Array.isArray(rows) ? rows : []).map(row => ({
+          id: String(row.id), label: String(row.label || ""), right: String(row.right || ""), enabled: !!row.enabled,
+        }));
+        if (JSON.stringify(next) !== JSON.stringify(worldRows)) { worldRows = next; dirty = true; }
+      },
       setSceneName(name) { sceneName = String(name || ""); dirty = true; },
       setMinimapFeatures(features) {
+        cancelMinimapInput();
         mapFeatures = Array.isArray(features?.boundsPolygon) && features.boundsPolygon.length >= 3 && features.boundsPolygon.every(mapPoint) ? features : null;
         mapPlayer = null; mapOpen = false; dirty = true;
       },

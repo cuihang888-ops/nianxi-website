@@ -81,6 +81,7 @@ function fixture(initial, { unlit = false } = {}) {
     openTeleport(destinations, callback) { this.destinations = destinations; this.chooseDestination = callback; this.portal = true; },
     closeTeleport() { this.portal = false; },
     setExtraRow(value) { this.extraRow = value; },
+    setWorldRows(value) { this.worldRows = value; },
     setBasket(value) { this.basket = value; },
     markDirty() {}, toast(value) { toasts.push(value); },
   };
@@ -94,13 +95,13 @@ function fixture(initial, { unlit = false } = {}) {
   };
 }
 
-function multiDamFixture(initial) {
+function multiDamFixture(initial, { onHomeRelocated = () => {} } = {}) {
   const base = fixture(initial);
   const records = Object.fromEntries(["mangshi", "ruili", "yingjiang", "longchuan", "lianghe"].map(dam => [dam, fixture()]));
   records.mangshi = base;
   const controller = createHomeController({ state: base.state, transact: base.session.transact, ui: base.ui,
     getDamWorld: dam => records[dam || "mangshi"].world, setScene: scene => base.scenes.push(scene),
-    now: () => START, today: () => DAY });
+    now: () => START, today: () => DAY, onHomeRelocated });
   return { ...base, records, controller,
     actIn(dam, prefix) {
       const index = ["mangshi", "ruili", "yingjiang", "longchuan", "lianghe"].indexOf(dam) + 2;
@@ -109,6 +110,182 @@ function multiDamFixture(initial) {
       return base.ui.action();
     } };
 }
+
+function relocationState(dam = "mangshi", custom = false) {
+  const state = Daily.defaultState();
+  state.coins = 0.5;
+  state.home = Daily.createHome(custom ? -1 : 0, custom ? -1 : 0, "Original home", dam);
+  if (custom) state.home.custom = { x: -120, z: -35 };
+  Object.assign(state.home, {
+    hut: true, house: 2, field: true, beds: { crop: "carrot", readyAt: START / 1000 + 500 }, harvests: 3,
+    animals: { chicken: 1, sheep: 1, rabbit: 1 }, produce: { egg: 1, wool: 2, fur: 3 },
+    basket: { carrot: 8, egg: 3, wool: 2, fur: 1 },
+    produceNext: { chicken: START / 1000 + 300, sheep: START / 1000 + 400, rabbit: START / 1000 + 500 },
+  });
+  return state;
+}
+
+const relocationAssets = home => {
+  const { site, plot, label, dam, custom, ...assets } = home;
+  return assets;
+};
+
+test("cross-dam fixed and custom moves preserve all home assets and clean the old scene only after saving", () => {
+  for (const custom of [false, true]) {
+    const cleared = [];
+    let f;
+    f = multiDamFixture(relocationState(), { onHomeRelocated(dam) {
+      assert.equal(f.state.home.dam, "ruili", "cleanup observes the committed destination");
+      cleared.push(dam);
+    } });
+    const destination = f.records.ruili;
+    destination.world.debugPlayer(-136, 5);
+    destination.world.checkHomeRoadAccess = () => ({ ok: false, reason: "road-access" });
+    if (custom) destination.target(null);
+    const assets = structuredClone(relocationAssets(f.state.home)), coins = f.state.coins;
+    f.controller.update(3, destination.world);
+    assert.match(f.ui.label, /把家搬到这里/);
+    const before = structuredClone(f.state);
+    f.fail(true);
+    assert.equal(f.ui.action().ok, false);
+    assert.deepEqual(f.state, before);
+    assert.deepEqual(cleared, []);
+    assert.deepEqual(destination.visuals, []);
+    f.fail(false);
+    assert.equal(f.actIn("ruili", "把家搬到这里").ok, true);
+    assert.deepEqual(cleared, ["mangshi"]);
+    assert.equal(f.state.coins, coins);
+    assert.deepEqual(relocationAssets(f.state.home), assets);
+    assert.equal(f.state.home.dam, "ruili");
+    if (custom) assert.deepEqual(f.state.home.custom, { x: -136, z: 5 });
+    else assert.equal(Object.hasOwn(f.state.home, "custom"), false);
+    assert.ok(destination.visuals.includes(custom ? "custom" : "claim"));
+  }
+});
+
+test("custom relocation checks the current site again and can move within the same dam without road access", () => {
+  for (const oldDam of ["mangshi", "ruili"]) {
+    const cleared = [], f = multiDamFixture(relocationState(oldDam), { onHomeRelocated: dam => cleared.push(dam) });
+    const destination = f.records.ruili;
+    destination.target(null); destination.world.debugPlayer(-136, 5);
+    destination.world.checkHomeRoadAccess = () => ({ ok: false, reason: "road-access" });
+    f.controller.update(3, destination.world);
+    assert.match(f.ui.label, /把家搬到这里/);
+    const action = f.ui.action, writes = f.writes(), original = structuredClone(f.state);
+    destination.world.debugPlotCheck({ ok: false, reason: "water" });
+    assert.equal(action(), false);
+    assert.deepEqual(f.state, original); assert.equal(f.writes(), writes); assert.deepEqual(cleared, []);
+    destination.world.debugPlotCheck({ ok: true });
+    destination.world.debugPlayer(-136, -10);
+    assert.equal(action().ok, true, "the actual current position is used after rechecking land");
+    assert.deepEqual(f.state.home.custom, { x: -136, z: -10 });
+    assert.deepEqual(relocationAssets(f.state.home), relocationAssets(original.home));
+    assert.equal(f.state.coins, original.coins);
+    assert.deepEqual(cleared, [oldDam]);
+  }
+});
+
+test("fixed relocation refuses stale, reserved, occupied and mounted targets before saving", () => {
+  for (const state of ["stale", "reserved", "occupied", "mounted"]) {
+    const cleared = [], f = multiDamFixture(relocationState(), { onHomeRelocated: dam => cleared.push(dam) });
+    const destination = f.records.ruili;
+    destination.world.debugPlayer(-136, 5);
+    f.controller.update(3, destination.world);
+    assert.match(f.ui.label, /把家搬到这里/);
+    const action = f.ui.action, before = structuredClone(f.state), writes = f.writes();
+    if (state === "stale") destination.target({ type: "plot", site: 0, idx: 1 });
+    if (state === "reserved") destination.target({ type: "plot", site: 0, idx: 0, reserved: true });
+    if (state === "occupied") destination.plot.claimed = true;
+    if (state === "mounted") destination.world.setMounted(true);
+    assert.equal(action(), false, state);
+    assert.deepEqual(f.state, before, state);
+    assert.equal(f.writes(), writes, state);
+    assert.deepEqual(cleared, [], state);
+  }
+});
+
+test("moving saves the following horse position atomically before the old scene is removed", () => {
+  const state = relocationState();
+  state.horse = horseState(12, 25);
+  const cleared = [], f = multiDamFixture(state, { onHomeRelocated: dam => cleared.push(dam) });
+  f.controller.restoreVisual(f.records.mangshi.world, "mangshi");
+  f.records.mangshi.world.debugHorse(24, 38);
+  f.records.ruili.world.debugPlayer(-136, 5);
+  f.controller.update(3, f.records.ruili.world);
+  const old = structuredClone(f.state);
+  f.fail(true);
+  assert.equal(f.ui.action().ok, false);
+  assert.deepEqual(f.state, old);
+  assert.deepEqual(cleared, []);
+  f.fail(false);
+  assert.equal(f.actIn("ruili", "把家搬到这里").ok, true);
+  assert.equal(f.state.horse.x, 24);
+  assert.equal(f.state.horse.z, 38);
+  assert.equal(f.state.horse.dam, "mangshi");
+  assert.deepEqual(cleared, ["mangshi"]);
+});
+
+test("the hall offers a one-time free supply without automatically topping up old saves", () => {
+  const old = Daily.defaultState(); old.coins = 0;
+  const f = fixture(old);
+  f.update(3);
+  assert.equal(f.state.coins, 0);
+  assert.ok(f.ui.worldRows.some(row => row.id === "trial-supply"));
+  f.fail(true);
+  assert.equal(f.controller.handleExternal("trial-supply").ok, false);
+  assert.equal(f.state.coins, 0);
+  f.fail(false);
+  assert.equal(f.controller.handleExternal("trial-supply").ok, true);
+  f.update(3);
+  assert.equal(f.ui.worldRows.some(row => row.id === "trial-supply"), false);
+  assert.equal(f.controller.handleExternal("trial-supply").ok, false);
+  assert.equal(f.state.coins, Daily.ECONOMY.trialSupplyCoins);
+});
+
+test("road construction requires a displayed quote, saves before rendering and never charges stale positions", () => {
+  const f = fixture();
+  const roads = [];
+  f.target(null);
+  f.world.getRoadNetwork = () => [{ a: { x: -30, z: 0 }, b: { x: 30, z: 0 }, width: 4 }];
+  f.world.quotePlayerRoad = (a, b) => Math.hypot(a.x - b.x, a.z - b.z) < 2
+    ? { ok: false, reason: "road-too-short" } : { ok: true, road: { a, b } };
+  f.world.restorePlayerRoads = values => { roads.splice(0, roads.length, ...values); };
+  f.world.getMapFeatures = () => ({ roads });
+  f.update(3);
+  assert.equal(f.controller.handleExternal("road-start"), true);
+  f.update(3);
+  assert.match(f.ui.label, /选定起点/);
+  f.ui.action();
+  f.world.debugPlayer(0, 20);
+  f.update(3);
+  assert.match(f.ui.label, /40 安币/);
+  f.fail(true);
+  assert.equal(f.ui.action().ok, false);
+  assert.equal(f.state.coins, 1000);
+  assert.equal(roads.length, 0);
+  f.fail(false);
+  f.world.debugPlayer(0, 25);
+  assert.equal(f.ui.action(), false);
+  assert.equal(f.state.coins, 1000);
+  f.update(3);
+  assert.match(f.ui.label, /50 安币/);
+  assert.equal(f.ui.action().ok, true);
+  assert.equal(f.state.coins, 950);
+  assert.equal(roads.length, 1);
+  assert.equal(f.controller.handleExternal("road-cancel"), true);
+  assert.equal(f.state.playerRoads.ruili.length, 1);
+});
+
+test("Ruili free placement remains available away from roads and charges the regular plot price", () => {
+  const f = fixture(); f.target(null);
+  f.world.checkHomeRoadAccess = () => ({ ok: false, reason: "road-access" });
+  f.update(3);
+  assert.match(f.ui.label, /在此安家/);
+  assert.equal(f.ui.action().ok, true);
+  assert.equal(f.state.coins, 400);
+  f.controller.restoreVisual(f.world, "ruili");
+  assert.equal(f.state.home.dam, "ruili");
+});
 
 test("home actions keep Muse order and restore only committed visual changes", () => {
   const f = fixture();
