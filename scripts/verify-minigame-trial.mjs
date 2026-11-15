@@ -5,7 +5,16 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { chromium } from "@playwright/test";
 import Discovery from "../wechat/vendor/preview-discovery.cjs";
+import Economy from "../wechat/vendor/preview-economy.cjs";
 import Sky from "../wechat/vendor/preview-sky.cjs";
+
+const HOME = Economy.HOME;
+const carrotCount = HOME.BEDS * HOME.CARROT_YIELD_PER_BED;
+const carrotSeedCost = HOME.BEDS * HOME.CARROT_SEED_PER_BED;
+const carrotBasketValue = carrotCount * HOME.CARROT_SELL;
+const fullProduceBasket = { carrot: 0, egg: HOME.PRODUCE_CAP, wool: HOME.PRODUCE_CAP, fur: HOME.PRODUCE_CAP };
+const fullProduceValue = Object.values(HOME.PRODUCE_SELL).reduce((total, price) => total + HOME.PRODUCE_CAP * price, 0);
+const produceFillSeconds = Math.max(...Object.values(HOME.PRODUCE_INTERVAL)) * HOME.PRODUCE_CAP + 1;
 
 const root = await realpath(fileURLToPath(new URL("..", import.meta.url)));
 if (process.platform === "win32" && !/^d:/i.test(root)) throw new Error("Trial verification outputs must stay on D:");
@@ -351,7 +360,8 @@ try {
   await page.clock.setFixedTime(fakeNow);
   await page.goto(url, { waitUntil: "networkidle" });
   await wait(() => !!window.__trial && document.querySelector("#status").hidden);
-  assert.equal((await state()).coins, 1200);
+  let expectedCoins = Economy.initialCoins;
+  assert.equal((await state()).coins, expectedCoins);
   assert.deepEqual((await state()).lit, {}, "a genuinely new save starts with no lit crystals");
   await visual("desktop-courtyard");
   await page.evaluate(() => {
@@ -371,10 +381,11 @@ try {
 
   await click("open-hall");
   await click("signin");
-  assert.equal((await state()).coins, 1205);
+  expectedCoins += Economy.signinCoins;
+  assert.equal((await state()).coins, expectedCoins);
   await click("signin");
-  assert.equal((await state()).coins, 1205);
-  check("signin adds 5 once; repeat tap does not duplicate reward");
+  assert.equal((await state()).coins, expectedCoins);
+  check(`signin adds ${Economy.signinCoins} once; repeat tap does not duplicate reward`);
   await click("jingxin");
   await page.waitForTimeout(1200);
   assert.equal((await state()).quests.jingxin, false);
@@ -393,7 +404,8 @@ try {
   const carrotPoint = await page.evaluate(() => window.__trial.getWorld().debugTapPoints(innerWidth, innerHeight).find(point => point.type === "bed" && point.crop === "carrot"));
   await page.mouse.click(carrotPoint.x, carrotPoint.y);
   await wait(() => window.__trial.getState().quests.harvest);
-  assert.equal((await state()).coins, 1220);
+  expectedCoins += Economy.carrotSale;
+  assert.equal((await state()).coins, expectedCoins);
   const animalStarts = await page.evaluate(() => {
     const values = {};
     window.__trial.getWorld().scene.traverse(object => { if (object.isGroup) values[object.uuid] = object.position.toArray(); });
@@ -412,9 +424,10 @@ try {
   await visual("desktop-pasture");
   await click("open-hall");
   await click("quest");
-  assert.equal((await state()).coins, 1260);
+  expectedCoins += Economy.questReward;
+  assert.equal((await state()).coins, expectedCoins);
   await click("quest");
-  assert.equal((await state()).coins, 1260);
+  assert.equal((await state()).coins, expectedCoins);
   await click("close");
   check("pasture pet and carrot clicks update quests; animals move; quest reward is single-use");
 
@@ -452,47 +465,64 @@ try {
     world.debugSetPlayer(plot.x, plot.z);
   });
   await action("安家");
-  assert.equal((await state()).coins, 860);
+  expectedCoins -= HOME.PLOT_PRICE;
+  assert.equal((await state()).coins, expectedCoins);
   assert.equal((await state()).home.plot, 0);
   await action("草棚");
   assert.equal((await state()).home.house, 1);
   await action("开");
   assert.equal((await state()).home.field, true);
   await action("种萝卜");
-  assert.equal((await state()).coins, 788);
+  expectedCoins -= carrotSeedCost;
+  assert.equal((await state()).coins, expectedCoins);
   assert.equal((await state()).home.beds.crop, "carrot");
-  await advanceSeconds(61);
+  await advanceSeconds(HOME.CARROT_GROW_SEC + 1);
   await action("收获萝卜");
-  assert.equal((await state()).coins, 788, "home harvest enters the basket without minting coins");
-  assert.deepEqual((await state()).home.basket, { carrot: 8, egg: 0, wool: 0, fur: 0 });
+  assert.equal((await state()).coins, expectedCoins, "home harvest enters the basket without minting coins");
+  assert.deepEqual((await state()).home.basket, { carrot: carrotCount, egg: 0, wool: 0, fur: 0 });
   assert.equal((await state()).home.harvests, 1);
   await page.reload({ waitUntil: "networkidle" });
   await wait(() => !!window.__trial);
-  assert.equal((await state()).coins, 788);
-  assert.deepEqual((await state()).home.basket, { carrot: 8, egg: 0, wool: 0, fur: 0 }, "a nonempty basket survives reload");
+  assert.equal((await state()).coins, expectedCoins);
+  assert.deepEqual((await state()).home.basket, { carrot: carrotCount, egg: 0, wool: 0, fur: 0 }, "a nonempty basket survives reload");
   await scene(2);
-  await sellAtMarket("mangshi", 120, "desktop-carrot");
+  await sellAtMarket("mangshi", carrotBasketValue, "desktop-carrot");
+  expectedCoins += carrotBasketValue;
   await returnHome();
   await action("鸡");
   await action("羊");
   await action("兔");
+  expectedCoins -= Object.values(HOME.ANIMAL_PRICE).reduce((total, price) => total + price, 0);
   let homeState = await state();
-  assert.equal(homeState.coins, 328);
+  assert.equal(homeState.coins, expectedCoins);
   assert.deepEqual(homeState.home.animals, { chicken: 1, rabbit: 1, sheep: 1 });
-  await advanceSeconds(226);
+  await advanceSeconds(produceFillSeconds);
   assert.equal(await page.evaluate(() => window.__trial.getWorld().scene.getObjectByName("home:harvest-basket")?.visible), true,
     "waiting animal produce appears as a physical harvest basket");
   await visual("desktop-harvest-basket");
   await action("出产");
-  assert.equal((await state()).coins, 328, "collecting animal produce only fills the basket");
-  assert.deepEqual((await state()).home.basket, { carrot: 0, egg: 3, wool: 3, fur: 3 });
+  assert.equal((await state()).coins, expectedCoins, "collecting animal produce only fills the basket");
+  assert.deepEqual((await state()).home.basket, fullProduceBasket);
   assert.equal(await page.evaluate(() => window.__trial.getWorld().scene.getObjectByName("home:harvest-basket")?.visible), false,
     "collecting all produce hides the physical harvest basket");
-  await sellAtMarket("mangshi", 210, "desktop-produce");
+  await sellAtMarket("mangshi", fullProduceValue, "desktop-produce");
+  expectedCoins += fullProduceValue;
   await returnHome();
+  // Fund the upgrade through real production; the opening grant alone no longer covers it.
+  for (let round = 1; expectedCoins < HOME.BAMBOO_PRICE; round++) {
+    assert.ok(round <= 10 && fullProduceValue > 0, "normal production can fund the bamboo upgrade");
+    await advanceSeconds(produceFillSeconds);
+    await action("出产");
+    assert.equal((await state()).coins, expectedCoins, "collecting upgrade funding does not mint coins");
+    assert.deepEqual((await state()).home.basket, fullProduceBasket);
+    await sellAtMarket("mangshi", fullProduceValue, `desktop-bamboo-funding-${round}`);
+    expectedCoins += fullProduceValue;
+    await returnHome();
+  }
   await action("竹楼");
+  expectedCoins -= HOME.BAMBOO_PRICE;
   homeState = await state();
-  assert.equal(homeState.coins, 38);
+  assert.equal(homeState.coins, expectedCoins);
   assert.equal(homeState.home.house, 2);
   await visual("desktop-home-built");
   check("real actions complete home progression; crop and animal produce enter a persistent basket and sell at market once");
@@ -501,7 +531,7 @@ try {
   await wait(() => !!window.__trial);
   const restored = await state();
   assert.deepEqual(restored.home, homeState.home);
-  assert.equal(restored.coins, 38);
+  assert.equal(restored.coins, expectedCoins);
   await click("open-hall");
   await click("go-home");
   assert.equal(await active(), 2);
@@ -529,11 +559,12 @@ try {
     await action("传送");
     await click("tp:mangshi");
     assert.equal(await active(), 2);
-    assert.equal((await state()).coins, beforeRoad - 0.5, "the return teleport charges 0.5");
+    expectedCoins -= Economy.teleportPrice;
+    assert.equal((await state()).coins, beforeRoad - Economy.teleportPrice, "the return teleport charges the configured price");
     await approachCrystal();
   }
   assert.deepEqual((await state()).lit, { mangshi: true, ruili: true, yingjiang: true, longchuan: true, lianghe: true });
-  check("new saves light crystals in person; four first road journeys are free and lit return trips cost 0.5");
+  check(`new saves light crystals in person; four first road journeys are free and lit return trips cost ${Economy.teleportPrice}`);
 
   await page.evaluate(() => {
     const world = window.__trial.getWorld(), crystal = world.getCrystalPos();
@@ -549,14 +580,16 @@ try {
   assert.deepEqual(portalEnd, portalStart, "movement is blocked behind teleport selector");
   await click("tp:ruili");
   assert.equal(await active(), 3);
-  assert.equal((await state()).coins, 35.5);
+  expectedCoins -= Economy.teleportPrice;
+  assert.equal((await state()).coins, expectedCoins);
   await visual("desktop-ruili");
   await approachCrystal();
   await action("传送");
   await click("tp:mangshi");
   assert.equal(await active(), 2);
-  assert.equal((await state()).coins, 35);
-  check("portal selector offers four destinations, blocks movement, and charges 0.5 per trip");
+  expectedCoins -= Economy.teleportPrice;
+  assert.equal((await state()).coins, expectedCoins);
+  check(`portal selector offers four destinations, blocks movement, and charges ${Economy.teleportPrice} per trip`);
 
   for (const destination of [{ id: "yingjiang", index: 4 }, { id: "longchuan", index: 5 }, { id: "lianghe", index: 6 }]) {
     const balance = (await state()).coins;
@@ -567,12 +600,14 @@ try {
     await action("传送");
     await click(`tp:${destination.id}`);
     assert.equal(await active(), destination.index);
-    assert.equal((await state()).coins, balance - 0.5);
+    expectedCoins -= Economy.teleportPrice;
+    assert.equal((await state()).coins, balance - Economy.teleportPrice);
     await approachCrystal();
     await action("传送");
     await click("tp:mangshi");
     assert.equal(await active(), 2);
-    assert.equal((await state()).coins, balance - 1);
+    expectedCoins -= Economy.teleportPrice;
+    assert.equal((await state()).coins, balance - 2 * Economy.teleportPrice);
   }
   check("all four destination routes and return trips use the visible selector and correct charge");
 
@@ -606,11 +641,11 @@ try {
 
   await page.setViewportSize({ width: 1280, height: 800 });
   await returnHome();
-  await advanceSeconds(226);
+  await advanceSeconds(produceFillSeconds);
   const beforeRestSale = (await state()).coins;
   await action("出产");
   assert.equal((await state()).coins, beforeRestSale);
-  await sellAtMarket("mangshi", 210, "rest-funding");
+  await sellAtMarket("mangshi", fullProduceValue, "rest-funding");
   await returnHome();
   await action("种萝卜");
   const beforeRest = await state();
@@ -636,7 +671,7 @@ try {
   check("physical harvest basket tracks pending produce; home resting changes pose, allows standing or walking away, and grants no economy benefit");
   await closeCurrentPageContext();
 
-  // A separate untouched save proves that the horse can be bought with the real opening grant.
+  // A separate fresh save funds the horse through the opening grant and real daily sign-ins.
   const horseProfile = await mkdtemp(path.join(profileRoot, "horse-"));
   const horseContext = await chromium.launchPersistentContext(horseProfile, {
     executablePath, headless: true, viewport: { width: 1280, height: 800 },
@@ -649,18 +684,28 @@ try {
   await page.clock.setFixedTime(fakeNow);
   await page.goto(url, { waitUntil: "networkidle" });
   await wait(() => !!window.__trial);
-  assert.equal((await state()).coins, 1200);
+  let horseExpectedCoins = Economy.initialCoins;
+  assert.equal((await state()).coins, horseExpectedCoins);
   await scene(2);
   await page.evaluate(() => window.__trial.getWorld().debugSetPlayer(-100, 130));
   const walking = await measureMovementSpeed();
   assert.ok(walking.speed > 11 && walking.speed < 14, `walking is about 13 units/s (${walking.speed})`);
   await click("open-hall");
+  for (let day = 1; horseExpectedCoins < HOME.HORSE_PRICE; day++) {
+    assert.ok(day <= 90, "normal sign-in rewards can fund the horse");
+    const count = (await state()).signin.days.length + 1;
+    await click("signin");
+    horseExpectedCoins += Economy.signinCoins + (Economy.milestones[count] || 0);
+    assert.equal((await state()).coins, horseExpectedCoins, "each actual sign-in pays its configured daily and cumulative reward");
+    if (horseExpectedCoins < HOME.HORSE_PRICE) await advanceSeconds(86400);
+  }
   await click("buy-horse");
-  assert.equal((await state()).coins, 0);
+  horseExpectedCoins -= HOME.HORSE_PRICE;
+  assert.equal((await state()).coins, horseExpectedCoins);
   assert.equal((await state()).horse.owned, true);
   assert.equal(await page.evaluate(() => window.__trial.ui.getHitRects().some(rect => rect.id === "horse-owned")), true);
   await click("horse-owned");
-  assert.equal((await state()).coins, 0);
+  assert.equal((await state()).coins, horseExpectedCoins);
   await click("close");
   await page.evaluate(() => {
     const world = window.__trial.getWorld(), horse = world.getHorsePos();
@@ -686,12 +731,12 @@ try {
   await page.reload({ waitUntil: "networkidle" });
   await wait(() => !!window.__trial);
   assert.deepEqual((await state()).horse, horseSave);
-  assert.equal((await state()).coins, 0);
+  assert.equal((await state()).coins, horseExpectedCoins);
   await scene(2);
   const restoredHorse = await page.evaluate(() => ({ pos: window.__trial.getWorld().getHorsePos(), mounted: window.__trial.getWorld().isMounted() }));
   assert.deepEqual(restoredHorse.pos, { x: horseSave.x, z: horseSave.z });
   assert.equal(restoredHorse.mounted, false);
-  check("fresh grant buys one horse for 1200; feed and brush raise bond to 20; mounted speed and dismount position persist");
+  check(`opening grant and real sign-in rewards buy one horse for ${HOME.HORSE_PRICE}; feed and brush raise bond to 20; mounted speed and dismount position persist`);
   for (let day = 1; day <= 6; day++) {
     await advanceSeconds(86400);
     await page.evaluate(() => {
@@ -718,7 +763,7 @@ try {
   const called = (await state()).horse;
   assert.equal(called.dam, "lianghe");
   assert.equal(called.bond, 80);
-  assert.equal((await state()).coins, 0, "care and call do not manufacture coins");
+  assert.equal((await state()).coins, horseExpectedCoins, "care and call do not manufacture coins");
   assert.ok(await page.evaluate(() => {
     const world = window.__trial.getWorld(), horse = world.getHorsePos(), player = world.getPlayerPos();
     return horse && Math.hypot(horse.x - player.x, horse.z - player.z) < 12;
@@ -748,7 +793,7 @@ try {
     await page.clock.setFixedTime(fakeNow);
     await page.goto(url, { waitUntil: "networkidle" });
     await wait(() => !!window.__trial);
-    assert.equal((await state()).coins, 1200);
+    assert.equal((await state()).coins, Economy.initialCoins);
     await scene(destination.index);
     await page.evaluate(() => {
       const world = window.__trial.getWorld(), plot = world.getPlots()[0];
@@ -777,7 +822,8 @@ try {
       world.debugSetPlayer(plot.x, plot.z);
     });
     await action("安家");
-    assert.equal((await state()).coins, 800);
+    const homeCoins = Economy.initialCoins - HOME.PLOT_PRICE;
+    assert.equal((await state()).coins, homeCoins);
     assert.equal((await state()).home.dam, destination.id);
     await action("草棚");
     await action("开");
@@ -794,7 +840,7 @@ try {
     await page.reload({ waitUntil: "networkidle" });
     await wait(() => !!window.__trial);
     assert.deepEqual((await state()).home, savedHome);
-    assert.equal((await state()).coins, 800);
+    assert.equal((await state()).coins, homeCoins);
     await click("open-hall");
     await click("go-home");
     assert.equal(await active(), destination.index);
@@ -815,7 +861,7 @@ try {
     await page.reload({ waitUntil: "networkidle" });
     await wait(() => !!window.__trial);
     assert.deepEqual((await state()).lit, { mangshi: true, [destination.id]: true }, "a legitimate old home save migrates its existing home and origin crystals");
-    assert.equal((await state()).coins, 800);
+    assert.equal((await state()).coins, homeCoins);
     await returnHome();
     await approachCrystal();
     await action("传送");
@@ -827,7 +873,7 @@ try {
     assert.deepEqual(await page.evaluate(() => window.__trial.getWorld().getPlayerPos()), behindStart);
     await click("tp:mangshi");
     assert.equal(await active(), 2);
-    assert.equal((await state()).coins, 799.5);
+    assert.equal((await state()).coins, homeCoins - Economy.teleportPrice);
     results.crossDamHomes.push({ dam: destination.id, profile: damProfile, savedHome });
     await damContext.close();
     contexts.pop();
@@ -849,8 +895,9 @@ try {
     return null;
   });
   assert.ok(customSpot, "a valid custom home site exists");
-  await action("600");
-  assert.equal((await state()).coins, 600);
+  await action(String(HOME.CUSTOM_PLOT_PRICE));
+  const customHomeCoins = Economy.initialCoins - HOME.CUSTOM_PLOT_PRICE;
+  assert.equal((await state()).coins, customHomeCoins);
   assert.equal((await state()).home.dam, "lianghe");
   assert.equal((await state()).home.site, -1);
   assert.equal((await state()).home.plot, -1);
@@ -858,13 +905,13 @@ try {
   await action("草棚");
   await action("开");
   await action("种萝卜");
-  await advanceSeconds(61);
+  await advanceSeconds(HOME.CARROT_GROW_SEC + 1);
   await action("收获萝卜");
-  assert.equal((await state()).coins, 528);
-  assert.deepEqual((await state()).home.basket, { carrot: 8, egg: 0, wool: 0, fur: 0 });
-  await sellAtMarket("lianghe", 120, "custom-home-carrot");
+  assert.equal((await state()).coins, customHomeCoins - carrotSeedCost);
+  assert.deepEqual((await state()).home.basket, { carrot: carrotCount, egg: 0, wool: 0, fur: 0 });
+  await sellAtMarket("lianghe", carrotBasketValue, "custom-home-carrot");
   const customSave = (await state()).home;
-  assert.equal((await state()).coins, 648);
+  assert.equal((await state()).coins, customHomeCoins - carrotSeedCost + carrotBasketValue);
   await scene(2);
   await click("open-hall");
   await click("go-home");
@@ -879,7 +926,7 @@ try {
   assert.equal(customVisual.house, 1);
   assert.equal(customVisual.field, true);
   await visual("custom-home-restored");
-  check("custom home costs 600 and supports construction, planting, harvest, cross-dam return and reload");
+  check(`custom home costs ${HOME.CUSTOM_PLOT_PRICE} and supports construction, planting, harvest, cross-dam return and reload`);
   await closeCurrentPageContext();
 
   results.festivals = [];
@@ -909,7 +956,7 @@ try {
       return moved;
     }, { id: festival.id, start: festiveMotion }));
     await action(festival.id === "munao" ? "纵歌" : festival.id === "songkran" ? "泼水" : "点灯");
-    assert.equal((await state()).coins, 1230);
+    assert.equal((await state()).coins, Economy.initialCoins + Economy.festivalReward);
     assert.equal((await state()).festJoined[festival.id], year);
     assert.equal((await state()).album.festivals[festival.id], true);
     if (festival.id === "songkran") {
@@ -957,7 +1004,7 @@ try {
       await page.waitForTimeout(6800);
       assert.equal(await page.evaluate(() => window.__trial.getWorld().scene.getObjectByName("festival:player-lanterns").children.some(child => child.visible)), false);
     }
-    assert.equal((await state()).coins, 1230, "repeated festival play cannot duplicate the annual reward");
+    assert.equal((await state()).coins, Economy.initialCoins + Economy.festivalReward, "repeated festival play cannot duplicate the annual reward");
     await visual(`festival-${festival.id}-joined`);
     const afterWindow = new Date(Date.UTC(year, festival.to[0] - 1, festival.to[1] + 1, 4)).getTime();
     await page.clock.setFixedTime(afterWindow);
@@ -965,12 +1012,12 @@ try {
     assert.equal(await page.evaluate(id => window.__trial.getWorld().scene.getObjectByName(`festival:${id}`)?.visible, festival.id), false);
     await page.reload({ waitUntil: "networkidle" });
     await wait(() => !!window.__trial);
-    assert.equal((await state()).coins, 1230);
+    assert.equal((await state()).coins, Economy.initialCoins + Economy.festivalReward);
     assert.equal((await state()).album.festivals[festival.id], true);
-    results.festivals.push({ id: festival.id, date: new Date(stamp).toISOString(), reward: 30, noRepeat: true, expiredWithoutSwitch: true });
+    results.festivals.push({ id: festival.id, date: new Date(stamp).toISOString(), reward: Economy.festivalReward, noRepeat: true, expiredWithoutSwitch: true });
     await closeCurrentPageContext();
   }
-  check("three calendar festivals pay 30 once; repeat splash, dance and lantern play is free, animated and expires with the date window");
+  check(`three calendar festivals pay ${Economy.festivalReward} once; repeat splash, dance and lantern play is free, animated and expires with the date window`);
 
   let rainyDate;
   for (let day = 1; day <= 31; day++) {
