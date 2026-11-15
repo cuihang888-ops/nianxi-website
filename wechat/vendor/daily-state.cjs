@@ -347,17 +347,29 @@ function claimQuest(state, today) {
   return { ok: true, msg: "小确幸达成 +" + QUEST_REWARD + " 安币 · 日子就是这样一点点攒起来的" };
 }
 
-function claimHome(state, site, plot, dam = "mangshi") {
+// 地价分档报价（单一数据源在 preview-economy.cjs 的 LAND_BANDS）：
+// 以本坝传送水晶为锚点，按坐标距水晶的直线距离取档位与价格。坝名无效返回 null。
+function landQuoteForDam(dam, x, z) {
+  if (typeof dam !== "string" || !Object.hasOwn(ECONOMY.DAMS, dam)) return null;
+  return ECONOMY.landQuote(ECONOMY.DAMS[dam].crystal, x, z);
+}
+
+function claimHome(state, site, plot, dam = "mangshi", centre = null) {
   if (typeof dam !== "string" || !Object.hasOwn(ECONOMY.DAMS, dam)) return failure("INVALID_DAM", "这处坝子暂时不能安家");
   if (!Number.isInteger(site) || site < 0 || site > 1 || !Number.isInteger(plot) || plot < 0 || plot > 7) {
     return failure("INVALID_PLOT", "这处土地暂时不能安家");
   }
   if (state.home) return failure("HOME_EXISTS", "已经有家了 · 一处家园，就够安心");
-  if (state.coins < ECONOMY.plotPrice) return failure("INSUFFICIENT_COINS", "安币不够，还差 " + (ECONOMY.plotPrice - state.coins) + " 安币");
-  state.coins -= ECONOMY.plotPrice;
+  // 价格按地块中心距本坝水晶的距离分档（控制器恒传世界侧真实坐标）；
+  // 无坐标的旧调用路径回退到标准地价（近郊档，与分档表同源）。
+  const quote = centre ? landQuoteForDam(dam, centre.x, centre.z) : null;
+  const price = quote ? quote.price : ECONOMY.plotPrice;
+  if (state.coins < price) return failure("INSUFFICIENT_COINS", "安币不够，还差 " + (price - state.coins) + " 安币");
+  state.coins -= price;
   state.home = createHome(site, plot, ECONOMY.DAMS[dam].name + " · " + ECONOMY.DAMS[dam].sites[site] + " " + (plot + 1) + " 号地", dam);
   if (state.player?.name) state.home.name = state.player.name + "的家";
-  return { ok: true, msg: "安家了 · " + (state.home.name || state.home.label) };
+  return { ok: true, price, landBand: quote ? quote.band : null, landLabel: quote ? quote.label : null,
+    msg: "安家了 · " + (state.home.name || state.home.label) };
 }
 
 function buildHomeHut(state) {
@@ -578,12 +590,16 @@ function setHorsePosition(state, x, z, dam = state.horse?.dam || "mangshi") {
 function claimCustomHome(state, x, z, dam = "mangshi") {
   if (!validHorsePosition(x, z, dam)) return failure("INVALID_PLOT", "这处土地暂时不能安家");
   if (state.home) return failure("HOME_EXISTS", "已经有家了 · 一处家园，就够安心");
-  if (state.coins < HOME.CUSTOM_PLOT_PRICE) return failure("INSUFFICIENT_COINS", "安币不够，还差 " + (HOME.CUSTOM_PLOT_PRICE - state.coins) + " 安币");
-  state.coins -= HOME.CUSTOM_PLOT_PRICE;
+  // 自选地按落点距本坝水晶的距离分档计价（取代旧定值 600）；位置已校验，报价必不为空。
+  const quote = landQuoteForDam(dam, x, z);
+  const price = quote ? quote.price : ECONOMY.plotPrice;
+  if (state.coins < price) return failure("INSUFFICIENT_COINS", "安币不够，还差 " + (price - state.coins) + " 安币");
+  state.coins -= price;
   state.home = createHome(-1, -1, ECONOMY.DAMS[dam].name + " · 自选之地", dam);
   state.home.custom = { x, z };
   if (state.player?.name) state.home.name = state.player.name + "的家";
-  return { ok: true, msg: state.home.name ? "安家了 · " + state.home.name : "安家了 · 这块自选之地，从此是你的了" };
+  return { ok: true, price, landBand: quote ? quote.band : null, landLabel: quote ? quote.label : null,
+    msg: state.home.name ? "安家了 · " + state.home.name : "安家了 · 这块自选之地，从此是你的了" };
 }
 
 function normalizeProgress(state) {
@@ -762,5 +778,7 @@ module.exports = { defaultState, newPlayerState, registrationPending, registerPl
   claimHome, buildHomeHut, validateState, normalizeLegacyState, createStateSession, todayShanghai,
   createHome, normalizeHome, accrueProduce, produceValue, openHomeField, plantCarrots, harvestCarrots,
   buyHomeAnimal, collectHomeProduce, basketValue, basketCount, sellBasket, upgradeHomeBamboo, lightCrystal, payTeleport, buyHorse, setHorsePosition,
-  claimCustomHome, careHorse, callHorse, bondTier, albumAdd, activeFestival, nextFestival, joinFestival, computeSky,
+  claimCustomHome, landQuoteForDam, landBandForDistance: ECONOMY.landBandForDistance,
+  landPriceForDistance: ECONOMY.landPriceForDistance, landQuote: ECONOMY.landQuote, LAND_BANDS: ECONOMY.LAND_BANDS,
+  careHorse, callHorse, bondTier, albumAdd, activeFestival, nextFestival, joinFestival, computeSky,
   HOME, ECONOMY, MILESTONES, QUEST_REWARD, BOND, FESTIVALS, FEST_REWARD };

@@ -549,7 +549,7 @@ test("custom location is rechecked on click and failed saves leave land and bala
   ruili.world.debugPlayer(80.25, 60.5);
   f.controller.update(3, ruili.world);
   const stale = f.ui.action;
-  assert.ok(f.ui.label.includes("600"));
+  assert.ok(f.ui.label.includes("400"), "自选地按距水晶分档：此点距瑞丽水晶约 89，近郊地 400");
   ruili.world.debugPlotCheck({ ok: false, reason: "water" });
   stale();
   assert.equal(f.state.coins, 1200);
@@ -563,7 +563,7 @@ test("custom location is rechecked on click and failed saves leave land and bala
   assert.deepEqual(ruili.visuals, []);
   f.fail(false);
   f.actIn("ruili", "在此安家");
-  assert.equal(f.state.coins, 600);
+  assert.equal(f.state.coins, 800);
   assert.equal(f.state.home.site, -1);
   assert.deepEqual(f.state.home.custom, { x: 80.25, z: 60.5 });
   assert.deepEqual(ruili.visuals, ["custom"]);
@@ -584,7 +584,7 @@ test("custom home restoration recreates its plot and go-home returns to the righ
   assert.equal(f.ui.panel, false);
   assert.equal(lianghe.teleports.length, 1);
   assert.equal(f.records.mangshi.teleports.length, 0);
-  assert.equal(f.state.coins, 600);
+  assert.equal(f.state.coins, 800, "梁河 (70,80) 距水晶约 101，近郊档 400（地价分档后）");
 });
 
 test("market sale saves before clearing the basket and showing a stall", () => {

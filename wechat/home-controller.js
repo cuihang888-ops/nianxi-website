@@ -284,7 +284,10 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
       ui.setAction("换个开阔处安家", () => ui.toast(SPOT_REASON[checked.reason] || "这里不合适，换个地方走走"));
       return;
     }
-    ui.setAction("在此安家 · " + Daily.HOME.CUSTOM_PLOT_PRICE + " 安币（自选）", () => {
+    // 自选地价格按落点距本坝水晶的距离分档，付款前先把档位与价格亮给玩家看。
+    const quote = Daily.landQuoteForDam(dam, position.x, position.z);
+    const priceLabel = quote ? quote.label + " " + quote.price : String(Daily.ECONOMY.plotPrice);
+    ui.setAction("在此安家 · " + priceLabel + " 安币（自选）", () => {
       const current = world.getPlayerPos();
       const next = world.checkPlotSpot(current.x, current.z);
       if (!next.ok) { ui.toast(SPOT_REASON[next.reason] || "这里暂时不能安家"); return false; }
@@ -455,7 +458,11 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
       if (Daily.registrationPending(state)) {
         ui.setAction("先登记入住 · 领安家金再安家", () => { openNamePanel("register"); return true; });
       } else {
-        ui.setAction("在此安家 · " + Daily.ECONOMY.plotPrice + " 安币", () => commit(value => Daily.claimHome(value, target.site, target.idx, dam)));
+        // 固定地块价格按地块中心距本坝水晶的距离分档，付款前先把档位与价格亮给玩家看。
+        const entry = world.getPlots?.().find(value => value.site === target.site && value.idx === target.idx);
+        const quote = entry ? Daily.landQuoteForDam(dam, entry.x, entry.z) : null;
+        const priceLabel = quote ? quote.label + " " + quote.price : String(Daily.ECONOMY.plotPrice);
+        ui.setAction("在此安家 · " + priceLabel + " 安币", () => commit(value => Daily.claimHome(value, target.site, target.idx, dam, entry ? { x: entry.x, z: entry.z } : null)));
       }
     } else if (target.type === "plot" && (state.home?.dam || "mangshi") === dam && state.home?.site === target.site && state.home.plot === target.idx) {
       homeAction(world);

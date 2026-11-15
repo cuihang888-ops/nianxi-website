@@ -599,7 +599,7 @@ test("horse call validates bond and destination and rolls back failed cross-dam 
   assert.equal(session.state.horse.x, 12);
 });
 
-test("custom home charges 600 once and retains precise validated coordinates", () => {
+test("custom home charges the land-band price once and retains precise validated coordinates", () => {
   const f = fixture();
   const session = Daily.createStateSession(f.repository);
   assert.equal(session.transact(state => Daily.claimCustomHome(state, NaN, 1, "ruili")).ok, false);
@@ -609,8 +609,10 @@ test("custom home charges 600 once and retains precise validated coordinates", (
   assert.equal(session.state.home, null);
   assert.equal(session.state.coins, 1200);
   f.failWrites = false;
-  assert.equal(session.transact(state => Daily.claimCustomHome(state, 100.125, 24.75, "ruili")).ok, true);
-  assert.equal(session.state.coins, 600);
+  const claimed = session.transact(state => Daily.claimCustomHome(state, 100.125, 24.75, "ruili"));
+  assert.equal(claimed.ok, true);
+  assert.equal(claimed.result.price, 400, "此点距瑞丽水晶约 95，近郊档 400（地价分档取代旧定值 600）");
+  assert.equal(session.state.coins, 800);
   assert.equal(session.state.home.site, -1);
   assert.equal(session.state.home.plot, -1);
   assert.deepEqual(session.state.home.custom, { x: 100.125, z: 24.75 });
