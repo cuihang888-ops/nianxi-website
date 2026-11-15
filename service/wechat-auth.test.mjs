@@ -147,6 +147,86 @@ test("rate limits and the replay-cache capacity fail safely without unbounded gr
   assert.equal((await cache.login("test-code-cache-b")).status, 503);
 });
 
+test("valid session inspections have independent quotas that reset after a minute", async t => {
+  let time = NOW;
+  const { call, login } = await fixture(t, {
+    now: () => time, requestsPerMinute: 2, loginsPerMinute: 2, inspectionsPerMinute: 2,
+  });
+  const a = (await login("test-code-inspect-a")).data;
+  const b = (await login("test-code-inspect-b")).data;
+  const inspect = token => call("/v1/auth/session", { method: "GET", token });
+  for (const token of [a.sessionToken, b.sessionToken]) {
+    assert.equal((await inspect(token)).status, 200);
+    assert.equal((await inspect(token)).status, 200);
+    const limited = await inspect(token);
+    assert.equal(limited.status, 429);
+    assert.equal(limited.data.error.code, "RATE_LIMITED");
+  }
+  time += 60_000;
+  const renewed = await inspect(a.sessionToken);
+  assert.equal(renewed.status, 200);
+  assert.deepEqual(renewed.data, { ok: true, playerId: a.playerId, expiresAt: a.expiresAt });
+  assert.equal((await inspect(b.sessionToken)).status, 200);
+});
+
+test("default session inspection quota allows 120 checks independently of IP request limits", async t => {
+  const { call, login } = await fixture(t, { requestsPerMinute: 1, loginsPerMinute: 1 });
+  const session = (await login("test-code-inspect-default")).data;
+  for (let count = 0; count < 120; count += 1) {
+    assert.equal((await call("/v1/auth/session", { method: "GET", token: session.sessionToken })).status, 200);
+  }
+  assert.equal((await call("/v1/auth/session", { method: "GET", token: session.sessionToken })).status, 429);
+});
+
+test("invalid inspection tokens stay IP limited and forwarded addresses cannot bypass it", async t => {
+  let time = NOW;
+  const { call } = await fixture(t, { now: () => time, requestsPerMinute: 2 });
+  assert.equal((await call("/v1/auth/session", { method: "GET" })).status, 401);
+  assert.equal((await call("/v1/auth/session", {
+    method: "GET", token: "a".repeat(43), headers: { "X-Forwarded-For": "198.51.100.1" },
+  })).status, 401);
+  const limited = await call("/v1/auth/session", {
+    method: "GET", token: "b".repeat(43), headers: { "X-Forwarded-For": "198.51.100.2" },
+  });
+  assert.equal(limited.status, 429);
+  assert.equal(limited.data.error.code, "RATE_LIMITED");
+  time += 60_000;
+  assert.equal((await call("/v1/auth/session", { method: "GET", token: "b".repeat(43) })).status, 401);
+});
+
+test("inspection bodies use the IP quota even with a valid token", async t => {
+  const { base, call, login } = await fixture(t, { requestsPerMinute: 3, inspectionsPerMinute: 1 });
+  const session = (await login("test-code-inspect-body")).data;
+  const invalidBody = () => new Promise((resolve, reject) => {
+    const req = request(`${base}/v1/auth/session`, {
+      method: "GET", headers: { Authorization: `Bearer ${session.sessionToken}`, "Content-Length": "1" },
+    }, response => { response.resume(); resolve(response.statusCode); });
+    req.on("error", reject);
+    req.end("x");
+  });
+  assert.equal(await invalidBody(), 400);
+  assert.equal(await invalidBody(), 400);
+  assert.equal(await invalidBody(), 429);
+  assert.equal((await call("/v1/auth/session", { method: "GET", token: session.sessionToken })).status, 200);
+  assert.equal((await call("/v1/auth/session", { method: "GET", token: session.sessionToken })).status, 429);
+});
+
+test("login and logout keep their IP limits independently of valid inspections", async t => {
+  let time = NOW;
+  const { call, login } = await fixture(t, {
+    now: () => time, requestsPerMinute: 2, loginsPerMinute: 1, inspectionsPerMinute: 1,
+  });
+  const session = (await login("test-code-inspect-login-a")).data;
+  assert.equal((await call("/v1/auth/session", { method: "GET", token: session.sessionToken })).status, 200);
+  assert.equal((await call("/v1/auth/session", { method: "GET", token: session.sessionToken })).status, 429);
+  assert.equal((await login("test-code-inspect-login-b")).status, 429);
+  assert.equal((await call("/v1/auth/logout", { token: session.sessionToken })).status, 200);
+  assert.equal((await login("test-code-inspect-login-b")).status, 429);
+  time += 60_000;
+  assert.equal((await call("/v1/auth/session", { method: "GET", token: session.sessionToken })).status, 401);
+  assert.equal((await login("test-code-inspect-login-b")).status, 200);
+});
+
 test("JSON payload, path, method and authentication headers are strictly checked", async t => {
   const { call, base } = await fixture(t, { loginsPerMinute: 100 });
   for (const body of [null, [], {}, { code: 1 }, { code: "short" }, { code: "has space in code" }, { code: "test-code-000001", appid: APP_ID }, { code: "test-code-000001", secret: APP_SECRET }, { code: "test-code-000001", protocolVersion: 2 }, { code: "test-code-000001", clientVersion: "x".repeat(65) }]) {

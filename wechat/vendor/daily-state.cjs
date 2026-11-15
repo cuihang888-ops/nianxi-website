@@ -8,6 +8,9 @@ const FEST_REWARD = ECONOMY.festivalReward;
 const MILESTONES = ECONOMY.milestones;
 const QUEST_REWARD = ECONOMY.questReward;
 const HOME = ECONOMY.HOME;
+// Saves predating crystal maps used 1200; changing new-player grants must not
+// reinterpret an untouched old save as established travel progress.
+const LEGACY_INITIAL_COINS = 1200;
 const ANIMAL_KINDS = ["chicken", "rabbit", "sheep"];
 const PRODUCE_KINDS = ["egg", "wool", "fur"];
 const BASKET_KINDS = ["carrot", "egg", "wool", "fur"];
@@ -483,7 +486,7 @@ function normalizeProgress(state) {
   }
   if (state.lit === undefined) {
     state.lit = {};
-    if (state.home || state.horse || state.coins !== ECONOMY.initialCoins) {
+    if (state.home || state.horse || state.coins !== LEGACY_INITIAL_COINS) {
       state.lit.mangshi = true;
       if (state.home) state.lit[state.home.dam || "mangshi"] = true;
       if (state.horse) state.lit[state.horse.dam || "mangshi"] = true;

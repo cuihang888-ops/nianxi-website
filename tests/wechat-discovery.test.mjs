@@ -80,17 +80,17 @@ test("festival action rechecks date and proximity and only celebrates a committe
   const action = f.ui.action;
   f.fail(true);
   action();
-  assert.equal(f.state.coins, 1200);
+  assert.equal(f.state.coins, 1000);
   assert.equal(f.state.festJoined.songkran, undefined);
   f.fail(false);
   action();
-  assert.equal(f.state.coins, 1230);
+  assert.equal(f.state.coins, 1030);
   assert.equal(f.state.festJoined.songkran, 2027);
   assert.equal(f.state.album.festivals.songkran, true);
   assert.equal(f.controller.setAction("mangshi", f.world), true);
   assert.equal(f.ui.label, "泼一捧水 · 送祝福");
   action();
-  assert.equal(f.state.coins, 1230);
+  assert.equal(f.state.coins, 1030);
   const stale = fixture("2027-04-16");
   stale.setPosition(0, 40);
   stale.controller.setAction("mangshi", stale.world);
@@ -100,7 +100,7 @@ test("festival action rechecks date and proximity and only celebrates a committe
   stale.setPosition(0, 40);
   stale.setTime("2027-04-16T16:00:00Z");
   staleAction();
-  assert.equal(stale.state.coins, 1200);
+  assert.equal(stale.state.coins, 1000);
   assert.equal(stale.writes(), 0);
 });
 
@@ -146,7 +146,7 @@ test("all three repeated festival performances leave rewards and saved progress 
     }
     assert.equal(f.plays[config.method], 3, config.id);
     assert.deepEqual(f.state, before);
-    assert.equal(f.state.coins, 1230);
+    assert.equal(f.state.coins, 1030);
     assert.equal(f.writes(), writes);
     assert.equal(f.session.revision, revision);
   }
@@ -205,7 +205,7 @@ test("festival reward callbacks cannot roll forward to a different year or act w
     invalidation(f);
     assert.equal(action(), false);
     assert.equal(f.writes(), 0);
-    assert.equal(f.state.coins, 1200);
+    assert.equal(f.state.coins, 1000);
   }
 });
 

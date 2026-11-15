@@ -113,22 +113,24 @@ function multiDamFixture(initial) {
 test("home actions keep Muse order and restore only committed visual changes", () => {
   const f = fixture();
   f.act("在此安家");
-  assert.equal(f.state.coins, 800);
+  assert.equal(f.state.coins, 600);
   f.act("搭草棚");
   f.act("开第一块田");
   f.act("种萝卜");
-  assert.equal(f.state.coins, 728);
+  assert.equal(f.state.coins, 528);
   assert.equal(f.plot.fieldStage, 1);
   f.advance(60000);
   f.act("收获萝卜");
-  assert.equal(f.state.coins, 728);
+  assert.equal(f.state.coins, 528);
   assert.equal(f.state.home.basket.carrot, 8);
   assert.equal(f.state.quests.harvest, true);
   assert.equal(f.plot.fieldStage, 0);
   f.act("领养一只鸡");
   f.act("领养一只羊");
+  // Sell the first harvest before adding the third companion.
+  f.session.transact(Daily.sellBasket);
   f.act("领养一只兔");
-  assert.equal(f.state.coins, 148);
+  assert.equal(f.state.coins, 68);
   const before = f.visuals.length;
   f.act("升级傣家竹楼");
   assert.equal(f.state.home.house, 1);
@@ -147,7 +149,7 @@ test("storage failure leaves currency, house and visual state unchanged", () => 
   f.fail(true);
   f.act("在此安家");
   assert.equal(f.state.home, null);
-  assert.equal(f.state.coins, 1200);
+  assert.equal(f.state.coins, 1000);
   assert.deepEqual(f.visuals, []);
   assert.equal(f.toasts.at(-1), "本机保存失败，请重试");
   f.fail(false);
@@ -195,12 +197,12 @@ test("paid portals change scene only after a successful half-coin save", () => {
   assert.deepEqual(f.ui.destinations.map(value => value.id), ["ruili", "yingjiang", "longchuan", "lianghe"]);
   f.fail(true);
   f.ui.chooseDestination("ruili");
-  assert.equal(f.state.coins, 1200);
+  assert.equal(f.state.coins, 1000);
   assert.deepEqual(f.scenes, []);
   assert.equal(f.ui.portal, true);
   f.fail(false);
   f.ui.chooseDestination("ruili");
-  assert.equal(f.state.coins, 1199.5);
+  assert.equal(f.state.coins, 999.5);
   assert.deepEqual(f.scenes, [3]);
   assert.equal(f.ui.portal, false);
   f.update(3);
@@ -208,7 +210,7 @@ test("paid portals change scene only after a successful half-coin save", () => {
   f.ui.action();
   assert.deepEqual(f.ui.destinations.map(value => value.id), ["mangshi", "yingjiang", "longchuan", "lianghe"]);
   f.ui.chooseDestination("mangshi");
-  assert.equal(f.state.coins, 1199);
+  assert.equal(f.state.coins, 999);
   assert.deepEqual(f.scenes, [3, 2]);
   assert.deepEqual(f.teleports, [{ x: 4, z: 52 }, { x: 4, z: 52 }]);
 });
@@ -231,12 +233,12 @@ test("crystal lighting verifies proximity and persists before changing visual st
   action();
   assert.deepEqual(f.state.lit, {});
   assert.equal(f.world.isCrystalLit(), false);
-  assert.equal(f.state.coins, 1200);
+  assert.equal(f.state.coins, 1000);
   f.fail(false);
   action();
   assert.deepEqual(f.state.lit, { mangshi: true });
   assert.equal(f.world.isCrystalLit(), true);
-  assert.equal(f.state.coins, 1200);
+  assert.equal(f.state.coins, 1000);
   f.update();
   assert.equal(f.ui.label, "传送 · 0.5 安币");
 });
@@ -280,10 +282,10 @@ test("old road selection cannot bypass a newly lit destination fare", () => {
   assert.equal(f.ui.chooseDestination("road:ruili").ok, false);
   assert.equal(f.writes(), writes);
   assert.deepEqual(f.scenes, []);
-  assert.equal(f.state.coins, 1200);
+  assert.equal(f.state.coins, 1000);
   f.ui.chooseDestination("ruili");
   assert.deepEqual(f.scenes, [3]);
-  assert.equal(f.state.coins, 1199.5);
+  assert.equal(f.state.coins, 999.5);
 });
 
 test("restored homes add each animal once and go-home closes the hall without payment", () => {
@@ -319,7 +321,9 @@ function horseFixture() {
 }
 
 test("horse purchase reveals the horse only after saving and does not charge twice", () => {
-  const f = fixture();
+  const state = Daily.defaultState();
+  state.coins = Daily.HOME.HORSE_PRICE;
+  const f = fixture(state);
   f.fail(true);
   f.controller.handleExternal("buy-horse");
   assert.equal(f.state.horse, null);
@@ -401,7 +405,7 @@ test("a home claimed in another dam restores only there and go-home returns to i
   f.fail(true);
   f.actIn("ruili", "在此安家");
   assert.equal(f.state.home, null);
-  assert.equal(f.state.coins, 1200);
+  assert.equal(f.state.coins, 1000);
   assert.deepEqual(f.records.ruili.visuals, []);
   assert.deepEqual(f.records.mangshi.visuals, []);
   f.fail(false);
@@ -420,7 +424,7 @@ test("a home claimed in another dam restores only there and go-home returns to i
   assert.deepEqual(restored.scenes, [3]);
   assert.equal(restored.records.ruili.teleports.length, 1);
   assert.equal(restored.records.mangshi.teleports.length, 0);
-  assert.equal(restored.state.coins, 800);
+  assert.equal(restored.state.coins, 600);
 });
 
 test("horse stays in its dam while paid travel routes the player to a different spawn", () => {
@@ -454,7 +458,9 @@ test("horse stays in its dam while paid travel routes the player to a different 
 });
 
 test("failed horse care never animates or increases visible bond", () => {
-  const f = fixture();
+  const state = Daily.defaultState();
+  state.coins = Daily.HOME.HORSE_PRICE;
+  const f = fixture(state);
   f.controller.handleExternal("buy-horse");
   f.target({ type: "horse" });
   f.fail(true);
@@ -475,6 +481,7 @@ test("failed horse care never animates or increases visible bond", () => {
 
 test("failed cross-dam call keeps the old horse visible until a committed move", () => {
   const state = Daily.defaultState();
+  state.coins = Daily.HOME.HORSE_PRICE;
   Daily.buyHorse(state);
   state.horse.bond = 80;
   const f = multiDamFixture(state);
@@ -498,6 +505,7 @@ test("failed cross-dam call keeps the old horse visible until a committed move",
 
 test("same-dam call keeps the old position on save failure and moves the horse once on retry", () => {
   const state = Daily.defaultState();
+  state.coins = Daily.HOME.HORSE_PRICE;
   Daily.buyHorse(state);
   state.horse.bond = 80;
   const f = fixture(state);
@@ -526,6 +534,7 @@ test("same-dam call keeps the old position on save failure and moves the horse o
 
 test("following horse position is preserved on scene change even when not mounted", () => {
   const state = Daily.defaultState();
+  state.coins = Daily.HOME.HORSE_PRICE;
   Daily.buyHorse(state);
   state.horse.bond = 50;
   const f = fixture(state);
@@ -552,18 +561,18 @@ test("custom location is rechecked on click and failed saves leave land and bala
   assert.ok(f.ui.label.includes("600"));
   ruili.world.debugPlotCheck({ ok: false, reason: "water" });
   stale();
-  assert.equal(f.state.coins, 1200);
+  assert.equal(f.state.coins, 1000);
   assert.equal(f.state.home, null);
   assert.equal(f.writes(), 0);
   ruili.world.debugPlotCheck({ ok: true });
   f.fail(true);
   f.actIn("ruili", "在此安家");
   assert.equal(f.state.home, null);
-  assert.equal(f.state.coins, 1200);
+  assert.equal(f.state.coins, 1000);
   assert.deepEqual(ruili.visuals, []);
   f.fail(false);
   f.actIn("ruili", "在此安家");
-  assert.equal(f.state.coins, 600);
+  assert.equal(f.state.coins, 400);
   assert.equal(f.state.home.site, -1);
   assert.deepEqual(f.state.home.custom, { x: 80.25, z: 60.5 });
   assert.deepEqual(ruili.visuals, ["custom"]);
@@ -584,7 +593,7 @@ test("custom home restoration recreates its plot and go-home returns to the righ
   assert.equal(f.ui.panel, false);
   assert.equal(lianghe.teleports.length, 1);
   assert.equal(f.records.mangshi.teleports.length, 0);
-  assert.equal(f.state.coins, 600);
+  assert.equal(f.state.coins, 400);
 });
 
 test("market sale saves before clearing the basket and showing a stall", () => {
@@ -599,16 +608,16 @@ test("market sale saves before clearing the basket and showing a stall", () => {
   const action = f.ui.action;
   f.fail(true);
   action();
-  assert.equal(f.state.coins, 800);
+  assert.equal(f.state.coins, 600);
   assert.equal(Daily.basketCount(f.state), 12);
   assert.equal(f.stalls.length, 0);
   f.fail(false);
   action();
-  assert.equal(f.state.coins, 1006);
+  assert.equal(f.state.coins, 806);
   assert.equal(Daily.basketCount(f.state), 0);
   assert.equal(f.stalls.length, 1);
   action();
-  assert.equal(f.state.coins, 1006);
+  assert.equal(f.state.coins, 806);
   assert.equal(f.stalls.length, 1);
 });
 
@@ -625,7 +634,7 @@ test("market action rechecks distance and mounted status on the actual click", (
   f.world.debugPlayer(4, 34); f.world.setMounted(true); action();
   assert.equal(f.writes(), 0);
   assert.equal(f.state.home.basket.carrot, 8);
-  assert.equal(f.state.coins, 800);
+  assert.equal(f.state.coins, 600);
   assert.equal(f.stalls.length, 0);
 });
 
@@ -734,7 +743,7 @@ test("Ruili market sale takes priority over repeat festival play until the baske
   controller.update(3, f.world);
   assert.ok(f.ui.label.startsWith("摆摊卖货"), f.ui.label);
   assert.equal(f.ui.action().ok, true);
-  assert.equal(f.state.coins, 950);
+  assert.equal(f.state.coins, 750);
   assert.equal(f.state.home.basket.carrot, 0);
   assert.equal(f.stalls.length, 1);
   assert.equal(splashes, 0);

@@ -3,11 +3,76 @@ import assert from "node:assert/strict";
 import Daily from "../wechat/vendor/daily-state.cjs";
 import { createPreviewSave } from "../wechat/platform/preview-save.js";
 import { createWechatAdapter } from "../wechat/platform/wechat-adapter.js";
+import { createLocalSaveRepository } from "../wechat/platform/save-repository.js";
 
 function storage(legacy) {
   const entries = new Map(legacy === undefined ? [] : [["anheli-minigame-v1", legacy]]);
   return { entries, getItem: key => entries.get(key) ?? null, setItem: (key, value) => entries.set(key, value) };
 }
+
+test("a fresh local preview starts with 1000 and reopening never grants again", () => {
+  const store = storage();
+  const session = createPreviewSave(store, () => 100);
+  assert.equal(session.ok, true);
+  assert.equal(session.cloudSynced, false);
+  assert.equal(session.state.coins, 1000);
+  assert.equal(session.save().ok, true);
+  assert.equal(createPreviewSave(store, () => 200).state.coins, 1000);
+  assert.equal(session.transact(state => Daily.claimHome(state, 0, 0, "ruili")).ok, true);
+  assert.equal(session.transact(Daily.buildHomeHut).ok, true);
+  assert.equal(session.transact(Daily.openHomeField).ok, true);
+  assert.equal(session.transact(state => Daily.plantCarrots(state, 100)).ok, true);
+  assert.equal(session.transact(state => Daily.buyHomeAnimal(state, "chicken", 100)).ok, true);
+  const reopened = createPreviewSave(store, () => 300);
+  assert.equal(reopened.state.coins, 388);
+  assert.equal(reopened.state.home.dam, "ruili");
+  assert.equal(reopened.state.home.hut, true);
+  assert.equal(reopened.state.home.field, true);
+  assert.equal(reopened.state.home.animals.chicken, 1);
+  assert.equal(reopened.state.home.beds.crop, "carrot");
+  assert.equal(reopened.save().ok, true);
+  assert.equal(createPreviewSave(store, () => 400).state.coins, 388);
+});
+
+test("existing and migrated balances are never replaced or topped up by the new grant", () => {
+  for (const coins of [1200, 1000, 799.5, 0, 12345.5]) {
+    const old = Daily.defaultState();
+    old.coins = coins;
+    delete old.lit;
+    const raw = JSON.stringify(old), store = storage(raw);
+    const migrated = createPreviewSave(store, () => 100);
+    assert.equal(migrated.ok, true);
+    assert.equal(migrated.state.coins, coins);
+    assert.deepEqual(migrated.state.lit, coins === 1200 ? {} : { mangshi: true });
+    assert.equal(store.entries.get("anheli-minigame-v1"), raw);
+    const reopened = createPreviewSave(store, () => 200);
+    assert.equal(reopened.state.coins, coins);
+    assert.equal(reopened.save().ok, true);
+    assert.equal(createPreviewSave(store, () => 300).state.coins, coins);
+    // A v2 save takes precedence over an old v1 copy, including a higher balance.
+    store.entries.set("anheli-minigame-v1", JSON.stringify({ ...old, coins: 50000 }));
+    assert.equal(createPreviewSave(store, () => 400).state.coins, coins);
+  }
+});
+
+test("already saved v2 balances survive loading and future saves without a new-player award", () => {
+  for (const coins of [1200, 799.5, 0, 12345.5]) {
+    const old = Daily.defaultState();
+    old.coins = coins;
+    const store = storage();
+    const repository = createLocalSaveRepository(store, {
+      namespace: "anheli-minigame-v2", validate: Daily.validateState, now: () => 100,
+    });
+    assert.equal(repository.save(old, { expectedRevision: 0 }).ok, true);
+    const raw = store.entries.get("anheli-minigame-v2:save");
+    const session = createPreviewSave(store, () => 200);
+    assert.equal(session.state.coins, coins);
+    assert.equal(store.entries.get("anheli-minigame-v2:save"), raw);
+    assert.equal(session.save().ok, true);
+    assert.equal(createPreviewSave(store, () => 300).state.coins, coins);
+  }
+});
+
 test("preview copies a validated legacy save once and preserves the original", () => {
   const original = Daily.defaultState();
   original.coins = 987;

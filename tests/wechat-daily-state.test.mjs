@@ -22,8 +22,9 @@ function fixture() {
   return { entries, repository, storage, set failWrites(value) { failWrites = value; } };
 }
 
-test("preview economy keeps Muse's current values isolated", () => {
-  assert.equal(Daily.defaultState().coins, 1200);
+test("preview grants new players 1000 while keeping other Muse values isolated", () => {
+  assert.equal(Daily.defaultState().coins, 1000);
+  assert.equal(Daily.HOME.HORSE_PRICE, 1200);
   assert.equal(Daily.ECONOMY.signinCoins, 5);
   assert.equal(Daily.ECONOMY.questReward, 40);
   assert.equal(Daily.ECONOMY.plotPrice, 400);
@@ -73,7 +74,7 @@ test("Shanghai midnight is independent of the host timezone", () => {
 test("signin milestones reward once and clock rollback cannot reset accumulated days", () => {
   const state = Daily.defaultState();
   for (const day of [1, 2, 3]) assert.equal(Daily.doSignin(state, `2026-11-0${day}`).ok, true);
-  assert.equal(state.coins, 1275);
+  assert.equal(state.coins, 1075);
   assert.deepEqual(state.signin.days, [1, 2, 3]);
   assert.equal(Daily.doSignin(state, "2026-11-03").ok, false);
   const before = clone(state);
@@ -81,7 +82,7 @@ test("signin milestones reward once and clock rollback cannot reset accumulated 
   assert.equal(Daily.refreshDaily(state, "2026-10-31"), false);
   assert.deepEqual(state, before);
   assert.equal(Daily.doSignin(state, "2026-12-01").ok, true);
-  assert.equal(state.coins, 1280);
+  assert.equal(state.coins, 1080);
   assert.deepEqual(state.signin.days, [1]);
   assert.equal(Daily.doSignin(state, "2026-11-03").error.code, "CLOCK_ROLLBACK");
   assert.deepEqual(state.signin.days, [1]);
@@ -92,13 +93,13 @@ test("quests reward once per day, reset forward and reject arbitrary keys", () =
   for (const key of ["fed", "harvest"]) assert.equal(Daily.markQuest(state, DAY, key).changed, true);
   assert.equal(Daily.doJingxin(state, DAY).ok, true);
   assert.equal(Daily.claimQuest(state, DAY).ok, true);
-  assert.equal(state.coins, 1240);
+  assert.equal(state.coins, 1040);
   assert.equal(Daily.claimQuest(state, DAY).ok, false);
   assert.equal(Daily.markQuest(state, DAY, "__proto__").error.code, "INVALID_QUEST");
   assert.equal(Daily.refreshDaily(state, "2026-11-14"), true);
   assert.equal(Daily.questAllDone(state), false);
   assert.equal(Daily.claimQuest(state, DAY).error.code, "CLOCK_ROLLBACK");
-  assert.equal(state.coins, 1240);
+  assert.equal(state.coins, 1040);
   assert.equal(state.jingxinDate, DAY);
 });
 
@@ -120,7 +121,7 @@ test("UI save failures restore the same state root and allow a clean retry", () 
   assert.equal(session.save().ok, true);
   assert.equal(session.revision, 2);
   const reopened = Daily.createStateSession(f.repository);
-  assert.equal(reopened.state.coins, 1205);
+  assert.equal(reopened.state.coins, 1005);
   assert.equal(Daily.doSignin(reopened.state, DAY).ok, false);
 });
 
@@ -129,19 +130,19 @@ test("home purchase commits before visual success and recovers with hut on resta
   const session = Daily.createStateSession(f.repository);
   f.failWrites = true;
   assert.equal(session.transact(state => Daily.claimHome(state, 1, 7)).ok, false);
-  assert.equal(session.state.coins, 1200);
+  assert.equal(session.state.coins, 1000);
   assert.equal(session.state.home, null);
   f.failWrites = false;
   const bought = session.transact(state => Daily.claimHome(state, 1, 7));
   assert.equal(bought.ok, true);
   assert.equal(bought.result.ok, true);
-  assert.equal(session.state.coins, 800);
+  assert.equal(session.state.coins, 600);
   assert.equal(session.transact(state => Daily.claimHome(state, 0, 0)).error.code, "HOME_EXISTS");
-  assert.equal(session.state.coins, 800);
+  assert.equal(session.state.coins, 600);
   assert.equal(session.transact(Daily.buildHomeHut).ok, true);
   const reopened = Daily.createStateSession(f.repository);
   assert.deepEqual(reopened.state.home, { ...Daily.createHome(1, 7, "芒市坝 · 东基址 8 号地"), hut: true, house: 1 });
-  assert.equal(reopened.state.coins, 800);
+  assert.equal(reopened.state.coins, 600);
   assert.equal(reopened.transact(Daily.buildHomeHut).error.code, "HUT_EXISTS");
 });
 
@@ -149,9 +150,9 @@ test("invalid or failed transactions roll back and reentrant save cannot double-
   const f = fixture();
   const session = Daily.createStateSession(f.repository);
   assert.equal(session.transact(state => { state.coins = -1; }).error.code, "SAVE_INVALID_STATE");
-  assert.equal(session.state.coins, 1200);
+  assert.equal(session.state.coins, 1000);
   assert.equal(session.transact(state => { state.coins = 0; throw new Error("bad"); }).error.code, "STATE_UPDATE_FAILED");
-  assert.equal(session.state.coins, 1200);
+  assert.equal(session.state.coins, 1000);
   let reentrant;
   assert.equal(session.transact(state => {
     reentrant = session.transact(inner => { inner.coins = 0; });
@@ -159,7 +160,7 @@ test("invalid or failed transactions roll back and reentrant save cannot double-
   }).ok, true);
   assert.equal(reentrant.error.code, "SAVE_BUSY");
   assert.equal(session.revision, 1);
-  assert.equal(session.state.coins, 1205);
+  assert.equal(session.state.coins, 1005);
 });
 
 test("corrupt saves remain untouched and read-only preview cannot overwrite them", () => {
@@ -168,10 +169,10 @@ test("corrupt saves remain untouched and read-only preview cannot overwrite them
   const session = Daily.createStateSession(f.repository);
   assert.equal(session.ok, false);
   assert.equal(session.error.code, "SAVE_CORRUPT");
-  assert.equal(session.state.coins, 1200);
+  assert.equal(session.state.coins, 1000);
   Daily.doSignin(session.state, DAY);
   assert.equal(session.save().ok, false);
-  assert.equal(session.state.coins, 1200);
+  assert.equal(session.state.coins, 1000);
   let called = false;
   assert.equal(session.transact(() => { called = true; }).ok, false);
   assert.equal(called, false);
@@ -185,7 +186,7 @@ test("concurrent sessions cannot overwrite newer balances", () => {
   assert.equal(first.transact(state => Daily.claimHome(state, 0, 0)).ok, true);
   assert.equal(second.transact(state => Daily.claimHome(state, 1, 0)).error.code, "SAVE_CONFLICT");
   assert.equal(second.state.home, null);
-  assert.equal(second.state.coins, 1200);
+  assert.equal(second.state.coins, 1000);
   assert.equal(f.repository.load().state.home.site, 0);
 });
 
@@ -198,7 +199,7 @@ test("legacy migration is explicit, preserves progress and does not mutate its s
   const migrated = Daily.normalizeLegacyState(old);
   assert.equal(migrated.ok, true);
   assert.deepEqual(old, before);
-  assert.equal(migrated.state.coins, 1205);
+  assert.equal(migrated.state.coins, 1005);
   assert.deepEqual(migrated.state.signin.days, [13]);
   assert.equal(migrated.state.home, null);
   assert.equal(migrated.state.latestDay, DAY);
@@ -228,10 +229,10 @@ test("half-coin portal charges persist and reject other fractional or unsafe bal
   const session = Daily.createStateSession(f.repository);
   assert.equal(session.transact(state => Daily.lightCrystal(state, "ruili")).ok, true);
   assert.equal(session.transact(state => Daily.payTeleport(state, "ruili")).ok, true);
-  assert.equal(session.state.coins, 1199.5);
-  assert.equal(Daily.createStateSession(f.repository).state.coins, 1199.5);
+  assert.equal(session.state.coins, 999.5);
+  assert.equal(Daily.createStateSession(f.repository).state.coins, 999.5);
   assert.equal(session.transact(state => { state.coins = 1.2; }).ok, false);
-  assert.equal(session.state.coins, 1199.5);
+  assert.equal(session.state.coins, 999.5);
   session.state.coins = 0.5;
   assert.equal(session.transact(state => Daily.payTeleport(state, "ruili")).ok, true);
   assert.equal(session.state.coins, 0);
@@ -242,12 +243,12 @@ test("crystal unlocks are free, idempotent and whitelist five dams", () => {
   const state = Daily.defaultState();
   assert.deepEqual(state.lit, {});
   assert.equal(Daily.payTeleport(state, "ruili").error.code, "CRYSTAL_UNLIT");
-  assert.equal(state.coins, 1200);
+  assert.equal(state.coins, 1000);
   for (const dam of Object.keys(Daily.ECONOMY.DAMS)) {
     assert.equal(Daily.lightCrystal(state, dam).changed, true);
     assert.equal(Daily.lightCrystal(state, dam).changed, false);
   }
-  assert.equal(state.coins, 1200);
+  assert.equal(state.coins, 1000);
   assert.equal(Daily.validateState(state), true);
   for (const dam of [undefined, null, 0, "", "unknown", "__proto__", "constructor"]) {
     const before = clone(state);
@@ -256,7 +257,7 @@ test("crystal unlocks are free, idempotent and whitelist five dams", () => {
     assert.deepEqual(state, before);
   }
   assert.equal(Daily.payTeleport(state, "ruili", 0).ok, true);
-  assert.equal(state.coins, 1199.5);
+  assert.equal(state.coins, 999.5);
   for (const lit of [null, [], { ruili: false }, { mangshi: 1 }, { unknown: true }, { constructor: true }]) {
     assert.equal(Daily.validateState({ ...state, lit }), false);
   }
@@ -270,6 +271,7 @@ test("crystal unlocks are free, idempotent and whitelist five dams", () => {
 test("missing legacy crystal map migrates only established progress and preserves explicit unlocks", () => {
   for (const mutate of [
     state => {},
+    state => { state.coins = 1200; },
     state => { state.coins = 1199.5; },
     state => { Daily.claimHome(state, 0, 0, "ruili"); Daily.buyHorse(state); },
     state => { state.coins = 3000; Daily.claimHome(state, 0, 0, "ruili"); Daily.buyHorse(state); Daily.setHorsePosition(state, 20, 30, "lianghe"); },
@@ -309,16 +311,16 @@ test("failed crystal and paid travel saves roll back unlocks and balances", () =
   f.failWrites = true;
   assert.equal(session.transact(state => Daily.lightCrystal(state, "ruili")).ok, false);
   assert.deepEqual(session.state.lit, {});
-  assert.equal(session.state.coins, 1200);
+  assert.equal(session.state.coins, 1000);
   f.failWrites = false;
   assert.equal(session.transact(state => Daily.lightCrystal(state, "ruili")).ok, true);
   f.failWrites = true;
   assert.equal(session.transact(state => Daily.payTeleport(state, "ruili")).ok, false);
-  assert.equal(session.state.coins, 1200);
+  assert.equal(session.state.coins, 1000);
   assert.deepEqual(session.state.lit, { ruili: true });
   f.failWrites = false;
   assert.equal(session.transact(state => Daily.payTeleport(state, "ruili")).ok, true);
-  assert.equal(session.state.coins, 1199.5);
+  assert.equal(session.state.coins, 999.5);
 });
 
 function homeSession() {
@@ -334,18 +336,18 @@ test("carrot cost, maturity and harvest persist with real epoch seconds and roll
   const { f, session } = homeSession();
   const now = Math.floor(Date.parse("2026-11-13T02:00:00Z") / 1000);
   assert.equal(session.transact(state => Daily.plantCarrots(state, now)).ok, true);
-  assert.equal(session.state.coins, 728);
+  assert.equal(session.state.coins, 528);
   assert.equal(session.state.home.beds.readyAt, now + 60);
   assert.equal(session.transact(state => Daily.harvestCarrots(state, now + 59)).error.code, "CROP_NOT_READY");
   f.failWrites = true;
   assert.equal(session.transact(state => Daily.harvestCarrots(state, now + 60)).error.code, "SAVE_WRITE_FAILED");
   assert.equal(session.state.home.beds.crop, "carrot");
-  assert.equal(session.state.coins, 728);
+  assert.equal(session.state.coins, 528);
   f.failWrites = false;
   const harvested = session.transact(state => Daily.harvestCarrots(state, now + 60));
   assert.equal(harvested.result.value, 120);
   assert.equal(harvested.result.count, 8);
-  assert.equal(session.state.coins, 728);
+  assert.equal(session.state.coins, 528);
   assert.equal(session.state.home.basket.carrot, 8);
   assert.equal(session.state.home.harvests, 1);
   assert.equal(session.state.quests.harvest, true);
@@ -357,7 +359,7 @@ test("animal production caps offline income and persists the next timestamp whil
   const { f, session } = homeSession();
   const now = Math.floor(Date.parse("2026-11-13T02:00:00Z") / 1000);
   assert.equal(session.transact(state => Daily.buyHomeAnimal(state, "chicken", now)).ok, true);
-  assert.equal(session.state.coins, 660);
+  assert.equal(session.state.coins, 460);
   assert.equal(session.transact(state => Daily.buyHomeAnimal(state, "chicken", now)).error.code, "ANIMAL_EXISTS");
   assert.equal(session.transact(state => Daily.buyHomeAnimal(state, "horse", now)).error.code, "INVALID_ANIMAL");
   assert.equal(Daily.accrueProduce(session.state, now + 44), false);
@@ -377,10 +379,10 @@ test("animal production caps offline income and persists the next timestamp whil
   f.failWrites = true;
   assert.equal(reopened.transact(state => Daily.collectHomeProduce(state, now + 9046)).ok, false);
   assert.equal(reopened.state.home.produce.egg, 3);
-  assert.equal(reopened.state.coins, 660);
+  assert.equal(reopened.state.coins, 460);
   f.failWrites = false;
   assert.equal(reopened.transact(state => Daily.collectHomeProduce(state, now + 9046)).result.value, 48);
-  assert.equal(reopened.state.coins, 660);
+  assert.equal(reopened.state.coins, 460);
   assert.equal(reopened.state.home.basket.egg, 3);
   assert.equal(reopened.state.home.produce.egg, 0);
   assert.equal(reopened.transact(state => Daily.collectHomeProduce(state, now + 9046)).ok, false);
@@ -426,6 +428,7 @@ test("round 14 saves acquire an empty horse slot without resetting home or balan
 test("horse purchase and position save are transactional and survive reload", () => {
   const f = fixture();
   const session = Daily.createStateSession(f.repository);
+  assert.equal(session.transact(state => { state.coins = Daily.HOME.HORSE_PRICE; }).ok, true);
   f.failWrites = true;
   assert.equal(session.transact(Daily.buyHorse).error.code, "SAVE_WRITE_FAILED");
   assert.equal(session.state.coins, 1200);
@@ -488,7 +491,7 @@ test("homes keep dam identity across saves and reject unknown destinations", () 
   }
   const state = Daily.defaultState();
   assert.equal(Daily.claimHome(state, 0, 0, "unknown").error.code, "INVALID_DAM");
-  assert.equal(state.coins, 1200);
+  assert.equal(state.coins, 1000);
   state.home = Daily.createHome(0, 0, "bad", "unknown");
   assert.equal(Daily.validateState(state), false);
 });
@@ -496,6 +499,7 @@ test("homes keep dam identity across saves and reject unknown destinations", () 
 test("horse bounds follow its saved dam and invalid changes roll back", () => {
   const f = fixture();
   const session = Daily.createStateSession(f.repository);
+  session.transact(state => { state.coins = Daily.HOME.HORSE_PRICE; });
   session.transact(Daily.buyHorse);
   assert.equal(session.transact(state => Daily.setHorsePosition(state, 254, 0, "yingjiang")).ok, true);
   assert.equal(session.state.horse.dam, "yingjiang");
@@ -520,23 +524,24 @@ test("festival rewards require configured dates, reject forged objects and preve
   assert.equal(session.transact(state => Daily.joinFestival(state, { id: "songkran" }, "2026-04-12")).ok, false);
   f.failWrites = true;
   assert.equal(session.transact(state => Daily.joinFestival(state, "songkran", "2026-04-12")).ok, false);
-  assert.equal(session.state.coins, 1200);
+  assert.equal(session.state.coins, 1000);
   assert.deepEqual(session.state.festJoined, {});
   assert.deepEqual(session.state.album.festivals, {});
   f.failWrites = false;
   assert.equal(session.transact(state => Daily.joinFestival(state, "songkran", "2026-04-12")).ok, true);
-  assert.equal(session.state.coins, 1230);
+  assert.equal(session.state.coins, 1030);
   assert.equal(session.state.album.festivals.songkran, true);
   assert.equal(session.transact(state => Daily.joinFestival(state, "songkran", "2026-04-13")).error.code, "FESTIVAL_JOINED");
   assert.equal(session.transact(state => Daily.joinFestival(state, "songkran", "2025-04-12")).ok, false);
   assert.equal(session.transact(state => Daily.joinFestival(state, "songkran", "2027-04-12")).ok, true);
-  assert.equal(session.state.coins, 1260);
+  assert.equal(session.state.coins, 1060);
   assert.equal(Daily.createStateSession(f.repository).state.festJoined.songkran, 2027);
 });
 
 test("album validates catalog IDs and purchase rewards persist in the same transaction", () => {
   const f = fixture();
   const session = Daily.createStateSession(f.repository);
+  session.transact(state => { state.coins = Daily.HOME.HORSE_PRICE; });
   assert.equal(Daily.albumAdd(session.state, "__proto__", "evil"), false);
   assert.equal(Daily.albumAdd(session.state, "landmarks", "unknown"), false);
   assert.equal(session.transact(state => Daily.albumAdd(state, "landmarks", "ms-temple")).ok, true);
@@ -561,6 +566,7 @@ test("album validates catalog IDs and purchase rewards persist in the same trans
 test("horse care is daily, rollback-safe and cannot replay via a backward clock", () => {
   const f = fixture();
   const session = Daily.createStateSession(f.repository);
+  session.transact(state => { state.coins = Daily.HOME.HORSE_PRICE; });
   session.transact(Daily.buyHorse);
   assert.equal(session.transact(state => Daily.careHorse(state, "brush", DAY)).error.code, "CARE_ORDER");
   assert.equal(session.state.horse.careCount, 0);
@@ -586,6 +592,7 @@ test("horse care is daily, rollback-safe and cannot replay via a backward clock"
 test("horse call validates bond and destination and rolls back failed cross-dam saves", () => {
   const f = fixture();
   const session = Daily.createStateSession(f.repository);
+  session.transact(state => { state.coins = Daily.HOME.HORSE_PRICE; });
   session.transact(Daily.buyHorse);
   assert.equal(session.transact(state => Daily.callHorse(state, 12, 42, "ruili")).error.code, "BOND_TOO_LOW");
   session.transact(state => { state.horse.bond = 80; });
@@ -607,10 +614,10 @@ test("custom home charges 600 once and retains precise validated coordinates", (
   f.failWrites = true;
   assert.equal(session.transact(state => Daily.claimCustomHome(state, 100.125, 24.75, "ruili")).ok, false);
   assert.equal(session.state.home, null);
-  assert.equal(session.state.coins, 1200);
+  assert.equal(session.state.coins, 1000);
   f.failWrites = false;
   assert.equal(session.transact(state => Daily.claimCustomHome(state, 100.125, 24.75, "ruili")).ok, true);
-  assert.equal(session.state.coins, 600);
+  assert.equal(session.state.coins, 400);
   assert.equal(session.state.home.site, -1);
   assert.equal(session.state.home.plot, -1);
   assert.deepEqual(session.state.home.custom, { x: 100.125, z: 24.75 });
@@ -663,15 +670,15 @@ test("basket sale is atomic, repeat-safe and survives restart", () => {
   assert.equal(Daily.basketValue(session.state), 206);
   f.failWrites = true;
   assert.equal(session.transact(Daily.sellBasket).error.code, "SAVE_WRITE_FAILED");
-  assert.equal(session.state.coins, 800);
+  assert.equal(session.state.coins, 600);
   assert.equal(Daily.basketCount(session.state), 12);
   f.failWrites = false;
   assert.equal(session.transact(Daily.sellBasket).result.gain, 206);
-  assert.equal(session.state.coins, 1006);
+  assert.equal(session.state.coins, 806);
   assert.equal(Daily.basketCount(session.state), 0);
   assert.equal(session.transact(Daily.sellBasket).error.code, "BASKET_EMPTY");
   const reopened = Daily.createStateSession(f.repository);
-  assert.equal(reopened.state.coins, 1006);
+  assert.equal(reopened.state.coins, 806);
   assert.equal(Daily.basketCount(reopened.state), 0);
 });
 

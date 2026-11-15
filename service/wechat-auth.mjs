@@ -115,6 +115,7 @@ export function createWechatAuthServer(options = {}) {
   const maxPendingRequests = integer(options.maxPendingRequests, 32, 1, 256);
   const requestsPerMinute = integer(options.requestsPerMinute, 90, 1, 10_000);
   const loginsPerMinute = integer(options.loginsPerMinute, 10, 1, 1000);
+  const inspectionsPerMinute = integer(options.inspectionsPerMinute, 120, 1, 10_000);
   const sessions = new Map(), buckets = new Map(), codes = new Map(), controllers = new Set();
   let exchanges = 0, pendingRequests = 0;
 
@@ -145,6 +146,15 @@ export function createWechatAuthServer(options = {}) {
     const session = sessions.get(tokenHash);
     if (!session || session.expiresAt <= time) throw failure(401, "SESSION_INVALID");
     return { tokenHash, session };
+  }
+
+  function limitInspection(session, time) {
+    if (!session.inspectionWindowEndsAt || session.inspectionWindowEndsAt <= time) {
+      session.inspections = 0;
+      session.inspectionWindowEndsAt = time + 60_000;
+    }
+    if (session.inspections >= inspectionsPerMinute) throw failure(429, "RATE_LIMITED");
+    session.inspections += 1;
   }
 
   async function exchange(code) {
@@ -193,13 +203,21 @@ export function createWechatAuthServer(options = {}) {
       if (!configured || typeof fetchImpl !== "function") throw failure(503, "WECHAT_AUTH_UNCONFIGURED");
       const time = now();
       prune(time);
-      rateLimit(request, login, time);
       if (inspect) {
-        if (request.headers["transfer-encoding"] || Number(request.headers["content-length"] || 0) !== 0) throw failure(400, "INVALID_BODY");
-        const { session } = authenticated(request, time);
+        let session;
+        try {
+          if (request.headers["transfer-encoding"] || Number(request.headers["content-length"] || 0) !== 0) throw failure(400, "INVALID_BODY");
+          ({ session } = authenticated(request, time));
+        } catch (error) {
+          rateLimit(request, false, time);
+          throw error;
+        }
+        // Internal world requests share one IP; valid checks use the bounded session record.
+        limitInspection(session, time);
         respond(response, 200, { ok: true, playerId: session.playerId, expiresAt: session.expiresAt });
         return;
       }
+      rateLimit(request, login, time);
       if (logout) {
         const { tokenHash } = authenticated(request, time);
         const body = await readJson(request, maxBodyBytes, bodyTimeoutMs);

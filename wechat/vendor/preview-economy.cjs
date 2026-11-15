@@ -28,7 +28,7 @@ const DAMS = Object.freeze({
 
 // Muse's free preview balance is separate from the existing farm economy.
 module.exports = Object.freeze({
-  initialCoins: 1200,
+  initialCoins: 1000,
   signinCoins: 5,
   questReward: 40,
   milestones: Object.freeze({ 3: 60, 7: 150, 15: 350, 25: 700 }),
