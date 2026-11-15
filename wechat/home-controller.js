@@ -19,6 +19,85 @@ const SPOT_REASON = {
 export function createHomeController({ state, transact, ui, getMangshi, getDamWorld, setScene, now = Date.now, today, setFestivalAction = () => false }) {
   let lastAccrualAt = -Infinity;
   let activeDam = null, activeWorld = null;
+  // —— 姐勒金塔祈福（仅瑞丽坝；纯客户端动作序列：不发币、不加产量、不挂红结、不写存档）——
+  let prayer = null;
+  const PRAYER_STAGES = { join: 1600, bow: 1800 };
+  function endPrayer(world, quietToast) {
+    if (!prayer) return;
+    world.setPrayerPose?.(0);
+    world.setResting?.(false);
+    world.setGuideRingVisible?.(false);
+    prayer = null;
+    if (quietToast) ui.toast(quietToast);
+  }
+  function startPrayer(world, site) {
+    world.setMoveInput(0, 0);
+    world.teleportPlayerTo(site.spot.x, site.spot.z);
+    world.setPlayerYaw?.(site.spot.yaw);
+    world.setPrayerPose?.(1);
+    prayer = { stage: "join", endsAt: now() + PRAYER_STAGES.join, world, ring: site.ring, lastAngle: null, swept: 0 };
+    ui.toast("走进塔门 · 先合掌，把心收回来");
+  }
+  // 祈福进行中返回 true（本帧动作区由祈福占用）。world 为当前坝世界。
+  function prayerAction(world) {
+    if (!prayer) return false;
+    if (prayer.world !== world) { endPrayer(world); return false; }
+    const position = world.getPlayerPos();
+    const time = now();
+    if (prayer.stage === "join" || prayer.stage === "bow") {
+      if (Math.hypot(position.x - prayer.ring.x, position.z - prayer.ring.z) > 34) { endPrayer(world, "祈福先停下了 · 想好了再来"); return true; }
+      ui.setAction(prayer.stage === "join" ? "合掌 · 把心收回来" : "礼拜 · 愿平安", null);
+      if (time >= prayer.endsAt) {
+        if (prayer.stage === "join") {
+          prayer.stage = "bow"; prayer.endsAt = time + PRAYER_STAGES.bow;
+          world.setPrayerPose?.(2);
+        } else {
+          prayer.stage = "sit"; prayer.endsAt = time + Daily.ECONOMY.meditationMilliseconds;
+          world.setPrayerPose?.(0);
+          world.setResting?.(true);
+          ui.toast("静坐祈福 · 跟着呼吸，慢一点");
+        }
+      }
+      return true;
+    }
+    if (prayer.stage === "sit") {
+      ui.setAction("静坐祈福 · 跟着呼吸", null);
+      if (time >= prayer.endsAt) {
+        prayer.stage = "circling"; prayer.lastAngle = null; prayer.swept = 0;
+        world.setResting?.(false);
+        world.setGuideRingVisible?.(true);
+        ui.toast("绕塔一周 · 顺着光点慢慢走");
+      }
+      return true;
+    }
+    if (prayer.stage === "circling") {
+      const dx = position.x - prayer.ring.x, dz = position.z - prayer.ring.z;
+      const dist = Math.hypot(dx, dz);
+      if (dist > 44) { endPrayer(world, "先到这里 · 塔门一直开着"); return true; }
+      if (dist >= prayer.ring.r - 7 && dist <= prayer.ring.r + 9) {
+        const angle = Math.atan2(dz, dx);
+        if (prayer.lastAngle !== null) {
+          let delta = angle - prayer.lastAngle;
+          while (delta > Math.PI) delta -= Math.PI * 2;
+          while (delta < -Math.PI) delta += Math.PI * 2;
+          prayer.swept += delta;
+        }
+        prayer.lastAngle = angle;
+      } else prayer.lastAngle = null;
+      if (Math.abs(prayer.swept) >= Math.PI * 2 * 0.98) {
+        prayer.stage = "done";
+        world.setGuideRingVisible?.(false);
+        ui.toast("绕塔一周了 · 心里亮堂了些");
+        ui.setAction("出塔 · 慢慢回村", () => { endPrayer(world, "出塔了 · 愿这一路都平安"); return true; });
+        return true;
+      }
+      ui.setAction("绕塔中 · 顺光点走满一圈（先停下）", () => { endPrayer(world, "先到这里 · 塔门一直开着"); return true; });
+      return true;
+    }
+    // done
+    ui.setAction("出塔 · 慢慢回村", () => { endPrayer(world, "出塔了 · 愿这一路都平安"); return true; });
+    return true;
+  }
   const nowSeconds = () => Math.floor(now() / 1000);
   const worldOf = dam => getDamWorld ? getDamWorld(dam || "mangshi") : getMangshi();
   const damOf = active => DESTINATIONS.find(value => value.scene === active)?.id;
@@ -245,6 +324,7 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
 
   function update(active, world) {
     activeDam = damOf(active); activeWorld = world;
+    if (prayer && activeDam !== "ruili") endPrayer(worldOf("ruili"));
     if (activeDam) world.setCrystalLit?.(!!state.lit?.[activeDam]);
     accrue();
     const basketCount = Daily.basketCount(state);
@@ -256,6 +336,7 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
     if (ui.isPanelOpen()) { ui.setAction("", null); return; }
     const dam = damOf(active);
     if (!dam || !world) { ui.setAction("", null); return; }
+    if (prayerAction(world)) return;
     if (world.isDancing?.()) {
       ui.setAction("纵歌中 · 迈步就停", null);
       return;
@@ -285,6 +366,23 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
     }
     if (marketAction(world, dam)) return;
     if (setFestivalAction(dam, world)) return;
+    if (dam === "ruili") {
+      const site = world.getPrayerSite?.();
+      if (site) {
+        const position = world.getPlayerPos();
+        if (Math.hypot(position.x - site.entry.x, position.z - site.entry.z) <= site.entry.r) {
+          ui.setAction("入塔祈福", () => {
+            const current = world.getPrayerSite?.();
+            if (!current || world.isMounted?.()) return false;
+            const pos = world.getPlayerPos();
+            if (Math.hypot(pos.x - current.entry.x, pos.z - current.entry.z) > current.entry.r + 2) return false;
+            startPrayer(world, current);
+            return true;
+          });
+          return;
+        }
+      }
+    }
     if (!target) { customAction(world, dam); return; }
     if (target.type === "crystal") {
       if (!state.lit[dam]) {
@@ -297,6 +395,8 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
       } else ui.setAction("传送 · " + Daily.ECONOMY.teleportPrice + " 安币", () => openTeleport(active));
     } else if (target.type === "hall") {
       ui.setAction("进入安和里大厅", () => { world.setMoveInput(0, 0); ui.openPanel(); });
+    } else if (target.type === "plot" && !target.claimed && target.reserved) {
+      ui.setAction("预留地 · 尚未开放", () => { ui.toast("这块地还在村里预留着 · 开放时会先紧着村里人"); return true; });
     } else if (target.type === "plot" && !target.claimed) {
       ui.setAction("在此安家 · " + Daily.ECONOMY.plotPrice + " 安币", () => commit(value => Daily.claimHome(value, target.site, target.idx, dam)));
     } else if (target.type === "plot" && (state.home?.dam || "mangshi") === dam && state.home?.site === target.site && state.home.plot === target.idx) {
