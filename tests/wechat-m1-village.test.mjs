@@ -94,10 +94,14 @@ test("pagoda prayer site anchors derive from the contract PAGODA and the spot is
   const world = ruiliWorld();
   const site = world.getPrayerSite();
   assert.ok(site, "瑞丽世界应提供祈福点");
-  const entryDam = Village.toDamCoords(Village.PAGODA.entry.position);
-  assert.equal(site.entry.x, entryDam.x);
-  assert.equal(site.entry.z, entryDam.z);
   const centerDam = Village.toDamCoords(Village.PAGODA.center);
+  const offset = Village.PAGODA.entry.localOffset;
+  const distance = Village.PAGODA.hillRadius + 8.5 + 6.4;
+  assert.equal(site.entry.x, centerDam.x + offset.x / Math.hypot(offset.x, offset.z) * distance);
+  assert.equal(site.entry.z, centerDam.z + offset.z / Math.hypot(offset.x, offset.z) * distance);
+  assert.equal(site.entry.r, Village.PAGODA.entry.radius);
+  assert.equal(world.getMapFeatures().pagoda.entry.x, site.entry.x);
+  assert.equal(world.getMapFeatures().pagoda.entry.z, site.entry.z);
   assert.equal(site.ring.x, centerDam.x);
   assert.equal(site.ring.z, centerDam.z);
   const resolved = world.resolveLandPosition(site.spot.x, site.spot.z);
@@ -114,7 +118,7 @@ test("pagoda prayer site anchors derive from the contract PAGODA and the spot is
   assert.equal(world.getPrayerPose(), 0);
 });
 
-test("map features expose village bounds, contract plots and the pagoda for the future minimap", () => {
+test("map features expose same-source bounds, plots, roads, landmarks and actual exits", () => {
   const world = ruiliWorld();
   const features = world.getMapFeatures();
   assert.equal(features.villageId, Village.VILLAGE_ID);
@@ -124,6 +128,42 @@ test("map features expose village bounds, contract plots and the pagoda for the 
   const centerDam = Village.toDamCoords(Village.PAGODA.center);
   assert.equal(features.pagoda.center.x, centerDam.x);
   assert.equal(features.pagoda.center.z, centerDam.z);
+  assert.equal(features.market.x, Village.toDamCoords(Village.MARKET_SELL_POINT).x);
+  assert.equal(features.market.z, Village.toDamCoords(Village.MARKET_SELL_POINT).z);
+  assert.equal(features.hall.x, world.getHallPos().x);
+  assert.equal(features.hall.z, world.getHallPos().z);
+  assert.equal(features.roads[0].points[0].x, Village.toDamCoords(Village.ROAD_APPROACH_WEST).x);
+  assert.equal(features.roads[0].points.length, Village.ROAD_POINTS.length + 1);
+  assert.equal(features.exits[0].to.x, Village.toDamCoords(Village.ROAD_APPROACH_WEST).x);
+  assert.equal(features.exits[1].id, Village.TEMPLE_ID);
+  assert.equal(features.exits[1].to.x, Village.toDamCoords(Village.TEMPLE_EXIT.milestone).x);
+  assert.equal(features.temple, undefined, "总佛寺只标方向，不能虚构本场景已有寺院");
+});
+
+test("minimap forward follows actual avatar or mount rotation and stays independent of camera orbit", () => {
+  const world = ruiliWorld();
+  for (const [yaw, expected] of [[0, { x: 0, z: 1 }], [Math.PI / 2, { x: 1, z: 0 }], [Math.PI, { x: 0, z: -1 }], [-Math.PI / 2, { x: -1, z: 0 }]]) {
+    world.setPlayerYaw(yaw);
+    const forward = world.getPlayerForward();
+    assert.ok(Math.abs(forward.x - expected.x) < 1e-10);
+    assert.ok(Math.abs(forward.z - expected.z) < 1e-10);
+    world.handleDrag(120, -40);
+    assert.equal(world.getPlayerForward().x, forward.x);
+    assert.equal(world.getPlayerForward().z, forward.z);
+  }
+  const position = world.getPlayerPos();
+  world.showHorse(position.x, position.z);
+  world.setMounted(true);
+  world.setMoveInput(1, 0);
+  world.update(0.016, 1);
+  world.setMoveInput(0, 0);
+  const mountedForward = world.getPlayerForward();
+  world.setPlayerYaw(Math.PI / 7);
+  assert.equal(world.getPlayerForward().x, mountedForward.x, "骑乘读取坐骑方向，不读独立角色旋转");
+  assert.equal(world.getPlayerForward().z, mountedForward.z);
+  world.handleDrag(-90, 25);
+  assert.equal(world.getPlayerForward().x, mountedForward.x);
+  assert.equal(world.getPlayerForward().z, mountedForward.z);
 });
 
 // —— home-controller 祈福流程（假世界，沿用 wechat-home-controller 测试的假件风格）——

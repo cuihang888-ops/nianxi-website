@@ -596,6 +596,24 @@ test("custom home restoration recreates its plot and go-home returns to the righ
   assert.equal(f.state.coins, 400);
 });
 
+test("saved custom homes use the explicit restoration path while new claims still check the current spot", () => {
+  const state = Daily.defaultState();
+  Daily.claimCustomHome(state, 70, 80, "lianghe");
+  const f = multiDamFixture(state), world = f.records.lianghe.world;
+  let restores = 0;
+  const addSavedPlot = world.claimCustomPlot.bind(world);
+  world.restoreCustomPlot = (x, z) => { restores++; return addSavedPlot(x, z); };
+  world.claimCustomPlot = () => assert.fail("saved homes must not be revalidated as new purchases");
+  world.debugPlotCheck({ ok: false, reason: "taken" });
+  const before = structuredClone(f.state);
+  f.controller.restoreVisual(world, "lianghe");
+  f.controller.restoreVisual(world, "lianghe");
+  assert.equal(restores, 1);
+  assert.deepEqual(f.state, before);
+  assert.equal(f.writes(), 0);
+  assert.equal(f.controller.goHome(), true);
+});
+
 test("market sale saves before clearing the basket and showing a stall", () => {
   const state = Daily.defaultState();
   Daily.claimHome(state, 0, 0);

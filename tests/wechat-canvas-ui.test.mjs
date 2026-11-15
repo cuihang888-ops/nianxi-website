@@ -4,15 +4,17 @@ import { createRequire } from "node:module";
 
 const require = createRequire(import.meta.url);
 const { createCanvasUI } = require("../wechat/vendor/canvas-ui.cjs");
+const Ruili = require("../wechat/vendor/ruili-scene.cjs");
 const Daily = require("../wechat/vendor/daily-state.cjs");
 const DAY = "2026-11-13";
+const MAP = Ruili.createRuiliScene({}, { createDamScene: (_, spec) => spec.mapFeatures });
 
 function fakeCanvas() {
   const calls = [];
   const ctx = {
     font: "12px sans-serif", textAlign: "left", fillStyle: "",
     setTransform() {}, clearRect() { calls.length = 0; },
-    beginPath() {}, closePath() {}, moveTo() {},
+    beginPath() {}, closePath() {}, moveTo() {}, lineTo() {},
     fill() {}, stroke() {}, fillRect() {},
     arc(x, y, radius) { calls.push({ type: "arc", x, y, radius }); },
     arcTo(x, y) { calls.push({ type: "point", x, y }); },
@@ -455,4 +457,111 @@ test("failed teleport stays open for retry and tap hit testing keeps texture upd
   ui.setAction("搭草棚", () => {});
   assert.equal(ui.handleTap(160, 180), false);
   assert.equal(ui.update(), true);
+});
+
+test("minimap shows the eight real plots, landmarks and route exits without inventing a temple", () => {
+  const { ui, calls } = fixture();
+  assert.equal(ui.getMinimapGeometry(), null);
+  ui.setMinimapFeatures(MAP);
+  ui.setMinimapPlayer({ x: -64, z: 66 }, { x: 0, z: -1 });
+  ui.draw();
+  const map = ui.getMinimapGeometry();
+  assert.equal(map.plots.length, 8);
+  assert.deepEqual(map.plots.map(plot => plot.id), MAP.plots.map(plot => plot.id));
+  assert.deepEqual(map.plots.map(plot => plot.reserved), [false, false, true, true, true, true, true, true]);
+  assert.deepEqual(map.landmarks.map(point => point.kind), ["hall", "market", "pagoda"]);
+  assert.deepEqual(map.exits.map(exit => exit.id), ["west-road", "ruili-temple"]);
+  assert.equal(map.landmarks.some(point => point.kind === "temple"), false);
+  assert.equal(ui.containsControl(map.x + map.w / 2, map.y + map.h / 2), true);
+  tap(ui, "minimap");
+  assert.equal(ui.isPanelOpen(), true);
+  assert.equal(ui.getMinimapGeometry().expanded, true);
+  ui.draw();
+  const labels = calls.filter(call => call.type === "text").map(call => call.value);
+  for (const label of ["A", "B", "C", "D", "E", "F", "G", "H", "大厅", "集市", "姐勒金塔", "西古道", "往总佛寺"]) assert.ok(labels.includes(label), label);
+  assert.equal(ui.containsControl(0, 0), true);
+  tap(ui, "minimap-close");
+  assert.equal(ui.isPanelOpen(), false);
+  ui.setMinimapFeatures(null);
+  assert.equal(ui.getMinimapGeometry(), null);
+  assert.equal(ui.getHitRects().some(rect => rect.id.startsWith("minimap")), false);
+});
+
+test("minimap player triangle follows the projected actual forward vector in all four directions", () => {
+  const { ui } = fixture();
+  ui.setMinimapFeatures(MAP);
+  for (const [forward, direction] of [
+    [{ x: 0, z: -1 }, { x: 0, y: -1 }],
+    [{ x: 1, z: 0 }, { x: 1, y: 0 }],
+    [{ x: 0, z: 1 }, { x: 0, y: 1 }],
+    [{ x: -1, z: 0 }, { x: -1, y: 0 }],
+  ]) {
+    ui.setMinimapPlayer({ x: -64, z: 66 }, forward);
+    const player = ui.getMinimapGeometry().player;
+    assert.ok(Math.abs(player.direction.x - direction.x) < 1e-10);
+    assert.ok(Math.abs(player.direction.y - direction.y) < 1e-10);
+    assert.ok(Math.abs(player.triangle[0].x - player.x - direction.x * 7) < 1e-10);
+    assert.ok(Math.abs(player.triangle[0].y - player.y - direction.y * 7) < 1e-10);
+  }
+  const before = ui.getMinimapGeometry().player;
+  ui.draw(); assert.equal(ui.update(), false);
+  ui.setMinimapPlayer({ x: -63.9, z: 66 }, { x: -1, z: 0 });
+  assert.equal(ui.update(), false, "subpixel walking does not redraw the full overlay");
+  ui.setMinimapPlayer({ x: -44, z: 66 }, { x: -1, z: 0 });
+  assert.equal(ui.update(), true);
+  assert.ok(ui.getMinimapGeometry().player.x > before.x);
+  ui.setMinimapPlayer({ x: 9000, z: -9000 }, { x: 1, z: 0 });
+  const map = ui.getMinimapGeometry();
+  assert.equal(map.player.outside, true);
+  for (const vertex of map.player.triangle) {
+    assert.ok(vertex.x >= map.content.x && vertex.x <= map.content.x + map.content.w);
+    assert.ok(vertex.y >= map.content.y && vertex.y <= map.content.y + map.content.h);
+  }
+  ui.setMinimapPlayer({ x: 0, z: 0 }, null);
+  assert.equal(ui.getMinimapGeometry().player, null, "an unavailable heading is never guessed from the camera");
+});
+
+test("minimap respects safe areas and controls, and expanded map traps movement", () => {
+  for (const [width, height, insets] of [
+    [320, 568, { safeLeft: 12, safeRight: 12, safeTop: 44, safeBottom: 34 }],
+    [667, 375, { safeLeft: 44, safeRight: 44, safeTop: 20, safeBottom: 24 }],
+    [320, 375, { safeLeft: 12, safeRight: 12, safeTop: 30, safeBottom: 20 }],
+  ]) {
+    const { ui, calls } = fixture({ onNextScene() {} });
+    ui.resize(width, height, 1, insets);
+    ui.setBasket("背篓 9999999 件 · 胡萝卜鸡蛋羊毛兔绒");
+    ui.setSceneName("瑞丽坝 · 雨季傍晚细雨绵绵，安静等候天晴");
+    ui.setAction("在瑞丽江畔安家", () => {});
+    ui.setJoystickVisible(true);
+    ui.setMinimapFeatures(MAP);
+    ui.setMinimapPlayer({ x: 10, z: 24 }, { x: 0, z: 1 });
+    ui.draw();
+    const bounds = { left: insets.safeLeft, right: width - insets.safeRight, top: insets.safeTop, bottom: height - insets.safeBottom };
+    assertTextWithin(calls, bounds);
+    const rects = ui.getHitRects();
+    for (const rect of rects) {
+      assert.ok(rect.x >= bounds.left && rect.y >= bounds.top);
+      assert.ok(rect.x + rect.w <= bounds.right && rect.y + rect.h <= bounds.bottom);
+      for (const other of rects) if (other !== rect) assert.equal(overlaps(rect, other), false, rect.id + " overlaps " + other.id);
+    }
+    const map = ui.getMinimapGeometry();
+    const joy = ui.getJoystickGeometry();
+    assert.equal(overlaps(map, { x: joy.x - joy.radius, y: joy.y - joy.radius, w: joy.radius * 2, h: joy.radius * 2 }), false);
+    ui.joystickStart(joy.x, joy.y);
+    tap(ui, "minimap");
+    assert.equal(ui.getMove().active, false);
+    assert.equal(ui.joystickStart(joy.x, joy.y), false);
+    assert.equal(ui.getJoystickGeometry().visible, false);
+    ui.draw(); assertTextWithin(calls, bounds);
+    assert.ok(ui.getHitRects().every(rect => rect.id.startsWith("minimap")));
+    ui.openPanel();
+    assert.equal(ui.getMinimapGeometry(), null);
+    ui.closePanel();
+    assert.equal(ui.getMinimapGeometry().expanded, false);
+    ui.openAlbum([]);
+    assert.equal(ui.getMinimapGeometry(), null);
+    ui.closeAlbum();
+    ui.openTeleport([], () => {});
+    assert.equal(ui.getMinimapGeometry(), null);
+  }
 });

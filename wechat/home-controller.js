@@ -45,7 +45,7 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
     const position = world.getPlayerPos();
     const time = now();
     if (prayer.stage === "join" || prayer.stage === "bow") {
-      if (Math.hypot(position.x - prayer.ring.x, position.z - prayer.ring.z) > 34) { endPrayer(world, "祈福先停下了 · 想好了再来"); return true; }
+      if (Math.hypot(position.x - prayer.ring.x, position.z - prayer.ring.z) > prayer.ring.r + 14) { endPrayer(world, "祈福先停下了 · 想好了再来"); return true; }
       ui.setAction(prayer.stage === "join" ? "合掌 · 把心收回来" : "礼拜 · 愿平安", null);
       if (time >= prayer.endsAt) {
         if (prayer.stage === "join") {
@@ -73,7 +73,7 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
     if (prayer.stage === "circling") {
       const dx = position.x - prayer.ring.x, dz = position.z - prayer.ring.z;
       const dist = Math.hypot(dx, dz);
-      if (dist > 44) { endPrayer(world, "先到这里 · 塔门一直开着"); return true; }
+      if (dist > prayer.ring.r + 24) { endPrayer(world, "先到这里 · 塔门一直开着"); return true; }
       if (dist >= prayer.ring.r - 7 && dist <= prayer.ring.r + 9) {
         const angle = Math.atan2(dz, dx);
         if (prayer.lastAngle !== null) {
@@ -113,7 +113,10 @@ export function createHomeController({ state, transact, ui, getMangshi, getDamWo
     if (state.horse?.owned && (state.horse.dam || "mangshi") === dam) world.setHorseBond?.(state.horse.bond);
     const h = state.home;
     if (!h || (h.dam || "mangshi") !== dam) return;
-    if (h.custom && !world.getPlots().some(value => value.site === -1 && value.idx === -1)) world.claimCustomPlot?.(h.custom.x, h.custom.z);
+    if (h.custom && !world.getPlots().some(value => value.site === -1 && value.idx === -1)) {
+      if (world.restoreCustomPlot) world.restoreCustomPlot(h.custom.x, h.custom.z);
+      else world.claimCustomPlot?.(h.custom.x, h.custom.z);
+    }
     const plot = world.getPlots().find(value => value.site === h.site && value.idx === h.plot);
     if (!plot) return;
     if (!plot.claimed) world.markClaimed(h.site, h.plot);

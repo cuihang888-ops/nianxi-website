@@ -12,11 +12,13 @@ const bundle = buildSync({
     import "./wechat/platform/runtime-compat.js";
     import { createWechatGameHost } from "./wechat/platform/game-host.js";
     import { createGame } from "./wechat/game-entry.js";
+    export let debugGame;
     export function start(wx, scheduler) {
       const host = createWechatGameHost(wx, {
         config: { appId: "wx24c1d8b3a00f962e", clientVersion: "native-test", protocolVersion: 1, backendBaseUrl: "" },
         createGame(context) {
-          const game = createGame(context);
+          const game = createGame({ ...context, debug: true });
+          debugGame = game;
           const dispose = game.dispose;
           game.dispose = () => {
             try { return dispose(); } catch (error) { disposeFailures.push(error); throw error; }
@@ -154,6 +156,53 @@ test("injected scheduler has priority and retains its receiver through the real 
   assert.equal(vm.runInContext("frames.size", context), 1);
   runtime.host.dispose();
   assert.equal(vm.runInContext("frames.size", context), 0);
+});
+
+test("touches starting in the minimap never reach world tap or camera handlers after leaving its edge", async () => {
+  const { context, runtime } = fixture();
+  assert.equal((await runtime.started).ok, true);
+  vm.runInContext(`
+    var mapGame = NativeEntry.debugGame;
+    mapGame.debug.setScene(3);
+    var worldTaps = 0, worldDrags = 0, worldPinches = 0;
+    mapGame.debug.getWorld().handleTap = () => { worldTaps++; };
+    mapGame.debug.getWorld().handleDrag = () => { worldDrags++; };
+    mapGame.debug.getWorld().handlePinch = () => { worldPinches++; };
+    var mapRect = mapGame.debug.ui.getMinimapGeometry();
+    function sendTouch(type, touches, changed) {
+      events.get(type)({
+        touches: touches.map(p => ({ identifier: p.id, clientX: p.x, clientY: p.y })),
+        changedTouches: changed.map(p => ({ identifier: p.id, clientX: p.x, clientY: p.y })),
+      });
+    }
+    var inside = { id: 1, x: mapRect.x + 2, y: mapRect.y + mapRect.h / 2 };
+    var outside = { id: 1, x: mapRect.x - 2, y: inside.y };
+    sendTouch("TouchStart", [inside], [inside]);
+    sendTouch("TouchEnd", [], [outside]);
+  `, context);
+  assert.equal(vm.runInContext("worldTaps", context), 0, "4px tap starting on the map cannot leak into the world");
+  assert.equal(vm.runInContext("mapGame.debug.ui.isPanelOpen()", context), false);
+  vm.runInContext(`
+    var center = { id: 2, x: mapRect.x + mapRect.w / 2, y: mapRect.y + mapRect.h / 2 };
+    sendTouch("TouchStart", [center], [center]);
+    sendTouch("TouchEnd", [], [center]);
+    var dragged = { id: 3, x: 4, y: 390 };
+    var origin = { id: 3, x: center.x, y: center.y };
+    sendTouch("TouchStart", [origin], [origin]);
+    sendTouch("TouchMove", [dragged], [dragged]);
+    sendTouch("TouchEnd", [], [dragged]);
+    var pinchOne = { id: 4, x: center.x - 30, y: center.y };
+    var pinchTwo = { id: 5, x: center.x + 30, y: center.y };
+    sendTouch("TouchStart", [pinchOne], [pinchOne]);
+    sendTouch("TouchStart", [pinchOne, pinchTwo], [pinchTwo]);
+    pinchTwo = { ...pinchTwo, x: pinchTwo.x + 50 };
+    sendTouch("TouchMove", [pinchOne, pinchTwo], [pinchTwo]);
+    sendTouch("TouchEnd", [], [pinchOne, pinchTwo]);
+  `, context);
+  assert.equal(vm.runInContext("mapGame.debug.ui.isPanelOpen()", context), true);
+  assert.equal(vm.runInContext("worldTaps + worldDrags + worldPinches", context), 0);
+  assert.equal(vm.runInContext("failures.length", context), 0);
+  runtime.host.dispose();
 });
 
 test("missing animation APIs fail at the scheduler without creating the scene or overlay", async () => {

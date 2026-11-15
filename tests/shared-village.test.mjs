@@ -121,6 +121,78 @@ test("every plot is clear of the road with the contracted clearance", () => {
   assert.equal(Village.isClearOfRoad(shifted), false);
 });
 
+test("a plot enclosing the entire village road is not clear of it", () => {
+  const enclosing = [
+    { x: -100, z: -100 }, { x: 100, z: -100 },
+    { x: 100, z: 100 }, { x: -100, z: 100 },
+  ];
+  for (const polygon of [enclosing, [...enclosing].reverse()]) {
+    assert.equal(Village.distancePolygonToRoad(polygon), 0);
+    assert.equal(Village.isClearOfRoad(polygon), false);
+  }
+});
+
+test("road clearance rejects contained, crossing and boundary-touching segments", () => {
+  const square = [
+    { x: 0, z: 0 }, { x: 10, z: 0 },
+    { x: 10, z: 10 }, { x: 0, z: 10 },
+  ];
+  const roads = [
+    { name: "entire segment inside", points: [{ x: 2, z: 5 }, { x: 8, z: 5 }] },
+    { name: "one endpoint inside", points: [{ x: -5, z: 5 }, { x: 5, z: 5 }] },
+    { name: "crossing with both endpoints outside", points: [{ x: -5, z: 5 }, { x: 15, z: 5 }] },
+    { name: "touching one corner", points: [{ x: -5, z: -5 }, { x: 0, z: 0 }] },
+    { name: "overlapping part of an edge", points: [{ x: -5, z: 0 }, { x: 5, z: 0 }] },
+    { name: "containing a whole edge", points: [{ x: -5, z: 0 }, { x: 15, z: 0 }] },
+    { name: "zero-length road inside", points: [{ x: 5, z: 5 }, { x: 5, z: 5 }] },
+  ];
+  for (const { name, points } of roads) {
+    for (const polygon of [square, [...square].reverse()]) {
+      for (const road of [points, [...points].reverse()]) {
+        assert.equal(Village.distancePolygonToRoad(polygon, road), 0, name);
+        assert.equal(Village.isClearOfRoad(polygon, Village.ROAD_CLEARANCE, road), false, name);
+      }
+    }
+  }
+});
+
+test("road clearance preserves separation and accepts the exact minimum distance", () => {
+  const square = [
+    { x: 0, z: 0 }, { x: 10, z: 0 },
+    { x: 10, z: 10 }, { x: 0, z: 10 },
+  ];
+  const collinearOutside = [{ x: 12, z: 0 }, { x: 20, z: 0 }];
+  assert.equal(Village.distancePolygonToRoad(square, collinearOutside), 2);
+  assert.equal(Village.isClearOfRoad(square, 2, collinearOutside), true);
+  assert.equal(Village.isClearOfRoad(square, 2.01, collinearOutside), false);
+  const exactClearance = [{ x: -5, z: -8 }, { x: 15, z: -8 }];
+  assert.equal(Village.distancePolygonToRoad(square, exactClearance), Village.ROAD_CLEARANCE);
+  assert.equal(Village.isClearOfRoad(square, Village.ROAD_CLEARANCE, exactClearance), true);
+  const tooClose = [{ x: -5, z: -7.99 }, { x: 15, z: -7.99 }];
+  assert.equal(Village.isClearOfRoad(square, Village.ROAD_CLEARANCE, tooClose), false);
+});
+
+test("segment distance includes crossing, collinear overlap, touches and degenerate segments", () => {
+  const segment = [{ x: 0, z: 0 }, { x: 10, z: 0 }];
+  const cases = [
+    { name: "crossing", other: [{ x: 5, z: -5 }, { x: 5, z: 5 }], distance: 0 },
+    { name: "shared endpoint", other: [{ x: 10, z: 0 }, { x: 10, z: 5 }], distance: 0 },
+    { name: "collinear overlap", other: [{ x: 5, z: 0 }, { x: 15, z: 0 }], distance: 0 },
+    { name: "collinear containment", other: [{ x: 2, z: 0 }, { x: 8, z: 0 }], distance: 0 },
+    { name: "collinear separation", other: [{ x: 12, z: 0 }, { x: 15, z: 0 }], distance: 2 },
+    { name: "zero-length segment on line", other: [{ x: 5, z: 0 }, { x: 5, z: 0 }], distance: 0 },
+    { name: "zero-length segment off line", other: [{ x: 5, z: 3 }, { x: 5, z: 3 }], distance: 3 },
+  ];
+  for (const { name, other, distance } of cases) {
+    for (const first of [segment, [...segment].reverse()]) {
+      for (const second of [other, [...other].reverse()]) {
+        assert.equal(Village.segmentsDistance(...first, ...second), distance, name);
+        assert.equal(Village.segmentsDistance(...second, ...first), distance, name);
+      }
+    }
+  }
+});
+
 test("every plot sits inside the village bounds and presses no water or hill", () => {
   for (const poly of allPolys) {
     for (const v of poly) {

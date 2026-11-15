@@ -129,8 +129,9 @@ const PAGODA = Object.freeze({
 // 第 1 排（中心 z=35）：C、D、E；第 2 排（中心 z=70）：F、G、H。
 // 排间留 3–5 宽土巷，列间留 4–10 宽土径/空地。东侧不再排地块：东南是南宛河河道、
 // 东北是集市与大厅，地块目录向西、向南展开（地形所迫，见布局文档 v2 修订节）。
-// bounds 为相对地块原点（地块中心）的局部坐标，与 HomeProjection.bounds 同构；
-// layout 锚点同样为地块局部坐标，与 HomeProjection.house / beds / animals 对齐。
+// 场景 bounds 为相对地块原点（地块中心）的局部坐标，plotPolygon 转为村落坐标。
+// 服务端 HomeProjection.bounds 已是村落坐标，不能再加地块 origin。
+// layout 锚点仍为地块局部坐标，与未来 HomeProjection.house / beds / animals 对齐。
 const PLOT_WIDTH = 30;
 const PLOT_DEPTH = 32;
 
@@ -267,9 +268,17 @@ function orientation(a, b, c) {
   return (b.x - a.x) * (c.z - a.z) - (b.z - a.z) * (c.x - a.x);
 }
 
+function pointOnSegment(point, a, b) {
+  return orientation(a, b, point) === 0
+    && point.x >= Math.min(a.x, b.x) && point.x <= Math.max(a.x, b.x)
+    && point.z >= Math.min(a.z, b.z) && point.z <= Math.max(a.z, b.z);
+}
+
 function segmentsIntersect(p1, p2, p3, p4) {
   const d1 = orientation(p3, p4, p1), d2 = orientation(p3, p4, p2);
   const d3 = orientation(p1, p2, p3), d4 = orientation(p1, p2, p4);
+  if (pointOnSegment(p1, p3, p4) || pointOnSegment(p2, p3, p4)
+    || pointOnSegment(p3, p1, p2) || pointOnSegment(p4, p1, p2)) return true;
   return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
 }
 
@@ -300,8 +309,10 @@ function distanceToRoad(point, roadPoints = ROAD_POINTS) {
   return min;
 }
 
-// 地块多边形（村落坐标）与道路中心线的最短距离（边对边）。
+// 地块区域（含内部，村落坐标）与道路中心线的最短距离。
 function distancePolygonToRoad(polygon, roadPoints = ROAD_POINTS) {
+  // 道路完全落在地块内时没有边界交点，也必须判作压路。
+  if (roadPoints.length >= 2 && roadPoints.some(point => pointInPolygon(point, polygon))) return 0;
   let min = Infinity;
   for (let i = 0; i < polygon.length; i++) {
     const a = polygon[i], b = polygon[(i + 1) % polygon.length];

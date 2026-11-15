@@ -206,10 +206,11 @@
     buildSite(1, 58, 96);
     const HALL_POS = { x: -38, z: -44 };
     const CRYSTAL_POS = { x: market.position.x + crystal.position.x, z: market.position.z + crystal.position.z };
-    function claimCustomPlot(x, z) {
+    function addCustomPlot(x, z, restoring) {
+      if (!Number.isFinite(x) || !Number.isFinite(z) || Math.hypot(x / landSpec.bounds.rx, z / landSpec.bounds.rz) > 1 + 1e-10) return null;
       const existing = plotList.find(p => p.site === -1 && p.idx === -1);
       if (existing) return existing.x === x && existing.z === z ? { site: -1, idx: -1, x, z, claimed: true } : null;
-      if (!DamWorld.checkCustomPlotSpot(landSpec, plotList, x, z).ok) return null;
+      if (!restoring && !DamWorld.checkCustomPlotSpot(landSpec, plotList, x, z).ok) return null;
       const mesh = box(7.6, 0.22, 7.6, M.plot, x, 0.11, z);
       const dx = HALL_POS.x - x, dz = HALL_POS.z - z, distance = Math.hypot(dx, dz) || 1;
       const plot = { site: -1, idx: -1, x, z, mesh, claimed: false, hut: false, house: 0, hutGroup: null,
@@ -218,6 +219,8 @@
       root.add(mesh); plotList.push(plot); markClaimedVisual(plot);
       return { site: -1, idx: -1, x, z, claimed: true };
     }
+    function claimCustomPlot(x, z) { return addCustomPlot(x, z, false); }
+    function restoreCustomPlot(x, z) { return addCustomPlot(x, z, true); }
 
     function markClaimedVisual(plot) {
       plot.claimed = true;
@@ -603,6 +606,7 @@
       setHorseBond(value) { bondLevel = Number.isFinite(value) ? Math.max(0, Math.min(DamWorld.BOND.MAX, value)) : 0; },
       horseCare() { if (horseShown) careT = 1; },
       claimCustomPlot,
+      restoreCustomPlot,
       checkPlotSpot(x, z) { return DamWorld.checkCustomPlotSpot(landSpec, plotList, x, z); },
       setMounted(value) {
         const next = !!value;

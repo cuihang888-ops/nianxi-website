@@ -15,6 +15,7 @@
 
   function createRuiliScene(THREE, DamWorld) {
     const DW = DamWorld || (typeof globalThis !== "undefined" ? globalThis.AnheliDamWorld : null);
+    const pagodaHillRadius = V ? V.PAGODA.hillRadius : 30;
     // —— 契约数据换算到坝内坐标（数值唯一来源是 shared-village.cjs，这里只换算不另立一份）——
     let villagePlots = null, pagoda = null, prayerSite = null, mapFeatures = null;
     if (V) {
@@ -30,20 +31,21 @@
         };
       });
       const center = V.toDamCoords(V.PAGODA.center);
-      const entry = V.toDamCoords(V.PAGODA.entry.position);
       const off = V.PAGODA.entry.localOffset;
       const offLen = Math.hypot(off.x, off.z) || 1;
       const dir = { x: off.x / offLen, z: off.z / offLen }; // 塔中心 → 村落/古道方向（西南）
+      const courtDistance = pagodaHillRadius + 8.5;
+      const entry = { x: center.x + dir.x * (courtDistance + 6.4), z: center.z + dir.z * (courtDistance + 6.4) };
       pagoda = {
         center, entry, dir,
-        court: { x: center.x + dir.x * 22.5, z: center.z + dir.z * 22.5 },   // 塔基礼拜庭（山脚地面）
-        shrine: { x: center.x + dir.x * 19.5, z: center.z + dir.z * 19.5 },  // 佛龛（靠山脚）
-        spot: { x: center.x + dir.x * 23.5, z: center.z + dir.z * 23.5 },    // 礼拜位（龛前）
+        court: { x: center.x + dir.x * courtDistance, z: center.z + dir.z * courtDistance },
+        shrine: { x: center.x + dir.x * (courtDistance - 3), z: center.z + dir.z * (courtDistance - 3) },
+        spot: { x: center.x + dir.x * (courtDistance + 1), z: center.z + dir.z * (courtDistance + 1) },
       };
       prayerSite = {
-        entry: { x: entry.x, z: entry.z, r: 8.5 }, // 契约判定半径 4；玩家被塔山碰撞圈（r16）与佛龛碰撞挡在锚点约 7 外，触发半径放宽到 8.5 保证站在礼拜庭正中就能触发
+        entry: { x: entry.x, z: entry.z, r: V.PAGODA.entry.radius },
         spot: { x: pagoda.spot.x, z: pagoda.spot.z, yaw: Math.atan2(-dir.x, -dir.z) }, // 站定面塔
-        ring: { x: center.x, z: center.z, r: 20 }, // 绕塔：绕塔山山脚一周（契约台面半径 9 需登塔结构，本块以山脚环行落地，见施工记录）
+        ring: { x: center.x, z: center.z, r: pagodaHillRadius + 2 }, // 依可见山体半径留出整圈步道；契约台面不作为地面环线
       };
       mapFeatures = {
         villageId: V.VILLAGE_ID,
@@ -55,7 +57,18 @@
         })(),
         plots: villagePlots.map(p => ({ id: p.id, x: p.x, z: p.z, w: p.w, d: p.d, reserved: p.reserved })),
         commonPoint: { ...V.toDamCoords(V.COMMON_POINT.position), radius: V.COMMON_POINT.radius },
-        pagoda: { id: V.PAGODA.id, name: V.PAGODA.name, center, entry: { x: entry.x, z: entry.z }, prayer: true },
+        roads: [
+          { points: [V.ROAD_APPROACH_WEST, ...V.ROAD_POINTS].map(p => V.toDamCoords(p)), width: V.ROAD_HALF_WIDTH * 2 },
+          { points: V.TEMPLE_ROUTE.map(p => V.toDamCoords(p)), width: V.ROAD_HALF_WIDTH * 2 },
+          ...[18.5, 53.5].map(z => ({ points: [-69, 35].map(x => V.toDamCoords({ x, z })), width: 3 })),
+        ],
+        market: { ...V.toDamCoords(V.MARKET_SELL_POINT), name: "集市", area: { ...V.toDamCoords(V.MARKET), radius: V.MARKET.radius } },
+        hall: { ...V.toDamCoords(V.HALL_POS), name: "大厅" },
+        exits: [
+          { id: "west-road", name: "西古道", from: V.toDamCoords(V.WEST_JUNCTION), to: V.toDamCoords(V.ROAD_APPROACH_WEST) },
+          { id: V.TEMPLE_EXIT.templeId, name: "往总佛寺", from: V.toDamCoords(V.TEMPLE_EXIT.point), to: V.toDamCoords(V.TEMPLE_EXIT.milestone) },
+        ],
+        pagoda: { id: V.PAGODA.id, name: V.PAGODA.name, center, entry: { x: entry.x, z: entry.z }, court: { ...pagoda.court, radius: 8.2 }, prayer: true },
       };
     }
     // 样板地格局示意 + 木牌（引擎 decoratePlot 钩子；认领后引擎自动撤下本组视觉）
@@ -121,7 +134,7 @@
         }
         const hillDefs = [
           [-220, -80, 60, 42, M.hill2], [-150, -180, 68, 40, M.hill1], [30, -215, 70, 38, M.hill2],
-          [175, -165, 58, 42, M.hill3], [228, -30, 55, 32, M.hill1], [232, 95, 52, 26, M.hill3],
+          [190, -205, 58, 42, M.hill3], [228, -30, 55, 32, M.hill1], [232, 95, 52, 26, M.hill3],
           [-228, 30, 56, 32, M.hill1], [-40, 218, 70, 28, M.hill2], [140, 205, 55, 24, M.hill3],
         ];
         for (const [hx, hz, r, h, mat] of hillDefs) {
@@ -131,6 +144,7 @@
           colliders.push({ x: hx, z: hz, r: r * 0.52 });
         }
         const waters = [];
+        const placement = { waters: [], solids: hillDefs.map(([x, z, r]) => ({ x, z, r })), roads: [] };
         function riverRun(pts, r) {
           for (let i = 0; i < pts.length - 1; i++) {
             const [ax, az] = pts[i], [bx, bz] = pts[i + 1];
@@ -141,6 +155,7 @@
               w.rotation.x = -Math.PI / 2;
               w.position.set(ax + (bx - ax) * t0, 0.05, az + (bz - az) * t0);
               w.scale.set(0.9, 1.35, 1);
+              placement.waters.push({ x: w.position.x, z: w.position.z, r: r * 1.35 });
               root.add(w); waters.push(w);
             }
           }
@@ -151,13 +166,16 @@
           const w = new THREE.Mesh(new THREE.CircleGeometry(lr, 14), M.water.clone());
           w.rotation.x = -Math.PI / 2;
           w.position.set(lx, 0.05, lz);
+          placement.waters.push({ x: lx, z: lz, r: lr });
           root.add(w); waters.push(w);
         }
         // 姐勒金塔（东北山丘）
-        const jtHill = new THREE.Mesh(new THREE.ConeGeometry(30, 15, 10), M.hill3);
+        const jtHill = new THREE.Mesh(new THREE.ConeGeometry(pagodaHillRadius, 15, 10), M.hill3);
+        jtHill.name = "pagoda:hill";
         jtHill.position.set(152, 5.5, -118);
         root.add(jtHill);
         const jt = new THREE.Group();
+        jt.name = "pagoda:tower";
         jt.position.set(152, 13, -118);
         jt.add(box(11, 1.4, 11, M.stone, 0, 0.7, 0));
         const tiers = [[4.4, 3.1], [3.6, 2.6], [2.8, 2.2], [2.1, 1.9], [1.5, 1.6]];
@@ -169,7 +187,7 @@
         const jtip = new THREE.Mesh(new THREE.ConeGeometry(0.75, 3, 8), M.gold);
         jtip.position.y = ty + 1.5; jt.add(jtip);
         root.add(jt);
-        colliders.push({ x: 152, z: -118, r: 16 });
+        colliders.push({ x: 152, z: -118, r: pagodaHillRadius });
         // 莫里瀑布（西北）
         root.add(box(26, 17, 6, M.stoneD, -158, 8.5, -118));
         colliders.push({ x: -158, z: -118, r: 13 });
@@ -179,6 +197,7 @@
         root.add(fall);
         const pool = new THREE.Mesh(new THREE.CircleGeometry(8.5, 13), M.water.clone());
         pool.rotation.x = -Math.PI / 2; pool.position.set(-158, 0.06, -108);
+        placement.waters.push({ x: -158, z: -108, r: 8.5 });
         root.add(pool); waters.push(pool);
         // 独树成林（东）
         const banyan = new THREE.Group();
@@ -254,7 +273,9 @@
         }
         if (pagoda) {
           // —— 金塔塔基礼拜庭（塔山西南山脚地面：塔门 + 佛龛 + 蒲团；不上塔身、不造假室内）——
-          root.add(disc(M.stone, 8.2, pagoda.court.x, pagoda.court.z, 0.03));
+          const courtBase = disc(M.stone, 8.2, pagoda.court.x, pagoda.court.z, 0.03);
+          courtBase.name = "pagoda:court";
+          root.add(courtBase);
           root.add(disc(M.earth, 7.2, pagoda.court.x, pagoda.court.z, 0.045));
           const gate = new THREE.Group();
           gate.position.set(pagoda.court.x + pagoda.dir.x * 6.4, 0, pagoda.court.z + pagoda.dir.z * 6.4);
@@ -266,6 +287,7 @@
           finial.position.y = 4.0; gate.add(finial);
           root.add(gate);
           const shrineG = new THREE.Group();
+          shrineG.name = "pagoda:shrine";
           shrineG.position.set(pagoda.shrine.x, 0, pagoda.shrine.z);
           shrineG.rotation.y = Math.atan2(pagoda.dir.x, pagoda.dir.z);
           shrineG.add(box(3.0, 2.9, 0.35, M.stone, 0, 1.45, -0.55));
@@ -290,12 +312,13 @@
           const perp = { x: -pagoda.dir.z, z: pagoda.dir.x };
           root.add(disc(M.saddle, 0.85, pagoda.spot.x, pagoda.spot.z, 0.06));
           root.add(disc(M.saddle, 0.85, pagoda.spot.x + perp.x * 1.7, pagoda.spot.z + perp.z * 1.7, 0.06));
-          for (const rr of [30, 37]) { // 踏石：自村落方向引向塔门
+          for (const rr of [50, 57]) { // 踏石：自村落方向引向塔门
             root.add(disc(M.stone, 1.5, pagoda.center.x + pagoda.dir.x * rr, pagoda.center.z + pagoda.dir.z * rr, 0.04));
           }
         }
         // 古道：西（弄岛）→ 集市 → 东（畹町）
         const roadPts = [[-190, 44], [-110, 26], [-40, 12], [0, 6], [70, 16], [140, 24], [200, 30]];
+        placement.roads.push({ points: roadPts.map(([x, z]) => ({ x, z })), width: 10 });
         for (let i = 0; i < roadPts.length - 1; i++) {
           const [ax, az] = roadPts[i], [bx, bz] = roadPts[i + 1];
           for (let s = 0; s < 3; s++) {
@@ -378,7 +401,7 @@
           const a = rnd() * Math.PI * 2, r = 26 + rnd() * 168;
           const x = Math.cos(a) * r * 1.12, z = Math.sin(a) * r * 0.94;
           if (z > 138) continue;
-          if (Math.hypot(x - 152, z + 118) < 34) continue;
+          if (Math.hypot(x - 152, z + 118) < (prayerSite ? prayerSite.ring.r + 6 : 34)) continue;
           if (Math.hypot(x + 158, z + 112) < 26) continue;
           if (Math.hypot(x - 128, z - 26) < 24) continue;
           if (Math.hypot(x, z - 6) < 21) continue;
@@ -412,7 +435,7 @@
           root.add(cl);
           clouds.push(cl);
         }
-        return { colliders, festivalGroups: { songkran: splash, dengdeng: lamps }, animate(dt, t) {
+        return { colliders, placement, festivalGroups: { songkran: splash, dengdeng: lamps }, animate(dt, t) {
           if (splash.visible) for (const d of drops) {
             const p = (t * d.userData.sp + d.userData.ph) % 1;
             const r = 2 + p * 8.5;

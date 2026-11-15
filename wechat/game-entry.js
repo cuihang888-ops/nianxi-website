@@ -123,6 +123,8 @@ export function createGame(context) {
     ui.setSceneName(SCENE_NAMES[index]);
     ui.setJoystickVisible(index >= 2);
     ui.setAction("", null);
+    ui.setMinimapFeatures(world.getMapFeatures?.() || null);
+    ui.setMinimapPlayer(world.getPlayerPos?.(), world.getPlayerForward?.());
     discoveryController?.syncWorld(DAMS[index], world);
     applySky(true);
   }
@@ -184,8 +186,9 @@ export function createGame(context) {
       const point = gesture && changed.find(value => value.id === gesture.id);
       if (point) {
         const tap = !gesture.moved && distance(point, gesture.start) <= 8 && clock() - gesture.time < 500;
+        const startedBlocked = gesture.blocked;
         gesture = null;
-        if (tap && !ui.handleTap(point.x, point.y) && !ui.isPanelOpen()) world.handleTap?.(point.x, point.y, viewport.width, viewport.height);
+        if (tap && !ui.handleTap(point.x, point.y) && !startedBlocked && !ui.isPanelOpen()) world.handleTap?.(point.x, point.y, viewport.width, viewport.height);
         if (ui.isPanelOpen()) clearInput();
       }
       if (touches.filter(point => point.id !== joyId).length < 2) { pinch = 0; pinchBlocked = false; }
@@ -246,6 +249,7 @@ export function createGame(context) {
         world.update(delta, elapsed);
         discoveryController.update(DAMS[active], world);
         homeController.update(active, world);
+        ui.setMinimapPlayer(world.getPlayerPos?.(), world.getPlayerForward?.());
         if (ui.update()) { ui.draw(); texture.needsUpdate = true; }
       },
       render() {

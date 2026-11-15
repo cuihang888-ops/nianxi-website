@@ -27,6 +27,7 @@
     let safe = { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
     let panelOpen = false, sceneName = "", dirty = true;
     let basketText = "";
+    let mapFeatures = null, mapPlayer = null, mapOpen = false;
     let teleportItems = null, teleportCallback = null, extraRow = null;
     let albumRowText = "", albumLines = null, albumPage = 0, albumPages = [];
     let albumDetail = null, detailPage = 0, detailPages = 1;
@@ -126,6 +127,159 @@
         action: { x: hall.x, y: hall.y - 58, w: hallW, h: 48 },
         joystick: { x: safe.left + 12 + radius, y: safe.bottom - 86, radius },
       };
+    }
+    const mapPoint = point => point && Number.isFinite(point.x) && Number.isFinite(point.z);
+    const clamp = (value, min, max) => Math.min(max, Math.max(min, value));
+    function minimapFrame() {
+      if (!mapFeatures || panelOpen || teleportItems || albumLines) return null;
+      if (mapOpen) {
+        const w = Math.min(580, safe.width - 24), h = Math.min(520, safe.height - 24);
+        return { x: safe.left + (safe.width - w) / 2, y: safe.top + (safe.height - h) / 2, w, h };
+      }
+      const w = Math.min(176, Math.max(116, Math.floor((safe.width - 36) / 2)));
+      const y = safe.top + 54, h = Math.min(176, controls().action.y - 12 - y);
+      return h >= 72 ? { x: safe.right - w - 12, y, w, h } : null;
+    }
+    function minimapGeometry() {
+      const frame = minimapFrame();
+      if (!frame) return null;
+      const content = { x: frame.x + 8, y: frame.y + (mapOpen ? 48 : 28), w: frame.w - 16, h: frame.h - (mapOpen ? 76 : 36) };
+      const points = [...mapFeatures.boundsPolygon];
+      for (const road of mapFeatures.roads || []) points.push(...road.points.filter(mapPoint));
+      for (const exit of mapFeatures.exits || []) {
+        if (mapPoint(exit.from)) points.push(exit.from);
+        if (mapPoint(exit.to)) points.push(exit.to);
+      }
+      for (const point of [mapFeatures.market, mapFeatures.hall, mapFeatures.pagoda?.center]) if (mapPoint(point)) points.push(point);
+      const xs = points.map(point => point.x), zs = points.map(point => point.z);
+      const minX = Math.min(...xs), maxX = Math.max(...xs), minZ = Math.min(...zs), maxZ = Math.max(...zs);
+      const scale = Math.min(Math.max(1, content.w - 24) / Math.max(1, maxX - minX), Math.max(1, content.h - 24) / Math.max(1, maxZ - minZ));
+      const cx = content.x + content.w / 2, cy = content.y + content.h / 2;
+      const project = point => ({ x: cx + (point.x - (minX + maxX) / 2) * scale, y: cy + (point.z - (minZ + maxZ) / 2) * scale });
+      const plots = (mapFeatures.plots || []).filter(plot => mapPoint(plot) && Number.isFinite(plot.w) && Number.isFinite(plot.d)).map((plot, index) => {
+        const center = project(plot);
+        return { id: plot.id, label: String.fromCharCode(65 + index), reserved: !!plot.reserved, x: center.x - plot.w * scale / 2, y: center.y - plot.d * scale / 2, w: plot.w * scale, h: plot.d * scale };
+      });
+      const landmarks = [];
+      for (const [kind, point, name] of [["hall", mapFeatures.hall, "大厅"], ["market", mapFeatures.market, "集市"], ["pagoda", mapFeatures.pagoda?.center, mapOpen ? "姐勒金塔" : "金塔"]]) {
+        if (mapPoint(point)) landmarks.push({ kind, name, ...project(point) });
+      }
+      const exits = (mapFeatures.exits || []).filter(exit => mapPoint(exit.from) && mapPoint(exit.to)).map(exit => ({ id: exit.id, name: exit.name, from: project(exit.from), to: project(exit.to) }));
+      let player = null;
+      if (mapPlayer) {
+        const position = project(mapPlayer.position);
+        const ahead = project({ x: mapPlayer.position.x + mapPlayer.forward.x, z: mapPlayer.position.z + mapPlayer.forward.z });
+        const length = Math.hypot(ahead.x - position.x, ahead.y - position.y) || 1;
+        const direction = { x: (ahead.x - position.x) / length, y: (ahead.y - position.y) / length };
+        const x = clamp(position.x, content.x + 9, content.x + content.w - 9);
+        const y = clamp(position.y, content.y + 9, content.y + content.h - 9);
+        const triangle = [
+          { x: x + direction.x * 7, y: y + direction.y * 7 },
+          { x: x - direction.x * 4 - direction.y * 4, y: y - direction.y * 4 + direction.x * 4 },
+          { x: x - direction.x * 4 + direction.y * 4, y: y - direction.y * 4 - direction.x * 4 },
+        ];
+        player = { x, y, direction, triangle, outside: x !== position.x || y !== position.y };
+      }
+      return {
+        ...frame, expanded: mapOpen, content, scale, plots, landmarks, exits, player,
+        bounds: mapFeatures.boundsPolygon.map(project),
+        commons: mapFeatures.commons ? [
+          project({ x: mapFeatures.commons.minX, z: mapFeatures.commons.minZ }),
+          project({ x: mapFeatures.commons.maxX, z: mapFeatures.commons.maxZ }),
+        ] : null,
+        roads: (mapFeatures.roads || []).map(road => ({ points: road.points.filter(mapPoint).map(project), width: road.width * scale })),
+        commonPoint: mapPoint(mapFeatures.commonPoint) ? project(mapFeatures.commonPoint) : null,
+      };
+    }
+    function path(points, close) {
+      if (!points.length) return;
+      ctx.beginPath(); ctx.moveTo(points[0].x, points[0].y);
+      for (const point of points.slice(1)) ctx.lineTo(point.x, point.y);
+      if (close) ctx.closePath();
+    }
+    function drawMinimap() {
+      const map = minimapGeometry();
+      if (!map) return;
+      if (map.expanded) {
+        btns = [];
+        ctx.fillStyle = "rgba(28,38,32,0.45)"; ctx.fillRect(0, 0, W, H);
+      }
+      rr(map.x, map.y, map.w, map.h, 8);
+      ctx.fillStyle = "rgba(244,248,239,0.96)"; ctx.fill();
+      ctx.strokeStyle = "#899d81"; ctx.lineWidth = 1; ctx.stroke();
+      text(map.expanded ? "瑞丽江畔 · 村落地图" : "瑞丽坝", map.x + 10, map.y + (map.expanded ? 22 : 14), (map.expanded ? "bold 16px" : "bold 11px") + " sans-serif", "#35584c");
+      if (map.expanded) {
+        addBtn("minimap-panel", map.x, map.y, map.w, map.h, true);
+        text("×", map.x + map.w - 26, map.y + 22, "22px sans-serif", INK, "center");
+        addBtn("minimap-close", map.x + map.w - 44, map.y + 6, 36, 36, true);
+        text("北 ↑", map.content.x + map.content.w - 4, map.content.y + 6, "11px sans-serif", "#35584c", "right");
+        text("A/B 样板 · C-H 预留", map.x + map.w / 2, map.y + map.h - 14, "12px sans-serif", FAINT, "center");
+      } else {
+        text("北 ↑", map.x + map.w - 9, map.y + 14, "10px sans-serif", "#35584c", "right");
+        addBtn("minimap", map.x, map.y, map.w, map.h, true);
+      }
+      path(map.bounds, true);
+      ctx.fillStyle = "#e5ecd9"; ctx.fill();
+      ctx.strokeStyle = "#a7b495"; ctx.lineWidth = 1; ctx.stroke();
+      if (map.commons) {
+        const [a, b] = map.commons;
+        ctx.fillStyle = "#cee0bd"; ctx.fillRect(a.x, a.y, b.x - a.x, b.y - a.y);
+      }
+      for (const road of map.roads) {
+        path(road.points);
+        ctx.strokeStyle = "#bbad88"; ctx.lineWidth = Math.max(2, road.width); ctx.stroke();
+      }
+      for (const plot of map.plots) {
+        rr(plot.x, plot.y, plot.w, plot.h, 1);
+        ctx.fillStyle = plot.reserved ? "#d0d6ca" : "#73a68c"; ctx.fill();
+        ctx.strokeStyle = plot.reserved ? "#a4ada0" : "#436f59"; ctx.lineWidth = 0.8; ctx.stroke();
+        if (plot.w >= 9 && plot.h >= 10) text(plot.label, plot.x + plot.w / 2, plot.y + plot.h / 2, (map.expanded ? "11px" : "8px") + " sans-serif", plot.reserved ? "#56614f" : "#ffffff", "center");
+      }
+      if (map.commonPoint) {
+        ctx.beginPath(); ctx.arc(map.commonPoint.x, map.commonPoint.y, map.expanded ? 3 : 2, 0, Math.PI * 2);
+        ctx.fillStyle = "#4e8ca2"; ctx.fill();
+      }
+      const font = (map.expanded ? "12px" : "9px") + " sans-serif";
+      const label = (value, x, y, align = "left") => {
+        if (!map.expanded && map.h < 128) return;
+        ctx.font = font;
+        const width = ctx.measureText(value).width;
+        const offset = align === "right" ? width : align === "center" ? width / 2 : 0;
+        const left = clamp(x - offset, map.x + 5, map.x + map.w - width - 5);
+        text(value, left, clamp(y, map.content.y + 5, map.y + map.h - (map.expanded ? 32 : 7)), font, "#35584c");
+      };
+      for (const landmark of map.landmarks) {
+        if (landmark.kind === "pagoda") {
+          path([{ x: landmark.x, y: landmark.y - 5 }, { x: landmark.x - 4, y: landmark.y + 3 }, { x: landmark.x + 4, y: landmark.y + 3 }], true);
+          ctx.fillStyle = "#b18a34"; ctx.fill();
+          label(landmark.name, landmark.x - 7, landmark.y - 6, "right");
+        } else if (landmark.kind === "hall") {
+          ctx.fillStyle = "#71688a"; ctx.fillRect(landmark.x - 3, landmark.y - 3, 6, 6);
+          label(landmark.name, landmark.x - 5, landmark.y - 9, "right");
+        } else {
+          ctx.beginPath(); ctx.arc(landmark.x, landmark.y, 3, 0, Math.PI * 2);
+          ctx.fillStyle = "#b66b58"; ctx.fill();
+          label(landmark.name, landmark.x + 5, landmark.y + 21);
+        }
+      }
+      for (const exit of map.exits) {
+        const dx = exit.to.x - exit.from.x, dy = exit.to.y - exit.from.y, length = Math.hypot(dx, dy) || 1;
+        const ux = dx / length, uy = dy / length;
+        path([
+          { x: exit.to.x - ux * 5 - uy * 3, y: exit.to.y - uy * 5 + ux * 3 },
+          exit.to,
+          { x: exit.to.x - ux * 5 + uy * 3, y: exit.to.y - uy * 5 - ux * 3 },
+        ]);
+        ctx.strokeStyle = "#6f7e54"; ctx.lineWidth = 1.5; ctx.stroke();
+        label(exit.name, exit.to.x + (ux < 0 ? 2 : -2), exit.to.y + (ux < 0 ? 13 : -13), ux < 0 ? "left" : "right");
+      }
+      if (map.player) {
+        ctx.beginPath(); ctx.arc(map.player.x, map.player.y, 8, 0, Math.PI * 2);
+        ctx.fillStyle = "rgba(255,255,255,0.85)"; ctx.fill();
+        path(map.player.triangle, true);
+        ctx.fillStyle = "#d45d45"; ctx.fill();
+        ctx.strokeStyle = "#8b392d"; ctx.lineWidth = 0.8; ctx.stroke();
+      }
     }
     function drawRow(x, y, w, h, id, label, right, enabled, accent) {
       rr(x, y, w, h, 10);
@@ -359,7 +513,8 @@
       }
       if (basketText) {
         const font = "12px sans-serif";
-        const label = fitText(basketText, safe.width - 52, font);
+        const map = minimapFrame();
+        const label = fitText(basketText, map && !mapOpen ? map.x - safe.left - 52 : safe.width - 52, font);
         ctx.font = font;
         const width = ctx.measureText(label).width + 28;
         rr(safe.left + 12, safe.top + 52, width, 26, 13);
@@ -369,16 +524,18 @@
       }
       if (sceneName) {
         const font = "12.5px sans-serif";
-        const label = fitText(sceneName, safe.width - 50, font);
+        const map = minimapFrame();
+        const leftWidth = map && !mapOpen ? map.x - safe.left - 12 : safe.width;
+        const label = fitText(sceneName, leftWidth - 26, font);
         ctx.font = font;
         const sw = ctx.measureText(label).width + 26;
-        const cx = safe.left + safe.width / 2;
+        const cx = safe.left + leftWidth / 2;
         const top = safe.top + (basketText ? 84 : 54);
         rr(cx - sw / 2, top, sw, 30, 15);
         ctx.fillStyle = "rgba(38,52,44,0.55)"; ctx.fill();
         text(label, cx, top + 15, font, "#f2ecd8", "center");
       }
-      if (!panelOpen && !teleportItems && !albumLines) {
+      if (!panelOpen && !teleportItems && !albumLines && !mapOpen) {
         const layout = controls(), hall = layout.hall;
         rr(hall.x, hall.y, hall.w, hall.h, 23);
         ctx.fillStyle = CREAM; ctx.fill();
@@ -418,6 +575,7 @@
           addBtn("action", a.x, a.y, a.w, a.h, true);
         }
       }
+      drawMinimap();
       if (panelOpen) drawPanel(day);
       if (albumLines) drawAlbum();
       if (teleportItems) drawTeleport();
@@ -427,9 +585,11 @@
     function joystickEnd() { joy.active = false; joy.dx = 0; joy.dy = 0; dirty = true; }
     function closeTeleport() { teleportItems = null; teleportCallback = null; dirty = true; }
     function closeAlbum() { albumLines = null; albumPages = []; albumDetail = null; detailPage = 0; dirty = true; }
-    function openPanel() { closeTeleport(); closeAlbum(); hallPage = 0; panelOpen = true; joystickEnd(); dirty = true; }
-    function closePanel() { panelOpen = false; closeTeleport(); closeAlbum(); dirty = true; }
+    function openPanel() { closeTeleport(); closeAlbum(); mapOpen = false; hallPage = 0; panelOpen = true; joystickEnd(); dirty = true; }
+    function closePanel() { panelOpen = false; closeTeleport(); closeAlbum(); mapOpen = false; dirty = true; }
     function dispatch(id) {
+      if (id === "minimap") { mapOpen = true; joystickEnd(); dirty = true; return; }
+      if (id === "minimap-close") { mapOpen = false; dirty = true; return; }
       if (id === "album") { if (opts.onAlbum) opts.onAlbum(); return; }
       if (id === "album-close") { closeAlbum(); return; }
       if (id === "album-back") { albumDetail = null; detailPage = 0; dirty = true; return; }
@@ -471,7 +631,7 @@
       for (let index = btns.length - 1; index >= 0; index--) {
         const b = btns[index];
         if (x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h) {
-          if (b.id === "panel" || b.id === "teleport-panel" || b.id === "album-panel") return true;
+          if (b.id === "panel" || b.id === "teleport-panel" || b.id === "album-panel" || b.id === "minimap-panel") return true;
           if (panelOpen && (b.id === "next-scene")) { closePanel(); return true; }
           if (b.enabled) dispatch(b.id);
           else if (b.id === "signin") toast("今天已经签到了 — 明天再来");
@@ -480,6 +640,7 @@
           return true;
         }
       }
+      if (mapOpen) { mapOpen = false; dirty = true; return true; }
       if (teleportItems) { closeTeleport(); return true; }
       if (albumLines) {
         if (albumDetail) { albumDetail = null; detailPage = 0; dirty = true; } else closeAlbum();
@@ -493,7 +654,7 @@
       return btns.filter(button => !panelOpen || button.id !== "next-scene").map(button => ({ ...button }));
     }
     function containsControl(x, y) {
-      if (panelOpen || teleportItems || albumLines) return true;
+      if (panelOpen || teleportItems || albumLines || mapOpen) return true;
       if (getHitRects().some(b => x >= b.x && x <= b.x + b.w && y >= b.y && y <= b.y + b.h)) return true;
       const j = controls().joystick;
       return joyVisible && Math.hypot(x - j.x, y - j.y) <= j.radius + 10;
@@ -518,11 +679,16 @@
 
     return {
       canvas, resize, draw, handleTap, update, toast, containsControl, getHitRects,
-      getJoystickGeometry: () => ({ ...controls().joystick, visible: joyVisible && !panelOpen && !teleportItems && !albumLines }),
-      isPanelOpen: () => panelOpen || !!teleportItems || !!albumLines,
+      getJoystickGeometry: () => ({ ...controls().joystick, visible: joyVisible && !panelOpen && !teleportItems && !albumLines && !mapOpen }),
+      getMinimapGeometry: () => {
+        const geometry = minimapGeometry();
+        return geometry ? JSON.parse(JSON.stringify(geometry)) : null;
+      },
+      isPanelOpen: () => panelOpen || !!teleportItems || !!albumLines || mapOpen,
       openPanel, closePanel,
       openTeleport(items, callback) {
         closeAlbum();
+        mapOpen = false;
         teleportItems = items.map(item => ({ id: String(item.id), label: String(item.label), right: String(item.right || "") }));
         teleportCallback = callback;
         panelOpen = false;
@@ -533,6 +699,7 @@
       setAlbumRow(value) { if ((value || "") !== albumRowText) { albumRowText = String(value || ""); dirty = true; } },
       openAlbum(lines) {
         closeTeleport();
+        mapOpen = false;
         albumLines = lines.map((line, index) => line.type === "group" ? { type: "group", text: String(line.text || "") }
           : { type: "item", index, name: String(line.name || ""), hint: String(line.hint || ""), note: String(line.note || ""), got: !!line.got });
         albumDetail = null; detailPage = 0; albumPage = 0; joystickEnd(); dirty = true;
@@ -544,6 +711,23 @@
         if (JSON.stringify(next) !== JSON.stringify(extraRow)) { extraRow = next; dirty = true; }
       },
       setSceneName(name) { sceneName = String(name || ""); dirty = true; },
+      setMinimapFeatures(features) {
+        mapFeatures = Array.isArray(features?.boundsPolygon) && features.boundsPolygon.length >= 3 && features.boundsPolygon.every(mapPoint) ? features : null;
+        mapPlayer = null; mapOpen = false; dirty = true;
+      },
+      setMinimapPlayer(position, forward) {
+        if (!mapFeatures) return;
+        if (!mapPoint(position) || !mapPoint(forward) || Math.hypot(forward.x, forward.z) < 1e-6) {
+          if (mapPlayer) { mapPlayer = null; dirty = true; }
+          return;
+        }
+        const length = Math.hypot(forward.x, forward.z);
+        const direction = { x: forward.x / length, z: forward.z / length };
+        if (!mapPlayer || Math.hypot(position.x - mapPlayer.position.x, position.z - mapPlayer.position.z) >= 0.5 ||
+          Math.hypot(direction.x - mapPlayer.forward.x, direction.z - mapPlayer.forward.z) >= 0.015) {
+          mapPlayer = { position: { x: position.x, z: position.z }, forward: direction }; dirty = true;
+        }
+      },
       setBasket(value) {
         const next = String(value || "");
         if (next !== basketText) { basketText = next; dirty = true; }
@@ -559,7 +743,7 @@
         if (!joyVisible) joystickEnd();
       },
       joystickStart(x, y) {
-        if (!joyVisible || panelOpen || teleportItems || albumLines) return false;
+        if (!joyVisible || panelOpen || teleportItems || albumLines || mapOpen) return false;
         const j = controls().joystick;
         if (x < safe.left || x > safe.right || y < safe.top || y > safe.bottom || Math.hypot(x - j.x, y - j.y) > j.radius + 10) return false;
         joy.active = true; joyMoveTo(x, y);

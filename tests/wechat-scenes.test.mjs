@@ -3,6 +3,9 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import vm from "node:vm";
 import Economy from "../wechat/vendor/preview-economy.cjs";
+import Village from "../wechat/vendor/shared-village.cjs";
+import Daily from "../wechat/vendor/daily-state.cjs";
+import { createHomeController } from "../wechat/home-controller.js";
 
 const vendor = new URL("../wechat/vendor/", import.meta.url);
 const adapterSource = fs.readFileSync(new URL("threejs-miniprogram.cjs", vendor), "utf8");
@@ -11,13 +14,14 @@ const sources = Object.fromEntries(["anheli", "pasture", "mangshi", "ruili", "yi
   name, fs.readFileSync(new URL(`${name}-scene.cjs`, vendor), "utf8"),
 ]));
 
-function fixture(name, events) {
+function fixture(name, events, { sharedVillage = false } = {}) {
   // The adapter patches canvas and Object prototypes; contain those patches in a VM.
   const context = vm.createContext({ exports: {}, console, require: () => Economy });
   vm.runInContext(adapterSource, context);
   vm.runInContext("class Canvas {}; this.THREE = exports.createScopedThreejs(new Canvas()); this.module = { exports: {} };", context);
   vm.runInContext(damSource, context);
-  vm.runInContext("this.DamWorld = module.exports; this.require = () => DamWorld; this.module = { exports: {} };", context);
+  vm.runInContext("this.DamWorld = module.exports; this.module = { exports: {} };", context);
+  context.require = name => sharedVillage && name.includes("shared-village") ? Village : context.DamWorld;
   vm.runInContext(sources[name], context);
   const factoryName = "create" + name[0].toUpperCase() + name.slice(1) + "Scene";
   const world = context.module.exports[factoryName](context.THREE, name === "pasture" ? events : context.DamWorld);
@@ -460,6 +464,102 @@ test("custom placement checks its entire footprint at bounds and near solids", (
   assert.equal(check(spec, [], 94, 0).reason, "bounds");
   assert.equal(check(spec, [], 22, 0).reason, "solid");
   assert.equal(check(spec, [], 0, 0).ok, true);
+});
+
+test("custom placement reserves the whole home against plot edges, public space and narrow road or water crossings", () => {
+  const context = vm.createContext({ module: { exports: {} }, require: () => Economy });
+  vm.runInContext(damSource, context);
+  const check = context.module.exports.checkCustomPlotSpot;
+  const base = {
+    bounds: { rx: 250, rz: 205 }, sites: [], hallPos: { x: 0, z: 100 },
+    crystalPos: { x: 100, z: 100 }, waters: [], colliders: [],
+  };
+  const result = spec => check({ ...base, ...spec }, [], 0, 0);
+  assert.equal(result({}).ok, true);
+  assert.equal(check(base, [{ x: 20, z: 0, w: 30, d: 32 }], 0, 0).reason, "taken",
+    "a large plot edge intersects the home even though its center is twenty units away");
+  assert.equal(result({ waters: [{ x: 0, z: 5.4, r: 0.1 }] }).reason, "water",
+    "water crossing an edge cannot hide between the footprint corners");
+  assert.equal(result({ colliders: [{ x: 0, z: -6.5, r: 0.1 }] }).reason, "solid",
+    "the back of an upgraded roof is reserved");
+  for (const points of [
+    [{ x: -1, z: 0 }, { x: 1, z: 0 }],
+    [{ x: -20, z: 5.4 }, { x: 20, z: 5.4 }],
+    [{ x: -20, z: 0 }, { x: -10, z: 0 }, { x: 20, z: 0 }],
+  ]) assert.equal(result({ mapFeatures: { roads: [{ points, width: 1 }] } }).reason, "site");
+  assert.equal(result({ mapFeatures: { commons: { minX: 5, maxX: 10, minZ: -10, maxZ: 10 } } }).reason, "site");
+  assert.equal(result({ mapFeatures: { commonPoint: { x: 6, z: 0, radius: 1 } } }).reason, "site");
+  assert.equal(result({ mapFeatures: { market: { area: { x: 6, z: 0, radius: 1 } } } }).reason, "site");
+  assert.equal(result({ placement: { waters: [{ x: 0, z: 5.4, r: 0.1 }] } }).reason, "water");
+  assert.equal(result({ placement: { roads: [{ points: [{ x: -1, z: 0 }, { x: 1, z: 0 }], width: 1 }] } }).reason, "site");
+  assert.equal(result({ placement: { solids: [{ x: 0, z: -6.5, r: 0.1 }] } }).reason, "solid");
+});
+
+test("actual Ruili homes cannot overlap any A-H plot, the village commons, full roads or visible rivers", () => {
+  const world = fixture("ruili", undefined, { sharedVillage: true });
+  const features = world.getMapFeatures();
+  for (const plot of features.plots) {
+    for (const [dx, dz] of [[-14, -15], [14, -15], [-14, 15], [14, 15]]) {
+      assert.equal(world.checkPlotSpot(plot.x + dx, plot.z + dz).ok, false, plot.id + " corner remains reserved");
+      assert.equal(world.claimCustomPlot(plot.x + dx, plot.z + dz), null);
+    }
+  }
+  for (const point of [
+    { x: -98, z: 49 }, { x: -64, z: 136 }, features.commonPoint,
+    { x: -95, z: 23 }, { x: 104, z: 20 }, { x: -100, z: 84.5 },
+    { x: 2, z: 18 }, { x: 49, z: -110 }, { x: -72, z: 180 },
+  ]) assert.equal(world.checkPlotSpot(point.x, point.z).ok, false, JSON.stringify(point));
+  const field = { x: -120, z: -35 };
+  assert.equal(world.checkPlotSpot(field.x, field.z).ok, true, "open ground remains available");
+  assert.equal(world.claimCustomPlot(field.x, field.z)?.claimed, true);
+});
+
+test("saved custom homes restore unchanged in all five dams when new placement rules reject them", () => {
+  const legacyPositions = {
+    mangshi: { x: -62.5, z: 48 }, ruili: { x: -102, z: 46 }, yingjiang: { x: -56.5, z: 12 },
+    longchuan: { x: 67.5, z: 48 }, lianghe: { x: -41.5, z: 100 },
+  };
+  for (const dam of ["mangshi", "ruili", "yingjiang", "longchuan", "lianghe"]) {
+    const world = fixture(dam, undefined, { sharedVillage: true });
+    const position = legacyPositions[dam];
+    const state = Daily.defaultState();
+    assert.equal(Daily.claimCustomHome(state, position.x, position.z, dam).ok, true);
+    Daily.buildHomeHut(state);
+    const before = structuredClone(state);
+    assert.equal(world.checkPlotSpot(position.x, position.z).ok, false, dam);
+    assert.equal(world.claimCustomPlot(position.x, position.z, { restoring: true }), null,
+      "a new claim cannot bypass validation through an options argument");
+    const scenes = [];
+    const ui = { toast() {}, markDirty() {}, closePanel() {}, closeTeleport() {} };
+    const controller = createHomeController({
+      state, transact() { assert.fail("restoration must not write or charge"); }, ui,
+      getDamWorld: () => world, setScene: value => scenes.push(value),
+      now: () => 0, today: () => "2026-11-15",
+    });
+    controller.restoreVisual(world, dam);
+    controller.restoreVisual(world, dam);
+    assert.equal(world.getPlots().filter(plot => plot.site === -1).length, 1, dam);
+    const restored = world.getPlots().find(plot => plot.site === -1);
+    assert.equal(restored.x, position.x); assert.equal(restored.z, position.z);
+    assert.equal(restored.house, 1);
+    assert.equal(controller.goHome(), true, dam + " home remains reachable through the home control");
+    assert.equal(scenes.at(-1), ["mangshi", "ruili", "yingjiang", "longchuan", "lianghe"].indexOf(dam) + 2);
+    const player = world.getPlayerPos(), spec = world.getSpec();
+    assert.ok(Math.hypot(player.x / spec.bounds.rx, player.z / spec.bounds.rz) <= 1 + 1e-8);
+    assert.ok(spec.waters.concat(spec.colliders).every(circle => Math.hypot(player.x - circle.x, player.z - circle.z) >= circle.r - 1e-6));
+    assert.deepEqual(state, before);
+  }
+});
+
+test("legacy restoration rejects invalid coordinates before creating any home in every dam", () => {
+  for (const dam of ["mangshi", "ruili", "yingjiang", "longchuan", "lianghe"]) {
+    const world = fixture(dam, undefined, { sharedVillage: true });
+    const before = world.getPlots().length, spec = world.getSpec();
+    for (const [x, z] of [[NaN, 0], [0, Infinity], ["0", 0], [spec.bounds.rx + 1, 0]]) {
+      assert.equal(world.restoreCustomPlot(x, z), null, dam);
+      assert.equal(world.getPlots().length, before);
+    }
+  }
 });
 
 test("horse bond care follow and hide stay finite and reuse existing meshes", () => {

@@ -53,28 +53,82 @@
     return { resolve, valid };
   }
 
+  function landBoundsContain(spec, x, z) {
+    const bounds = spec.bounds || { rx: 250, rz: 205 };
+    return Number.isFinite(x) && Number.isFinite(z) && Math.hypot(x / bounds.rx, z / bounds.rz) <= 1 + 1e-10;
+  }
+
+  function rectangle(x, z, minX, maxX, minZ, maxZ, angle = 0) {
+    const cos = Math.cos(angle), sin = Math.sin(angle);
+    return [[minX, minZ], [maxX, minZ], [maxX, maxZ], [minX, maxZ]].map(([px, pz]) => ({
+      x: x + px * cos + pz * sin, z: z - px * sin + pz * cos,
+    }));
+  }
+
+  function homeFootprint(x, z, angle) {
+    // Covers the upgraded roof, field, unrotated pad and animal paths plus their bodies.
+    return rectangle(x, z, -5.5, 5.5, -6.6, 5.5, angle);
+  }
+
+  function polygonsOverlap(a, b) {
+    for (const polygon of [a, b]) for (let i = 0; i < polygon.length; i++) {
+      const p = polygon[i], q = polygon[(i + 1) % polygon.length];
+      const nx = q.z - p.z, nz = p.x - q.x;
+      const project = points => points.map(point => point.x * nx + point.z * nz);
+      const left = project(a), right = project(b);
+      if (Math.max(...left) < Math.min(...right) - 1e-9 || Math.max(...right) < Math.min(...left) - 1e-9) return false;
+    }
+    return true;
+  }
+
+  function pointSegmentDistance(point, a, b) {
+    const dx = b.x - a.x, dz = b.z - a.z, length = dx * dx + dz * dz;
+    const t = length ? Math.max(0, Math.min(1, ((point.x - a.x) * dx + (point.z - a.z) * dz) / length)) : 0;
+    return Math.hypot(point.x - a.x - t * dx, point.z - a.z - t * dz);
+  }
+
+  function pointPolygonDistance(point, polygon) {
+    if (polygonsOverlap(polygon, [point])) return 0;
+    return Math.min(...polygon.map((p, index) => pointSegmentDistance(point, p, polygon[(index + 1) % polygon.length])));
+  }
+
+  function polygonRoadDistance(polygon, points) {
+    let distance = Infinity;
+    for (let i = 1; i < points.length; i++) {
+      const a = points[i - 1], b = points[i];
+      if (polygonsOverlap(polygon, [a, b])) return 0;
+      distance = Math.min(distance, pointPolygonDistance(a, polygon), pointPolygonDistance(b, polygon),
+        ...polygon.map(point => pointSegmentDistance(point, a, b)));
+    }
+    return distance;
+  }
+
   function checkCustomPlotSpot(spec, plots, x, z) {
     if (!Number.isFinite(x) || !Number.isFinite(z)) return { ok: false, reason: "invalid" };
-    const bounds = spec.bounds || { rx: 250, rz: 205 };
-    const dx = spec.hallPos.x - x, dz = spec.hallPos.z - z;
-    const angle = Math.atan2(dx, dz);
-    // Includes the upgraded roof, stairs, field and the original square pad.
-    const footprint = [];
-    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-      footprint.push({ x: x + sx * 3.8, z: z + sz * 3.8 });
-      for (const reach of [6.2, 5.4]) footprint.push({
-        x: x + sx * 4.5 * Math.cos(angle) + sz * reach * Math.sin(angle),
-        z: z - sx * 4.5 * Math.sin(angle) + sz * reach * Math.cos(angle),
-      });
-    }
-    if (Math.hypot(x / bounds.rx, z / bounds.rz) > 1 || footprint.some(p => Math.hypot(p.x / bounds.rx, p.z / bounds.rz) > 1)) return { ok: false, reason: "bounds" };
+    const angle = Math.atan2(spec.hallPos.x - x, spec.hallPos.z - z);
+    const footprint = homeFootprint(x, z, angle);
+    if (!landBoundsContain(spec, x, z) || footprint.some(p => !landBoundsContain(spec, p.x, p.z))) return { ok: false, reason: "bounds" };
     for (const site of spec.sites) if (Math.hypot(x - site.x, z - site.z) < 16) return { ok: false, reason: "site" };
     if (Math.hypot(x - spec.hallPos.x, z - spec.hallPos.z) < 15) return { ok: false, reason: "hall" };
     if (Math.hypot(x - spec.crystalPos.x, z - spec.crystalPos.z) < 11) return { ok: false, reason: "crystal" };
-    const clearance = 8.5;
-    for (const circle of spec.waters || []) if (Math.hypot(x - circle.x, z - circle.z) < circle.r + clearance) return { ok: false, reason: "water" };
-    for (const circle of spec.colliders || []) if (Math.hypot(x - circle.x, z - circle.z) < circle.r + clearance) return { ok: false, reason: "solid" };
-    for (const plot of plots) if (Math.hypot(x - plot.x, z - plot.z) < 12) return { ok: false, reason: "taken" };
+    for (const circle of (spec.waters || []).concat(spec.placement?.waters || [])) if (pointPolygonDistance(circle, footprint) <= circle.r + 0.5) return { ok: false, reason: "water" };
+    for (const circle of (spec.colliders || []).concat(spec.placement?.solids || [])) if (pointPolygonDistance(circle, footprint) <= circle.r + 0.5) return { ok: false, reason: "solid" };
+    const features = spec.mapFeatures;
+    for (const plot of plots.concat(features?.plots || [])) {
+      const width = plot.w || 7.6, depth = plot.d || 7.6;
+      if (polygonsOverlap(footprint, rectangle(plot.x, plot.z, -width / 2, width / 2, -depth / 2, depth / 2))
+        || polygonsOverlap(footprint, homeFootprint(plot.x, plot.z, plot.face || 0))) return { ok: false, reason: "taken" };
+    }
+    for (const road of (features?.roads || []).concat(spec.placement?.roads || [])) {
+      if (polygonRoadDistance(footprint, road.points) < road.width / 2 + 3) return { ok: false, reason: "site" };
+    }
+    const commons = features?.commons;
+    if (commons && polygonsOverlap(footprint, rectangle(0, 0, commons.minX, commons.maxX, commons.minZ, commons.maxZ))) return { ok: false, reason: "site" };
+    const ring = spec.prayerSite?.ring;
+    for (const area of [features?.commonPoint, features?.market?.area, features?.pagoda?.court, spec.prayerSite?.entry,
+      ring && { x: ring.x, z: ring.z, radius: ring.r + 3 }].filter(Boolean)) {
+      if (pointPolygonDistance(area, footprint) <= (area.radius ?? area.r)) return { ok: false, reason: "site" };
+    }
     return { ok: true };
   }
 
@@ -337,6 +391,7 @@
     const decoration = spec.decorate(root, M, H);
     const animate = typeof decoration === "function" ? decoration : decoration?.animate || null;
     const colliders = (spec.colliders || []).concat(decoration?.colliders || []);
+    const placementSpec = { ...spec, colliders, placement: decoration?.placement };
     const festivalGroups = decoration?.festivalGroups || {};
     for (const [id, group] of Object.entries(festivalGroups)) {
       group.name = "festival:" + id;
@@ -369,7 +424,7 @@
           const mesh = box(w, 0.22, d, M.plot, lp.x, 0.11, lp.z);
           root.add(mesh);
           const plot = {
-            site: si, idx, id: lp.id || null, x: lp.x, z: lp.z, mesh,
+            site: si, idx, id: lp.id || null, x: lp.x, z: lp.z, w, d, mesh,
             claimed: false, hut: false, hutGroup: null,
             fieldGroup: null, fieldSprouts: null, fieldStage: 0, house: 0, animals: [],
             face: Number.isFinite(lp.face) ? lp.face : Math.atan2(site.x - lp.x, site.z - lp.z),
@@ -393,7 +448,7 @@
         const mesh = box(7.6, 0.22, 7.6, M.plot, px, 0.11, pz);
         root.add(mesh);
         plotList.push({
-          site: si, idx, x: px, z: pz, mesh,
+          site: si, idx, x: px, z: pz, w: 7.6, d: 7.6, mesh,
           claimed: false, hut: false, hutGroup: null,
           fieldGroup: null, fieldSprouts: null, fieldStage: 0, house: 0, animals: [],
           face: Math.atan2(site.x - px, site.z - pz),
@@ -402,10 +457,11 @@
       }
     });
     function findPlot(site, idx) { return plotList.find(p => p.site === site && p.idx === idx); }
-    function claimCustomPlot(x, z) {
+    function addCustomPlot(x, z, restoring) {
+      if (!landBoundsContain(spec, x, z)) return null;
       const existing = findPlot(-1, -1);
       if (existing) return existing.x === x && existing.z === z ? { site: -1, idx: -1, x, z, claimed: true } : null;
-      if (!checkCustomPlotSpot({ ...spec, colliders }, plotList, x, z).ok) return null;
+      if (!restoring && !checkCustomPlotSpot(placementSpec, plotList, x, z).ok) return null;
       const mesh = box(7.6, 0.22, 7.6, M.plot, x, 0.11, z);
       const dx = spec.hallPos.x - x, dz = spec.hallPos.z - z, distance = Math.hypot(dx, dz) || 1;
       const plot = { site: -1, idx: -1, x, z, mesh, claimed: false, hut: false, house: 0, hutGroup: null,
@@ -413,6 +469,8 @@
       root.add(mesh); plotList.push(plot); markClaimedVisual(plot);
       return { site: -1, idx: -1, x, z, claimed: true };
     }
+    function claimCustomPlot(x, z) { return addCustomPlot(x, z, false); }
+    function restoreCustomPlot(x, z) { return addCustomPlot(x, z, true); }
 
     function markClaimedVisual(plot) {
       plot.claimed = true;
@@ -786,6 +844,10 @@
       getPlayerPos: () => mounted
         ? { x: horse.position.x, z: horse.position.z }
         : { x: player.position.x, z: player.position.z },
+      getPlayerForward() {
+        const rotation = mounted ? horse.rotation.y : player.rotation.y;
+        return { x: Math.sin(rotation), z: Math.cos(rotation) };
+      },
       showHorse(x, z) {
         if (!Number.isFinite(x) || !Number.isFinite(z)) return;
         horseShown = true; horse.visible = true;
@@ -841,7 +903,8 @@
       setHorseBond(value) { bondLevel = Number.isFinite(value) ? Math.max(0, Math.min(BOND.MAX, value)) : 0; },
       horseCare() { if (horseShown) careT = 1; },
       claimCustomPlot,
-      checkPlotSpot(x, z) { return checkCustomPlotSpot({ ...spec, colliders }, plotList, x, z); },
+      restoreCustomPlot,
+      checkPlotSpot(x, z) { return checkCustomPlotSpot(placementSpec, plotList, x, z); },
       setMounted(b) {
         if (!horseShown || mounted === !!b) return;
         stopDance();

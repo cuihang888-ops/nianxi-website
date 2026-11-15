@@ -12,7 +12,7 @@ node --test tests/wechat-build.test.mjs
 
 The script uses esbuild to bundle JavaScript/TypeScript into one ES2017 IIFE `game.js`; `wx` stays the actual platform global. The preview uploader rejected optional chaining in the ES2020 output on 2026-11-14, so newer syntax is lowered before upload. Syntax lowering does not supply missing runtime APIs; the entry loads the small `platform/runtime-compat.js` compatibility layer before the game modules. Modules must resolve within `wechat/`, `src/`, or `node_modules/`. Node builtins, service modules, React/DOM framework imports, JSX, HTML and CSS are rejected. This catches known incompatible dependencies, not every possible use of a browser global: runtime testing remains required. Pure shared game rules may be imported normally. Do not provide a fake `window`/`document` just to make React compile.
 
-On Windows, an open Developer Tools project may lock `dist/wechat` and prevent its atomic replacement. Close that project through the tool or its official `cli close --project` command before rebuilding, then generate a new preview. Do not edit the generated bundle in place or disable the staging checks to work around a directory lock.
+On Windows, an open Developer Tools project may lock `dist/wechat` and prevent its atomic replacement. Close that project through the tool or its official `cli close --project` command before rebuilding, then generate a new preview. If the directory remains locked after closing the project, exit Developer Tools normally (or use its official `cli quit`) before rebuilding, then reopen the same generated project. Do not edit the generated bundle in place or disable the staging checks to work around a directory lock.
 
 The output allowlist is:
 
