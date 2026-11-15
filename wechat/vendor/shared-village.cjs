@@ -1,6 +1,6 @@
 "use strict";
 
-// 安和里 · 瑞丽共享村落（M1 布局契约数据模块）
+// 安和里 · 瑞丽共享村落（M1 布局契约数据模块，v2 放大版）
 // 纯数据 + 纯函数：无 DOM、无随机、无时间依赖。
 // 坐标系：村落局部坐标 —— 原点为现有瑞丽场景（wechat/vendor/ruili-scene.cjs）
 // 基址 site0「湖畔」的中心，坝内坐标 (-64, 66)；村落坐标轴与坝内坐标轴平行，
@@ -8,6 +8,12 @@
 // 北为 -Z，yaw 为绕 +Y 的弧度（与 dam-world 的 face 约定一致：yaw = atan2(dx, dz)）。
 // 本模块的数值是布局契约的唯一来源，docs/MUSE_M1_RUILI_VILLAGE_LAYOUT_20261115.md 从此处抄录。
 // 这里的地块/村落 ID 均为场景侧建议名，最终以服务端目录（C1）为准。
+//
+// v2（2026-11-15 用户反馈「地图要大一点，我们做的是原始社会」）：
+// 村落可走范围由矩形 90×120（面积 10800）放大为顺应水面的多边形（面积 22784，约 2.11 倍）；
+// 样板地由 23×24（552）放大为 30×32（960）；正式给出 8 块地块位（2 样板 + 6 预留）；
+// 公共空间放大（村心空地南北贯通、井/榕树保留半径 6 → 8）；
+// 新增姐勒金塔祈福锚点（现有场景地标，此前未纳入锚点体系）。
 
 const WORLD_ID = "dehong";
 const REGION_ID = "ruili";
@@ -17,10 +23,24 @@ const TEMPLE_ID = "ruili-temple";
 // 村落原点在坝内（ruili-scene spec）坐标中的位置：基址 site0 中心。
 const ORIGIN_IN_DAM = Object.freeze({ x: -64, z: 66 });
 
-// 村落可走范围（村落坐标，矩形）。东界刻意停在集市空地圆盘（坝内中心 (0,6)、r15）
-// 西沿之外，集市本体不划入村落；南界与瑞丽江水面（坝内 z≈160 起）之间留有余量；
-// 西界停在弄莫湖水面（坝内 (-126,56) r7 等）东沿之外。
-const BOUNDS = Object.freeze({ minX: -46, maxX: 44, minZ: -66, maxZ: 54 });
+// 村落可走范围（村落坐标，多边形，顶点按顺序绕行）。
+// 形状顺应地形让出三处凹口：西侧弄莫湖（spec 水圆东沿坝内 -119、渲染沿 -117.5）、
+// 东北系统集市圆盘与大厅一带、东南南宛河河道（渲染河道西沿随 z 收向村内）；
+// 南界与瑞丽江水面（北沿村落 z≈94）之间留 6 以上余量；北界坝内 z=-24，
+// 北侧丘陵碰撞圈（最近一处村落坐标 (-164,-36) r29.1）均在范围之外。
+// 多边形面积 22784（鞋带公式，测试断言），为 v1 矩形范围（90×120=10800）的约 2.11 倍。
+const BOUNDS_POLYGON = Object.freeze([
+  Object.freeze({ x: -52, z: -90 }),  // 北界西段起（坝内 -116,-24）
+  Object.freeze({ x: 48, z: -90 }),   // 北界东端
+  Object.freeze({ x: 48, z: -28 }),   // 东界北段（集市圆盘在其东侧 z -75..-45，不入村）
+  Object.freeze({ x: 62, z: -28 }),   // 河岸步道凸出段北端
+  Object.freeze({ x: 62, z: 88 }),    // 东南角（南宛河渲染河道西沿在此 z 约 64，留 1.3 以上）
+  Object.freeze({ x: -100, z: 88 }),  // 南界西端（瑞丽江水面北沿约 94）
+  Object.freeze({ x: -100, z: 18 }),  // 湖岸南侧凸出段（弄莫湖渲染南沿 17.5 以南 0.5 起，spec 沿 16）
+  Object.freeze({ x: -52, z: 18 }),   // 湖东凹口（湖 spec 东沿 -55、渲染东沿 -53.5，均在界外）
+]);
+// 包围盒（仅作粗筛与地图视窗参考，不作可走判定；判定用 BOUNDS_POLYGON + pointInPolygon）。
+const BOUNDS = Object.freeze({ minX: -100, maxX: 62, minZ: -90, maxZ: 88 });
 
 // —— 村路 ——
 // 村内主路沿现有古道（ruili-scene decorate 的 roadPts）南段走行：
@@ -45,16 +65,19 @@ const MARKET_SELL_POINT = Object.freeze({ x: 66, z: -48 });
 
 // 公共点（村内，永久保留，不划入任何地块）
 const REST_POINT = Object.freeze({ x: 0, z: 0 }); // 出生歇脚处 = 基址中心圆台（引擎在 site 中心生成 r3.2 石台）
+// 村心空地：南北贯通的公共长条（x -5..5），样板地与后续地块分列其东西两侧，
+// 北起第 0 排北界、南抵第 2 排南界；出生圆台居其北段中央。任何地块不得侵入。
+const VILLAGE_COMMONS = Object.freeze({ minX: -5, maxX: 5, minZ: -18, maxZ: 86 });
 const COMMON_POINT = Object.freeze({
   id: "ruili-river-0001-common",
   kind: "well-banyan", // 井台 + 榕树
   position: Object.freeze({ x: -16, z: -28 }),
-  radius: 6,
+  radius: 8, // v2 由 6 放大为 8（井边空地）；到 A 地块北界距离 10，不压地块；到主路中心线 17.65，不压路
 });
 
-// 村外参照点（村落坐标表示，仅作小地图方向指示，不在本村范围内）
-const HALL_POS = Object.freeze({ x: 37, z: -74 });     // 大厅亭，坝内 (-27,-8)
-const CRYSTAL_POS = Object.freeze({ x: 70.5, z: -55.5 }); // 传送水晶现状，坝内 (6.5,10.5)，试玩快捷入口不在本契约改动
+// 村外参照点（村落坐标表示，仅作小地图方向指示）
+const HALL_POS = Object.freeze({ x: 37, z: -74 });     // 大厅亭，坝内 (-27,-8)；v2 北界扩至 -90 后位于村落北缘范围内，仍是宿主锚点保留点，不划地块
+const CRYSTAL_POS = Object.freeze({ x: 70.5, z: -55.5 }); // 传送水晶现状，坝内 (6.5,10.5)，在村落范围之外，试玩快捷入口不在本契约改动
 
 // —— 寺院通路 ——
 // 总佛寺（ruili-temple）不在现有瑞丽坝场景范围内，本村只交出口、方向与里程碑锚点。
@@ -74,61 +97,105 @@ const TEMPLE_EXIT = Object.freeze({
   knotAnchorIdPrefix: "ruili-temple-knot-", // 后接树/架编号，如 ruili-temple-knot-tree-01 / ruili-temple-knot-rack-01
 });
 
-// —— 样板地 ——
-// 两块相邻样板地，位于村心、主路以南（路在北，户门朝北向路）。
-// 地块 23 x 24（x 向 23、z 向 24），面积 552。两块之间是 8 宽的村心空地：
-// 基址中心圆台（r3.2）居中，两侧各留约 2.4 通行带，地块边界不压圆台。
+// —— 姐勒金塔（金塔祈福点）——
+// 来源：现有瑞丽场景 ruili-scene.cjs decorate —— 金塔建在坝内 (152,-118) 的山丘上
+// （丘体圆锥 r30 h15、塔身多层金顶），碰撞圈 {x:152, z:-118, r:16}；
+// 换算村落坐标中心 (216,-184)。金塔在村落东北、坝内可达（坝界椭圆 rx250/rz205 内），
+// 沿古道东行出村、再北上塔山可达；不在村落可走多边形内，本契约作坝内地标锚点管理。
+// 塔门朝村落/古道一侧（西南侧）：入口锚点 = 塔中心 + 局部偏移 (-11, 9)（距中心约 14.2，在碰撞圈内缘）。
+// 本契约只定锚点与动线；塔内场景建模属 M1 场景实现阶段，不 invent 现有代码不存在的室内结构。
+const PAGODA = Object.freeze({
+  id: "ruili-jiele-pagoda", // 场景侧建议名
+  name: "姐勒金塔",
+  center: Object.freeze({ x: 216, z: -184 }), // 村落坐标；坝内 (152,-118)
+  hillRadius: 30,        // 塔山丘体半径（现有场景圆锥 r30）
+  colliderRadius: 16,    // 现有场景碰撞圈 r16
+  entry: Object.freeze({
+    anchorId: "ruili-jiele-pagoda-entry",
+    position: Object.freeze({ x: 205, z: -175 }), // 村落坐标；相对塔中心局部偏移 (-11, 9)，朝村落/古道一侧
+    localOffset: Object.freeze({ x: -11, z: 9 }),
+    radius: 4, // 入塔判定半径
+  }),
+  prayerSpot: Object.freeze({
+    anchorId: "ruili-jiele-pagoda-prayer",
+    localOffset: Object.freeze({ x: 0, z: 3.5 }), // 塔内佛前礼拜位（相对塔中心局部点，塔基台面范围内）
+  }),
+  circumambulationRadius: 9, // 绕塔环行路径半径（绕塔基一周）
+});
+
+// —— 地块（样板地 + 预留扩展槽）——
+// 统一 30（x 向）× 32（z 向），面积 960。三排排布，全部在主路以南（路在北，户门朝北向路）：
+// 第 0 排（中心 z=-2）：A、B 样板地分列村心空地东西两侧（中间 10 宽空地，出生圆台居中，地块不压圆台）；
+// 第 1 排（中心 z=35）：C、D、E；第 2 排（中心 z=70）：F、G、H。
+// 排间留 3–5 宽土巷，列间留 4–10 宽土径/空地。东侧不再排地块：东南是南宛河河道、
+// 东北是集市与大厅，地块目录向西、向南展开（地形所迫，见布局文档 v2 修订节）。
 // bounds 为相对地块原点（地块中心）的局部坐标，与 HomeProjection.bounds 同构；
 // layout 锚点同样为地块局部坐标，与 HomeProjection.house / beds / animals 对齐。
-function makePlot(id, originX) {
+const PLOT_WIDTH = 30;
+const PLOT_DEPTH = 32;
+
+function makePlot(id, cx, cz) {
   return Object.freeze({
     id,
     villageId: VILLAGE_ID,
-    origin: Object.freeze({ x: originX, z: -4 }),
+    origin: Object.freeze({ x: cx, z: cz }),
     yaw: 0,
     bounds: Object.freeze([
-      Object.freeze({ x: -11.5, z: -12 }),
-      Object.freeze({ x: 11.5, z: -12 }),
-      Object.freeze({ x: 11.5, z: 12 }),
-      Object.freeze({ x: -11.5, z: 12 }),
+      Object.freeze({ x: -15, z: -16 }),
+      Object.freeze({ x: 15, z: -16 }),
+      Object.freeze({ x: 15, z: 16 }),
+      Object.freeze({ x: -15, z: 16 }),
     ]),
     layout: Object.freeze({
       house: Object.freeze({
         kind: "hut", // 起步草棚，后续可升竹楼；kind 取值等服务端资产目录冻结
-        position: Object.freeze({ x: -5.75, z: -6 }),
+        position: Object.freeze({ x: -7.5, z: -8 }),
         yaw: Math.PI, // 门朝北（-Z）向主路：yaw = atan2(0, -1) = PI
       }),
       beds: Object.freeze([
-        Object.freeze({ position: Object.freeze({ x: 3.4, z: -5.4 }), size: Object.freeze({ x: 3.6, z: 4.2 }) }),
-        Object.freeze({ position: Object.freeze({ x: 7.6, z: -5.4 }), size: Object.freeze({ x: 3.6, z: 4.2 }) }),
-        Object.freeze({ position: Object.freeze({ x: 3.4, z: -0.2 }), size: Object.freeze({ x: 3.6, z: 4.2 }) }),
-        Object.freeze({ position: Object.freeze({ x: 7.6, z: -0.2 }), size: Object.freeze({ x: 3.6, z: 4.2 }) }),
+        Object.freeze({ position: Object.freeze({ x: 4.2, z: -7 }), size: Object.freeze({ x: 4.4, z: 5.2 }) }),
+        Object.freeze({ position: Object.freeze({ x: 9.4, z: -7 }), size: Object.freeze({ x: 4.4, z: 5.2 }) }),
+        Object.freeze({ position: Object.freeze({ x: 4.2, z: -0.5 }), size: Object.freeze({ x: 4.4, z: 5.2 }) }),
+        Object.freeze({ position: Object.freeze({ x: 9.4, z: -0.5 }), size: Object.freeze({ x: 4.4, z: 5.2 }) }),
       ]),
       animalZone: Object.freeze({
-        center: Object.freeze({ x: -5.75, z: 5 }),
-        radius: 5,
+        center: Object.freeze({ x: -7.5, z: 6.5 }),
+        radius: 6,
       }),
-      gate: Object.freeze({ position: Object.freeze({ x: 0, z: -12 }) }), // 北边中点，朝主路
+      gate: Object.freeze({ position: Object.freeze({ x: 0, z: -16 }) }), // 北边中点，朝主路
     }),
   });
 }
 
+// 样板地（M1 首批两户，村心第 0 排）
 const SAMPLE_PLOTS = Object.freeze([
-  makePlot("plot_ruili_river_0001_a", -15.5),
-  makePlot("plot_ruili_river_0001_b", 15.5),
+  makePlot("plot_ruili_river_0001_a", -20, -2),
+  makePlot("plot_ruili_river_0001_b", 20, -2),
 ]);
 
-// 村落扩展网格（沿路新增地块的排布规则，详见布局文档）：
-// 样板地所在为第 0 排；向南（+Z）逐排扩展，排距 27（地深 24 + 巷 3）；
-// 同排向东/西逐列扩展，列距 26（地宽 23 + 径 3）；编号按排、列递增。
-// 第 0 排两列中心距为 31（中间夹村心空地），其余相邻列按列距 26 排布。
+// 预留扩展槽（村落目录预留位，启用顺序 = 数组顺序：先近路排、同排西→东，再向南逐排）
+const EXPANSION_PLOTS = Object.freeze([
+  makePlot("plot_ruili_river_0001_c", -54, 35), // 第 1 排西
+  makePlot("plot_ruili_river_0001_d", -20, 35), // 第 1 排中西
+  makePlot("plot_ruili_river_0001_e", 20, 35),  // 第 1 排中东
+  makePlot("plot_ruili_river_0001_f", -54, 70), // 第 2 排西
+  makePlot("plot_ruili_river_0001_g", -20, 70), // 第 2 排中西
+  makePlot("plot_ruili_river_0001_h", 20, 70),  // 第 2 排中东
+]);
+
+// 村落全部地块位（样板 + 预留，共 8 块）
+const ALL_PLOTS = Object.freeze([...SAMPLE_PLOTS, ...EXPANSION_PLOTS]);
+
+// 村落扩展规则摘要（完整规则见布局文档）：地块统一 30×32；
+// 排距：第 0→1 排中心距 37、第 1→2 排中心距 35（地深 32 + 土巷 5/3）；
+// 列距：村心两侧列中心距 40（中间夹 10 宽村心空地），西列与中列中心距 34（土径 4）。
+// 既有地块一经分配永不移动；本目录 8 块排满后扩新村（新 villageId），本村坐标不变。
 const EXPANSION = Object.freeze({
-  plotWidth: 23,
-  plotDepth: 24,
-  columnStep: 26,
-  rowStep: 27,
-  firstRowCenterZ: -4,
-  firstColumnCentersX: Object.freeze([-15.5, 15.5]),
+  plotWidth: PLOT_WIDTH,
+  plotDepth: PLOT_DEPTH,
+  rowCentersZ: Object.freeze([-2, 35, 70]),
+  columnCentersX: Object.freeze([-54, -20, 20]), // 第 0 排只有中两列（村心两侧），西列自第 1 排起
+  enableOrder: Object.freeze(ALL_PLOTS.map(p => p.id)),
 });
 
 // —— 小地图投影 ——
@@ -174,6 +241,11 @@ function pointInPolygon(point, polygon) {
   return inside;
 }
 
+// 点是否在村落可走范围内（BOUNDS_POLYGON 判定）。
+function pointInBounds(point) {
+  return pointInPolygon(point, BOUNDS_POLYGON);
+}
+
 function distancePointToSegment(point, a, b) {
   const dx = b.x - a.x, dz = b.z - a.z;
   const len2 = dx * dx + dz * dz;
@@ -201,8 +273,18 @@ function segmentsIntersect(p1, p2, p3, p4) {
   return ((d1 > 0 && d2 < 0) || (d1 < 0 && d2 > 0)) && ((d3 > 0 && d4 < 0) || (d3 < 0 && d4 > 0));
 }
 
-// 点（村落坐标）落在哪个样板地内；不在任何地块返回 null。plots 可注入以便测试/扩展。
-function plotAt(point, plots = SAMPLE_PLOTS) {
+// 点到多边形的距离（点在多边形内为 0）。
+function distancePointToPolygon(point, polygon) {
+  if (pointInPolygon(point, polygon)) return 0;
+  let min = Infinity;
+  for (let i = 0; i < polygon.length; i++) {
+    min = Math.min(min, distancePointToSegment(point, polygon[i], polygon[(i + 1) % polygon.length]));
+  }
+  return min;
+}
+
+// 点（村落坐标）落在哪个地块内；不在任何地块返回 null。plots 可注入以便测试/扩展。
+function plotAt(point, plots = ALL_PLOTS) {
   for (const plot of plots) {
     if (pointInPolygon(point, plotPolygon(plot))) return plot;
   }
@@ -251,16 +333,17 @@ function mapToWorld(mapPoint, projection = MAP_PROJECTION) {
 
 module.exports = {
   WORLD_ID, REGION_ID, VILLAGE_ID, TEMPLE_ID,
-  ORIGIN_IN_DAM, BOUNDS,
+  ORIGIN_IN_DAM, BOUNDS, BOUNDS_POLYGON,
   ROAD_POINTS, ROAD_HALF_WIDTH, ROAD_CLEARANCE,
   WEST_JUNCTION, ROAD_APPROACH_WEST, EAST_GATE,
   MARKET, MARKET_SELL_POINT,
-  REST_POINT, COMMON_POINT, HALL_POS, CRYSTAL_POS,
-  TEMPLE_ROUTE, TEMPLE_EXIT,
-  SAMPLE_PLOTS, EXPANSION, MAP_PROJECTION,
+  REST_POINT, VILLAGE_COMMONS, COMMON_POINT, HALL_POS, CRYSTAL_POS,
+  TEMPLE_ROUTE, TEMPLE_EXIT, PAGODA,
+  PLOT_WIDTH, PLOT_DEPTH,
+  SAMPLE_PLOTS, EXPANSION_PLOTS, ALL_PLOTS, EXPANSION, MAP_PROJECTION,
   toVillageCoords, toDamCoords,
   plotPolygon, polygonArea,
-  pointInPolygon, distancePointToSegment, segmentsDistance,
+  pointInPolygon, pointInBounds, distancePointToSegment, distancePointToPolygon, segmentsDistance,
   plotAt, distanceToRoad, distancePolygonToRoad, isClearOfRoad,
   worldToMap, mapToWorld,
 };
