@@ -53,7 +53,7 @@
     return { resolve, valid };
   }
 
-  function checkCustomPlotSpot(spec, plots, x, z) {
+  function checkCustomPlotSpot(spec, plots, x, z, roadSegments) {
     if (!Number.isFinite(x) || !Number.isFinite(z)) return { ok: false, reason: "invalid" };
     const bounds = spec.bounds || { rx: 250, rz: 205 };
     const dx = spec.hallPos.x - x, dz = spec.hallPos.z - z;
@@ -83,7 +83,85 @@
         if (Math.hypot(rx, rz) < 8) return { ok: false, reason: "taken" };
       } else if (Math.hypot(x - plot.x, z - plot.z) < 12) return { ok: false, reason: "taken" };
     }
+    // —— 开放式安家通路条件（调用方传入路网时才判；无路网的旧夹具/恢复路径不判）——
+    // 少规则口径只查一条距离：以候选点中心到路网中心线的距离 d 换算——地块边缘到
+    // 路面边缘 = d − PLOT_REACH − HALF_WIDTH，须 ≤ ACCESS_RANGE，否则还没通路。
+    // 压不压路不再拦：路是平的，住在路边、路口都是玩家自己的选择（地块自身的物理
+    // 拒绝在上面已经查完，与此无关）。固定基址地块不走本函数，不受此限。
+    if (roadSegments) {
+      const d = distanceToRoadSegments(x, z, roadSegments);
+      if (d - Economy.ROADS.PLOT_REACH - Economy.ROADS.HALF_WIDTH > Economy.ROADS.ACCESS_RANGE) return { ok: false, reason: "road" };
+    }
     return { ok: true };
+  }
+
+  // —— 路网（开放式安家）：折线 → 线段、点到路网距离、修路整段校验 ——
+  // 路网 = 场景古道/村内土路（spec.roads 折线）+ 玩家自建路（两点段）。纯函数，无 THREE 依赖，
+  // 芒市独立模块与测试共用同一份实现，不许别处再写一份。
+  function pointToSegmentDistance(x, z, ax, az, bx, bz) {
+    const dx = bx - ax, dz = bz - az;
+    const len2 = dx * dx + dz * dz;
+    let t = len2 === 0 ? 0 : ((x - ax) * dx + (z - az) * dz) / len2;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(x - (ax + dx * t), z - (az + dz * t));
+  }
+
+  function roadSegmentsFromPolylines(polylines) {
+    const segments = [];
+    for (const line of polylines || []) {
+      const points = (line || []).map(p => Array.isArray(p) ? { x: p[0], z: p[1] } : p)
+        .filter(p => p && Number.isFinite(p.x) && Number.isFinite(p.z));
+      for (let i = 0; i < points.length - 1; i++) {
+        segments.push({ ax: points[i].x, az: points[i].z, bx: points[i + 1].x, bz: points[i + 1].z });
+      }
+    }
+    return segments;
+  }
+
+  function distanceToRoadSegments(x, z, segments) {
+    let min = Infinity;
+    for (const seg of segments || []) min = Math.min(min, pointToSegmentDistance(x, z, seg.ax, seg.az, seg.bx, seg.bz));
+    return min;
+  }
+
+  // 修路整段校验（少规则口径，用户 2026-11-15 21:29）：几何上只拦两件——
+  // ① 不压任何已划地块（已认领 + 契约/基址地块，含预留 C–H）：采样点到地块矩形的
+  //    距离 < 条带半宽 + 0.5 即拒（"taken"）；
+  // ② 不压地标建筑本体占地圈：context.landmarks + 大厅（r6）+ 集市（r8）+ 水晶（r4），
+  //    采样点进圈（圈半径 + 条带半宽）即拒（"landmark"）。
+  // 余额够不够由状态层 buildRoad 管（第三条硬性）。其余全放开：过水（渲染成木栈道）、
+  // 贴山脚穿丘陵碰撞圈、任意长度（仅两点几乎重合 <1 不是路，"invalid"）、不接主网的
+  // 孤立路段、与已有路相交，都允许。采样步长 = ROADS.SAMPLE_STEP（2 单位，含两端点）。
+  // context = { landmarks, hallPos, marketPos, crystalPos, plots }。
+  function validateRoadSegment(a, b, context) {
+    const R = Economy.ROADS;
+    const ctx = context || {};
+    if (!a || !b || !Number.isFinite(a.x) || !Number.isFinite(a.z) || !Number.isFinite(b.x) || !Number.isFinite(b.z)) {
+      return { ok: false, reason: "invalid" };
+    }
+    const length = Math.hypot(b.x - a.x, b.z - a.z);
+    if (length < 1) return { ok: false, reason: "invalid", length };
+    const half = R.STRIP_HALF_WIDTH;
+    const landmarkCircles = (ctx.landmarks || []).slice();
+    if (ctx.hallPos) landmarkCircles.push({ x: ctx.hallPos.x, z: ctx.hallPos.z, r: 6 });
+    if (ctx.marketPos) landmarkCircles.push({ x: ctx.marketPos.x, z: ctx.marketPos.z, r: 8 });
+    if (ctx.crystalPos) landmarkCircles.push({ x: ctx.crystalPos.x, z: ctx.crystalPos.z, r: 4 });
+    const steps = Math.max(1, Math.ceil(length / R.SAMPLE_STEP));
+    for (let i = 0; i <= steps; i++) {
+      const t = i / steps;
+      const px = a.x + (b.x - a.x) * t, pz = a.z + (b.z - a.z) * t;
+      for (const c of landmarkCircles) {
+        if (Math.hypot(px - c.x, pz - c.z) < c.r + half) return { ok: false, reason: "landmark", length };
+      }
+      for (const plot of ctx.plots || []) {
+        const w = Number.isFinite(plot.padW) ? plot.padW : 7.6;
+        const d = Number.isFinite(plot.padD) ? plot.padD : 7.6;
+        const rx = Math.max(0, Math.abs(px - plot.x) - w / 2);
+        const rz = Math.max(0, Math.abs(pz - plot.z) - d / 2);
+        if (Math.hypot(rx, rz) < half + 0.5) return { ok: false, reason: "taken", length };
+      }
+    }
+    return { ok: true, length };
   }
 
   function createSkyEffects(THREE, scene, player) {
@@ -414,6 +492,8 @@
     function claimCustomPlot(x, z) {
       const existing = findPlot(-1, -1);
       if (existing) return existing.x === x && existing.z === z ? { site: -1, idx: -1, x, z, claimed: true } : null;
+      // 恢复/落位路径：只查几何占位，不查通路——通路条件只管新安家（控制器 checkPlotSpot），
+      // 已安的家不因后来路网规则被追溯（老存档处理口径，见开放式安家文档）。
       if (!checkCustomPlotSpot({ ...spec, colliders }, plotList, x, z).ok) return null;
       const mesh = box(7.6, 0.22, 7.6, M.plot, x, 0.11, z);
       const dx = spec.hallPos.x - x, dz = spec.hallPos.z - z, distance = Math.hypot(dx, dz) || 1;
@@ -624,6 +704,60 @@
     const moveIn = { x: 0, z: 0 };
     let walkPhase = 0, moving = false;
     const land = createLandResolver({ ...spec, colliders });
+
+    // —— 玩家自建路（开放式安家）：路网 = spec.roads 折线（古道+村内土路）+ 存档自建路 ——
+    const baseRoadSegments = spec.roads ? roadSegmentsFromPolylines(spec.roads) : null;
+    let playerRoadList = [];
+    let playerRoadSegments = [];
+    const playerRoadGroup = new THREE.Group();
+    playerRoadGroup.name = "roads:player";
+    root.add(playerRoadGroup);
+    function networkSegments() {
+      if (!baseRoadSegments && !playerRoadSegments.length) return null;
+      return (baseRoadSegments || []).concat(playerRoadSegments);
+    }
+    function setPlayerRoads(list) {
+      playerRoadList = (Array.isArray(list) ? list : [])
+        .filter(seg => seg && Number.isFinite(seg.a?.x) && Number.isFinite(seg.a?.z) && Number.isFinite(seg.b?.x) && Number.isFinite(seg.b?.z))
+        .map(seg => ({ a: { x: seg.a.x, z: seg.a.z }, b: { x: seg.b.x, z: seg.b.z } }));
+      playerRoadSegments = playerRoadList.map(seg => ({ ax: seg.a.x, az: seg.a.z, bx: seg.b.x, bz: seg.b.z }));
+      while (playerRoadGroup.children.length) {
+        const child = playerRoadGroup.children[0];
+        playerRoadGroup.remove(child);
+        if (child.geometry?.dispose) child.geometry.dispose();
+      }
+      for (const seg of playerRoadList) {
+        const dx = seg.b.x - seg.a.x, dz = seg.b.z - seg.a.z;
+        const length = Math.hypot(dx, dz);
+        if (length < 1e-6) continue;
+        // 土路条带：宽约 3、与古道同材质；按 ≤6 一段分块，过水的块换木料、略抬高，
+        // 就是一段简易木栈道（同价，不另收费）——少规则口径：水上也能修路。
+        const chunks = Math.max(1, Math.ceil(length / 6));
+        for (let i = 0; i < chunks; i++) {
+          const t0 = i / chunks, t1 = (i + 1) / chunks;
+          const ax = seg.a.x + dx * t0, az = seg.a.z + dz * t0;
+          const bx = seg.a.x + dx * t1, bz = seg.a.z + dz * t1;
+          const mx = (ax + bx) / 2, mz = (az + bz) / 2;
+          const overWater = (spec.waters || []).some(w => Math.hypot(mx - w.x, mz - w.z) < w.r);
+          const strip = box(Math.hypot(bx - ax, bz - az), 0.07, Economy.ROADS.STRIP_HALF_WIDTH * 2,
+            overWater ? M.wood : M.road, mx, overWater ? 0.1 : 0.05, mz);
+          strip.rotation.y = Math.atan2(-dz, dx);
+          playerRoadGroup.add(strip);
+          if (!overWater && i > 0) {
+            const cap = new THREE.Mesh(new THREE.CircleGeometry(Economy.ROADS.STRIP_HALF_WIDTH + 0.15, 10), M.road);
+            cap.rotation.x = -Math.PI / 2;
+            cap.position.set(ax, 0.048, az);
+            playerRoadGroup.add(cap);
+          }
+        }
+        for (const p of [seg.a, seg.b]) {
+          const cap = new THREE.Mesh(new THREE.CircleGeometry(Economy.ROADS.STRIP_HALF_WIDTH, 10), M.road);
+          cap.rotation.x = -Math.PI / 2;
+          cap.position.set(p.x, 0.05, p.z);
+          playerRoadGroup.add(cap);
+        }
+      }
+    }
     const skyEffects = createSkyEffects(THREE, scene, player);
     const festivalEffects = createFestivalEffects(THREE, scene, player);
     // —— 引导光环（spec.guideRing：绕行类动作的地面光点环，默认隐藏）——
@@ -850,7 +984,20 @@
       setHorseBond(value) { bondLevel = Number.isFinite(value) ? Math.max(0, Math.min(BOND.MAX, value)) : 0; },
       horseCare() { if (horseShown) careT = 1; },
       claimCustomPlot,
-      checkPlotSpot(x, z) { return checkCustomPlotSpot({ ...spec, colliders }, plotList, x, z); },
+      checkPlotSpot(x, z) { return checkCustomPlotSpot({ ...spec, colliders }, plotList, x, z, networkSegments()); },
+      setPlayerRoads,
+      getPlayerRoads: () => playerRoadList.map(seg => ({ a: { ...seg.a }, b: { ...seg.b } })),
+      getRoadSegments: () => (networkSegments() || []).map(seg => ({ a: { x: seg.ax, z: seg.az }, b: { x: seg.bx, z: seg.bz } })),
+      distanceToRoadNetwork(x, z) {
+        const segments = networkSegments();
+        return segments ? distanceToRoadSegments(x, z, segments) : null;
+      },
+      validateRoadSegment(a, b) {
+        return validateRoadSegment(a, b, {
+          landmarks: spec.landmarks || [], hallPos: spec.hallPos, marketPos: spec.marketPos,
+          crystalPos: spec.crystalPos, plots: plotList,
+        });
+      },
       setMounted(b) {
         if (!horseShown || mounted === !!b) return;
         stopDance();
@@ -941,5 +1088,6 @@
     };
   }
 
-  return { createDamScene, createLandResolver, checkCustomPlotSpot, createSkyEffects, createHomeProps, createFestivalEffects, BOND };
+  return { createDamScene, createLandResolver, checkCustomPlotSpot, createSkyEffects, createHomeProps, createFestivalEffects,
+    roadSegmentsFromPolylines, distanceToRoadSegments, validateRoadSegment, BOND };
 });

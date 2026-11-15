@@ -513,8 +513,60 @@
       { x: -58, z: -58, r: 15 }, { x: HALL_POS.x, z: HALL_POS.z, r: 4.5 },
     ]);
     const landSpec = { bounds: { rx: 265, rz: 215 }, waters: waterZones, colliders: solidZones, spawn: { x: 4, z: 52 },
-      sites: [{ x: -78, z: 66 }, { x: 58, z: 96 }], hallPos: HALL_POS, crystalPos: CRYSTAL_POS };
+      sites: [{ x: -78, z: 66 }, { x: 58, z: 96 }], hallPos: HALL_POS, crystalPos: CRYSTAL_POS,
+      // 路网（开放式安家）：与上方古道绘制的 roadPts 同一份数据。
+      // 地标建筑本体占地圈（修路硬性②）：总佛寺；集市中心与市场组同点。
+      roads: [roadPts], marketPos: { x: 4, z: 34 }, landmarks: [{ x: -58, z: -58, r: 15 }] };
     const land = DamWorld.createLandResolver(landSpec);
+
+    // —— 玩家自建路（开放式安家）：路网 = 古道 + 存档自建路；几何函数共用 dam-world 实现 ——
+    const baseRoadSegments = DamWorld.roadSegmentsFromPolylines(landSpec.roads);
+    let playerRoadList = [];
+    let playerRoadSegments = [];
+    const playerRoadGroup = new THREE.Group();
+    playerRoadGroup.name = "roads:player";
+    root.add(playerRoadGroup);
+    function roadNetworkSegments() { return baseRoadSegments.concat(playerRoadSegments); }
+    function setPlayerRoads(list) {
+      playerRoadList = (Array.isArray(list) ? list : [])
+        .filter(seg => seg && Number.isFinite(seg.a?.x) && Number.isFinite(seg.a?.z) && Number.isFinite(seg.b?.x) && Number.isFinite(seg.b?.z))
+        .map(seg => ({ a: { x: seg.a.x, z: seg.a.z }, b: { x: seg.b.x, z: seg.b.z } }));
+      playerRoadSegments = playerRoadList.map(seg => ({ ax: seg.a.x, az: seg.a.z, bx: seg.b.x, bz: seg.b.z }));
+      while (playerRoadGroup.children.length) {
+        const child = playerRoadGroup.children[0];
+        playerRoadGroup.remove(child);
+        if (child.geometry?.dispose) child.geometry.dispose();
+      }
+      for (const seg of playerRoadList) {
+        const dx = seg.b.x - seg.a.x, dz = seg.b.z - seg.a.z;
+        const length = Math.hypot(dx, dz);
+        if (length < 1e-6) continue;
+        // 与 dam-world 同口径：≤6 一段分块，过水的块换木料略抬高成木栈道。
+        const chunks = Math.max(1, Math.ceil(length / 6));
+        for (let i = 0; i < chunks; i++) {
+          const t0 = i / chunks, t1 = (i + 1) / chunks;
+          const ax = seg.a.x + dx * t0, az = seg.a.z + dz * t0;
+          const bx = seg.a.x + dx * t1, bz = seg.a.z + dz * t1;
+          const mx = (ax + bx) / 2, mz = (az + bz) / 2;
+          const overWater = waterZones.some(w => Math.hypot(mx - w.x, mz - w.z) < w.r);
+          const strip = box(Math.hypot(bx - ax, bz - az), 0.07, 3, overWater ? M.wood : M.road, mx, overWater ? 0.1 : 0.05, mz);
+          strip.rotation.y = Math.atan2(-dz, dx);
+          playerRoadGroup.add(strip);
+          if (!overWater && i > 0) {
+            const cap = new THREE.Mesh(new THREE.CircleGeometry(1.65, 10), M.road);
+            cap.rotation.x = -Math.PI / 2;
+            cap.position.set(ax, 0.048, az);
+            playerRoadGroup.add(cap);
+          }
+        }
+        for (const p of [seg.a, seg.b]) {
+          const cap = new THREE.Mesh(new THREE.CircleGeometry(1.5, 10), M.road);
+          cap.rotation.x = -Math.PI / 2;
+          cap.position.set(p.x, 0.05, p.z);
+          playerRoadGroup.add(cap);
+        }
+      }
+    }
     const moveIn = { x: 0, z: 0 };
     let walkPhase = 0, moving = false;
     const camPos = new THREE.Vector3(player.position.x, 16, player.position.z + 28);
@@ -603,7 +655,17 @@
       setHorseBond(value) { bondLevel = Number.isFinite(value) ? Math.max(0, Math.min(DamWorld.BOND.MAX, value)) : 0; },
       horseCare() { if (horseShown) careT = 1; },
       claimCustomPlot,
-      checkPlotSpot(x, z) { return DamWorld.checkCustomPlotSpot(landSpec, plotList, x, z); },
+      checkPlotSpot(x, z) { return DamWorld.checkCustomPlotSpot(landSpec, plotList, x, z, roadNetworkSegments()); },
+      setPlayerRoads,
+      getPlayerRoads: () => playerRoadList.map(seg => ({ a: { ...seg.a }, b: { ...seg.b } })),
+      getRoadSegments: () => roadNetworkSegments().map(seg => ({ a: { x: seg.ax, z: seg.az }, b: { x: seg.bx, z: seg.bz } })),
+      distanceToRoadNetwork(x, z) { return DamWorld.distanceToRoadSegments(x, z, roadNetworkSegments()); },
+      validateRoadSegment(a, b) {
+        return DamWorld.validateRoadSegment(a, b, {
+          landmarks: landSpec.landmarks || [], hallPos: HALL_POS, marketPos: landSpec.marketPos,
+          crystalPos: CRYSTAL_POS, plots: plotList,
+        });
+      },
       setMounted(value) {
         const next = !!value;
         if (!horseShown || mounted === next) return;

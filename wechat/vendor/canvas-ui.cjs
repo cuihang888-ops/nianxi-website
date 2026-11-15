@@ -27,7 +27,7 @@
     let safe = { left: 0, top: 0, right: 0, bottom: 0, width: 0, height: 0 };
     let panelOpen = false, sceneName = "", dirty = true;
     let basketText = "";
-    let teleportItems = null, teleportCallback = null, extraRow = null;
+    let teleportItems = null, teleportCallback = null, extraRow = null, roadRow = false;
     let namePanel = null;
     let albumRowText = "", albumLines = null, albumPage = 0, albumPages = [];
     let albumDetail = null, detailPage = 0, detailPages = 1;
@@ -156,6 +156,7 @@
         + (Daily.registrationPending(state) ? 1 : 0)
         + (state.player ? 1 : 0)
         + (state.home ? 2 : 0)
+        + (roadRow ? 1 : 0)
         + (albumRowText ? 1 : 0) + (extraRow ? 1 : 0);
       const footerH = lines.length * 16 + 8;
       const ph = Math.min(82 + rows * 48 + (rows - 1) * 8 + footerH + 14, safe.height - 24);
@@ -210,6 +211,7 @@
       if (state.player) entries.push(["player-name", "我的名字 · " + state.player.name, "改名", true, false]);
       if (state.home) entries.push(["go-home", "我的家园 · " + (state.home.name || state.home.label || ""), "回家", true, true]);
       if (state.home) entries.push(["home-name", "家的名字 · " + (state.home.name || "我的家"), "改名", true, false]);
+      if (roadRow) entries.push(["build-road", "修一条路", "自己出钱 · 通了路才能安家", true, false]);
       if (albumRowText) entries.push(["album", "我的图鉴", albumRowText, true, false]);
       if (extraRow) entries.push([extraRow.id, extraRow.label, extraRow.right, extraRow.enabled, extraRow.enabled]);
       for (const entry of entries.slice(hallPage * pageSize, (hallPage + 1) * pageSize)) {
@@ -556,6 +558,7 @@
       if (id === "next-scene") { joystickEnd(); opts.onNextScene(); return; }
       if (id === "action") { if (actionFn) actionFn(); return; }
       if (id === "go-home") { if (opts.onExternal) opts.onExternal("go-home"); return; }
+      if (id === "build-road") { if (opts.onExternal) opts.onExternal("build-road"); return; }
       if (id === "jingxin") { breathStart = now(); dirty = true; return; }
       if (id === "signin") { saveResult(Daily.doSignin(state, today())); dirty = true; return; }
       if (id === "quest") {
@@ -667,6 +670,7 @@
         const next = row ? { id: String(row.id), label: String(row.label), right: String(row.right), enabled: !!row.enabled } : null;
         if (JSON.stringify(next) !== JSON.stringify(extraRow)) { extraRow = next; dirty = true; }
       },
+      setRoadRow(value) { if (!!value !== roadRow) { roadRow = !!value; dirty = true; } },
       setSceneName(name) { sceneName = String(name || ""); dirty = true; },
       setBasket(value) {
         const next = String(value || "");

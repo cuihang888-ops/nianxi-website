@@ -106,7 +106,21 @@
         { x: -152, z: 58, r: 12.5 }, { x: -136, z: 68, r: 9 }, { x: -163, z: 74, r: 8 }, { x: -140, z: 45, r: 8 }, { x: -126, z: 56, r: 7 },
       ],
       siteLayouts: V ? [{ plots: villagePlots }, null] : undefined,
+      // 路网（开放式安家）：古道折线与 decorate 的 roadPts 逐字一致；另把湖畔村的
+      // 村心空地中线与两条排间土巷算进路网——村内沿土路安家与在古道边同等待遇。
+      roads: [
+        [[-190, 44], [-110, 26], [-40, 12], [0, 6], [70, 16], [140, 24], [200, 30]],
+        ...(V ? [
+          [V.toDamCoords({ x: 0, z: V.VILLAGE_COMMONS.minZ }), V.toDamCoords({ x: 0, z: V.VILLAGE_COMMONS.maxZ })]
+            .map(p => [p.x, p.z]),
+          ...[18.5, 53.5].map(lz => [V.toDamCoords({ x: -69, z: lz }), V.toDamCoords({ x: 35, z: lz })]
+            .map(p => [p.x, p.z])),
+        ] : []),
+      ],
       decoratePlot: V ? villagePlotDecor : undefined,
+      // 地标建筑本体占地圈（修路硬性②）与集市中心：姐勒金塔塔山、独树成林。
+      marketPos: { x: 0, z: 6 },
+      landmarks: [{ x: 152, z: -118, r: 16 }, { x: 128, z: 26, r: 4 }],
       prayerSite: prayerSite || undefined,
       guideRing: prayerSite ? prayerSite.ring : undefined,
       mapFeatures,

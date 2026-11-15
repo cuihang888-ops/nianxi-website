@@ -74,6 +74,7 @@ function defaultState() {
     album: { landmarks: {}, animals: {}, festivals: {} },
     festJoined: {},
     lit: {},
+    roads: {},
     latestDay: "",
   };
 }
@@ -188,10 +189,39 @@ function validDays(days, month) {
   return true;
 }
 
+// —— 玩家自建路存档（开放式安家，2026-11-15）——
+// state.roads = { [damId]: [{ a:{x,z}, b:{x,z}, by, at }] }：by 是修路人名字（记名不排名，
+// 与村碑记名同口径），at 是修成时间。老存档没有 roads 键：校验按可选字段处理，
+// normalizeProgress 加载时补空对象，不追溯、不收费、不影响已安的家。
+const MAX_ROADS_PER_DAM = 400;
+
+function validateRoadSegmentRecord(segment, dam) {
+  if (!fields(segment, ["a", "b", "by", "at"])
+    || !dataKeys(segment.a, ["x", "z"]) || !dataKeys(segment.b, ["x", "z"])
+    || !validHorsePosition(segment.a.x, segment.a.z, dam) || !validHorsePosition(segment.b.x, segment.b.z, dam)
+    || !isValidName(segment.by) || !validTime(segment.at)) return false;
+  return Math.hypot(segment.b.x - segment.a.x, segment.b.z - segment.a.z) >= 1 - 1e-9;
+}
+
+function validateRoads(roads) {
+  if (!fields(roads, [], Object.keys(ECONOMY.DAMS))) return false;
+  return Object.keys(roads).every(dam => {
+    const list = roads[dam];
+    if (!Array.isArray(list) || list.length > MAX_ROADS_PER_DAM
+      || Reflect.ownKeys(list).length !== list.length + 1) return false;
+    for (let index = 0; index < list.length; index += 1) {
+      const descriptor = Object.getOwnPropertyDescriptor(list, String(index));
+      if (!descriptor || !descriptor.enumerable || !Object.hasOwn(descriptor, "value")) return false;
+      if (!validateRoadSegmentRecord(descriptor.value, dam)) return false;
+    }
+    return true;
+  });
+}
+
 function validateState(state) {
   try {
     const keys = ["coins", "jingxinDate", "signin", "quests", "home", "latestDay"];
-    if (!fields(state, keys, ["horse", "album", "festJoined", "lit", "player", "grant", "rites"])
+    if (!fields(state, keys, ["horse", "album", "festJoined", "lit", "player", "grant", "rites", "roads"])
       || !validCoins(state.coins)
       || !optionalDate(state.jingxinDate) || !optionalDate(state.latestDay)
       || !dataKeys(state.signin, ["month", "days", "last"])
@@ -210,6 +240,7 @@ function validateState(state) {
     if (Object.hasOwn(state, "album") && !validateAlbum(state.album)) return false;
     if (Object.hasOwn(state, "festJoined") && !record(state.festJoined, FESTIVALS.map(fest => fest.id), year => Number.isInteger(year) && year >= 1 && year <= 9999)) return false;
     if (Object.hasOwn(state, "lit") && !record(state.lit, Object.keys(ECONOMY.DAMS), value => value === true)) return false;
+    if (Object.hasOwn(state, "roads") && !validateRoads(state.roads)) return false;
     if (Object.hasOwn(state, "player") && state.player !== null && !validatePlayer(state.player)) return false;
     if (Object.hasOwn(state, "grant") && state.grant !== null && !validateGrant(state.grant)) return false;
     // 登记与安家金由 registerPlayer 原子写入：有其一必有其二，半套档案视为伪造。
@@ -602,8 +633,32 @@ function claimCustomHome(state, x, z, dam = "mangshi") {
     msg: state.home.name ? "安家了 · " + state.home.name : "安家了 · 这块自选之地，从此是你的了" };
 }
 
+// 玩家自费修路（开放式安家）：状态层只管记账与落档——报价走 preview-economy 的
+// roadCostForLength 单一数据源（只按长度，round 取整，无最低消费）；整段几何校验只剩
+// 两条（不压已划地块、不压地标建筑本体）在世界层 dam-world.validateRoadSegment，
+// 控制器先校验后才调本函数（与自选地 claim 同分工）。余额够是第三条硬性，在此判。
+// 修成的路永久记入 state.roads[dam] 并记名 by；路是公共的，不产生路边土地权利。
+function buildRoad(state, dam, a, b, { at, by } = {}) {
+  if (typeof dam !== "string" || !Object.hasOwn(ECONOMY.DAMS, dam)) return failure("INVALID_DAM", "这处坝子暂时不能修路");
+  if (!a || !b || !validHorsePosition(a.x, a.z, dam) || !validHorsePosition(b.x, b.z, dam)) {
+    return failure("INVALID_ROAD", "这条路的位置超出了坝子的范围");
+  }
+  const length = Math.hypot(b.x - a.x, b.z - a.z);
+  const cost = ECONOMY.roadCostForLength(length);
+  if (cost === null) return failure("INVALID_ROAD", "这两点几乎重合 · 走开几步再铺");
+  if (!validTime(at)) return failure("INVALID_TIME", "修路时间无效");
+  if (!isValidName(by)) return failure("INVALID_NAME", "先登记入住，再来修路");
+  if (!state.roads) state.roads = {};
+  if ((state.roads[dam] || []).length >= MAX_ROADS_PER_DAM) return failure("ROAD_LIMIT", "这一坝的路已经修得很密了");
+  if (state.coins < cost) return failure("INSUFFICIENT_COINS", "安币不够，还差 " + (cost - state.coins) + " 安币");
+  state.coins -= cost;
+  (state.roads[dam] ||= []).push({ a: { x: a.x, z: a.z }, b: { x: b.x, z: b.z }, by, at });
+  return { ok: true, cost, length, msg: "路修好了 · " + Math.round(length) + " 单位，花了 " + cost + " 安币 · 这条路大家都能走" };
+}
+
 function normalizeProgress(state) {
   normalizeHome(state);
+  if (state.roads === undefined) state.roads = {};
   if (!state.album) state.album = { landmarks: {}, animals: {}, festivals: {} };
   if (!state.festJoined) state.festJoined = {};
   if (state.horse) {
@@ -778,7 +833,7 @@ module.exports = { defaultState, newPlayerState, registrationPending, registerPl
   claimHome, buildHomeHut, validateState, normalizeLegacyState, createStateSession, todayShanghai,
   createHome, normalizeHome, accrueProduce, produceValue, openHomeField, plantCarrots, harvestCarrots,
   buyHomeAnimal, collectHomeProduce, basketValue, basketCount, sellBasket, upgradeHomeBamboo, lightCrystal, payTeleport, buyHorse, setHorsePosition,
-  claimCustomHome, landQuoteForDam, landBandForDistance: ECONOMY.landBandForDistance,
+  claimCustomHome, buildRoad, landQuoteForDam, landBandForDistance: ECONOMY.landBandForDistance,
   landPriceForDistance: ECONOMY.landPriceForDistance, landQuote: ECONOMY.landQuote, LAND_BANDS: ECONOMY.LAND_BANDS,
   careHorse, callHorse, bondTier, albumAdd, activeFestival, nextFestival, joinFestival, computeSky,
   HOME, ECONOMY, MILESTONES, QUEST_REWARD, BOND, FESTIVALS, FEST_REWARD };

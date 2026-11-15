@@ -39,6 +39,32 @@ function landQuote(anchor, x, z) {
 // 状态层在不知道地块坐标时（旧调用路径）以此为默认，控制器接线后恒传真实坐标。
 const STANDARD_PLOT_PRICE = LAND_BANDS.find(band => band.key === "near").price;
 
+// —— 开放式安家与玩家修路（用户 2026-11-15 拍板；规则口径 21:29 修订：少规则）——
+// 设计原则：留足可玩性与开放性，只拦物理上不可能与侵犯他人之地的事，其余全开放。
+// 以道路为标尺沿路安家：自选地必须通路（地块边缘到路网 ≤ ACCESS_RANGE）；
+// 没路的地方玩家自费修路（只按长度计价，COST_PER_UNIT 安币/单位），一建成即计入路网、
+// 周边随即开放安家——孤立路段也行，村落可以先自己长出来，以后再和主网连上。
+// 修路只剩三条硬性：不压已划地块、不压地标建筑本体、余额够（校验在 dam-world 与状态层）。
+// 过水就搭一段木栈道（同价）、贴山脚、任意长度、不用先接主网，全部放行。
+// 路网 = 场景自带古道 + 村落内部土路 + 玩家自建路（存档 state.roads 按坝记名保存）。
+// 修好的路是公共的：任何人路过、沿它安家都不再收费；修路不产生路边土地的任何权利，
+// 地仍按 LAND_BANDS 先到先得认领——修路是基建，不是圈地（见 docs/MUSE_OPEN_SETTLEMENT_ROADS_20261115.md）。
+const ROADS = Object.freeze({
+  ACCESS_RANGE: 30,       // 自选地块边缘到路网（路面边缘）的最大距离：超过即「还没通路」
+  COST_PER_UNIT: 2,       // 修路单价（安币/坝内单位）——费用只留这一个数，无最低消费
+  SAMPLE_STEP: 2,         // 修路整段校验的采样步长（坝内单位/点）
+  HALF_WIDTH: 5,          // 既有道路走廊半宽（与 shared-village.cjs 的 ROAD_HALF_WIDTH 同值）
+  STRIP_HALF_WIDTH: 1.5,  // 玩家自建土路的条带半宽（整条宽约 3）
+  PLOT_REACH: 7.7,        // 自选地 footprint 最坏半径（dam-world checkCustomPlotSpot 足迹点极值约 7.66）
+});
+
+// 修路报价：只按长度计价，报价 = round(长度 × 单价)（四舍五入，全游戏唯一口径）；
+// 长度不足 1（两点几乎重合）不是一条路，返回 null。
+function roadCostForLength(length) {
+  if (typeof length !== "number" || !Number.isFinite(length) || length < 1) return null;
+  return Math.round(length * ROADS.COST_PER_UNIT);
+}
+
 const HOME = Object.freeze({
   PLOT_PRICE: STANDARD_PLOT_PRICE,
   CARROT_SEED_PER_BED: 18,
@@ -95,6 +121,8 @@ module.exports = Object.freeze({
   landBandForDistance,
   landPriceForDistance,
   landQuote,
+  ROADS,
+  roadCostForLength,
   carrotSale: 15,
   cropRegrowthSeconds: 18,
   meditationMilliseconds: 5000,
