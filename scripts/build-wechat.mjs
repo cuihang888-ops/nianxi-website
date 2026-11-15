@@ -7,6 +7,8 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
+// The preview uploader parses code before the newer device runtime executes it.
+const SCRIPT_TARGET = "es2017";
 const ASSET_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".ktx2", ".basis", ".glb", ".gltf", ".bin", ".mp3", ".ogg", ".wav", ".json", ".ttf", ".woff", ".woff2", ".atlas"]);
 const CODE_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".json"]);
 const VENDOR_LICENSE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.LICENSE$/;
@@ -122,7 +124,7 @@ export async function buildWechat({ projectRoot = REPO_ROOT, checkOnly = false, 
   };
   const bundle = await build({
     absWorkingDir: root, entryPoints: ["wechat/game.js"], outfile: "dist/wechat/game.js",
-    bundle: true, platform: "neutral", format: "iife", target: "es2020", write: false,
+    bundle: true, platform: "neutral", format: "iife", target: SCRIPT_TARGET, write: false,
     metafile: true, sourcemap: false, minify: false, legalComments: "inline", preserveSymlinks: true,
     logLevel: "silent", plugins: [dependencyGuard(root)],
   });
@@ -167,7 +169,7 @@ export async function buildWechat({ projectRoot = REPO_ROOT, checkOnly = false, 
   if (totalBytes > maxPackageBytes) throw new Error(`Game package exceeds the project budget: ${totalBytes} > ${maxPackageBytes} bytes`);
   let baseline = null;
   try { baseline = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch {}
-  const report = { version: 1, baseline, checkedAt: new Date().toISOString(), output: "dist/wechat", format: "iife", target: "es2020", maxPackageBytes, totalBytes, files, modules: Object.keys(bundle.metafile.inputs).sort() };
+  const report = { version: 1, baseline, checkedAt: new Date().toISOString(), output: "dist/wechat", format: "iife", target: SCRIPT_TARGET, maxPackageBytes, totalBytes, files, modules: Object.keys(bundle.metafile.inputs).sort() };
   if (checkOnly) return report;
 
   await fs.mkdir(dist, { recursive: true });

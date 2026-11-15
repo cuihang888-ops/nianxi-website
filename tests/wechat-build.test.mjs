@@ -44,6 +44,29 @@ test("standalone bundle runs without a DOM or module loader, excludes private fi
   assert.deepEqual((await fs.readdir(path.join(projectRoot, "dist", "wechat"))).sort(), ["game.js", "game.json", "project.config.json"]);
 });
 
+test("lowers modern syntax rejected by the preview uploader without changing its behavior", async t => {
+  const projectRoot = await fixture(t);
+  await fs.writeFile(path.join(projectRoot, "wechat", "game.js"), `
+    const sample = wx.sample();
+    const result = { ...sample?.position, label: sample?.name ?? "fallback" };
+    result.score ??= 7;
+    const { label, ...rest } = result;
+    wx.record([label, rest.x, rest.score, sample?.read?.() ?? -1]);
+  `);
+  const report = await buildWechat({ projectRoot });
+  assert.equal(report.target, "es2017");
+  const code = await fs.readFile(path.join(projectRoot, "dist", "wechat", "game.js"), "utf8");
+  assert.doesNotMatch(code, /\?\.|\?\?/);
+  for (const [sample, expected] of [
+    [undefined, ["fallback", undefined, 7, -1]],
+    [{ name: "", position: { x: 4, score: 0 }, read() { return this.position.x; } }, ["", 4, 0, 4]],
+  ]) {
+    let actual;
+    vm.runInNewContext(code, { wx: { sample: () => sample, record: value => { actual = Array.from(value); } } });
+    assert.deepEqual(actual, expected);
+  }
+});
+
 test("check-only and failed builds leave the existing output intact", async t => {
   const projectRoot = await fixture(t);
   await buildWechat({ projectRoot, checkOnly: true });

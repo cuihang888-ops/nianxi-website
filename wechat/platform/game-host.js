@@ -8,7 +8,29 @@ const messages = Object.freeze({
   PLATFORM_ERROR: "The WeChat runtime reported an error.",
   DISPOSED: "The game host has been disposed.",
 });
-const failure = code => Object.freeze({ ok: false, error: Object.freeze({ code, message: messages[code] }) });
+const failure = (code, detail = {}) => Object.freeze({ ok: false, error: Object.freeze({ code, message: messages[code], ...detail }) });
+const errorNames = new Set(["Error", "TypeError", "ReferenceError", "RangeError", "SyntaxError", "EvalError", "URIError"]);
+const stages = new Set(["canvas", "scheduler", "platform", "viewport", "events", "game-create", "three-scope", "renderer", "ui-canvas", "scene", "ui-resize", "game-resize", "update", "render", "input", "pause", "resume", "frame"]);
+
+function diagnostic(stage, error) {
+  const detail = { stage: stages.has(stage) ? stage : "platform" };
+  try {
+    if (errorNames.has(error?.name)) detail.errorName = error.name;
+    const match = typeof error?.stack === "string" && error.stack.match(/(?:^|[\s(/\\])game\.js:(\d{1,7}):(\d{1,7})(?=[\s)]|$)/);
+    if (match) detail.source = `game.js:${match[1]}:${match[2]}`;
+  } catch {}
+  return detail;
+}
+
+function frameScheduler(canvas, scheduler) {
+  if (scheduler) return scheduler;
+  if (typeof canvas.requestAnimationFrame === "function" && typeof canvas.cancelAnimationFrame === "function") return canvas;
+  // Mini Games expose these as global functions; globalThis is not required.
+  if (typeof requestAnimationFrame === "function" && typeof cancelAnimationFrame === "function") {
+    return { requestAnimationFrame: callback => requestAnimationFrame(callback), cancelAnimationFrame: id => cancelAnimationFrame(id) };
+  }
+  throw new TypeError("Animation frame API unavailable");
+}
 
 function readViewport(wxApi, size) {
   const info = typeof wxApi.getWindowInfo === "function" ? wxApi.getWindowInfo() : wxApi.getSystemInfoSync();
@@ -40,6 +62,7 @@ export function createWechatGameHost(wxApi, { config, createGame, onError, sched
   let phase = "idle", visible = true, viewport = null, canvas = null, game = null, platform = null;
   let startPromise = null, frame = null, lastFrameAt = null, lastError = null, loopEpoch = 0;
   let requestFrame, cancelFrame;
+  let stage = "canvas";
   const inputListeners = new Set();
   const removers = [];
   const releasedGames = new WeakSet();
@@ -75,9 +98,9 @@ export function createWechatGameHost(wxApi, { config, createGame, onError, sched
     overlayCanvases.clear();
   }
 
-  function fail(code) {
+  function fail(code, error, at = stage) {
     if (stopped()) return;
-    lastError = failure(code).error;
+    lastError = failure(code, diagnostic(at, error)).error;
     phase = "error";
     cleanup();
     // Error objects can contain credentials, request URLs or private game data.
@@ -86,16 +109,18 @@ export function createWechatGameHost(wxApi, { config, createGame, onError, sched
 
   function invoke(method, ...args) {
     if (stopped() || typeof game?.[method] !== "function") return;
+    stage = method === "resize" ? "game-resize" : method;
     try {
       const result = game[method](...args);
-      if (result?.then) Promise.resolve(result).catch(() => fail("GAME_RUNTIME_ERROR"));
-    } catch { fail("GAME_RUNTIME_ERROR"); }
+      const at = stage;
+      if (result?.then) Promise.resolve(result).catch(error => fail("GAME_RUNTIME_ERROR", error, at));
+    } catch (error) { fail("GAME_RUNTIME_ERROR", error); }
   }
 
   function schedule() {
     if (phase !== "running" || frame !== null) return;
     const epoch = loopEpoch;
-    try { frame = requestFrame(timestamp => { if (epoch === loopEpoch) onFrame(timestamp); }); } catch { fail("GAME_RUNTIME_ERROR"); }
+    try { frame = requestFrame(timestamp => { if (epoch === loopEpoch) onFrame(timestamp); }); } catch (error) { fail("GAME_RUNTIME_ERROR", error, "frame"); }
   }
 
   function onFrame(timestamp) {
@@ -115,10 +140,11 @@ export function createWechatGameHost(wxApi, { config, createGame, onError, sched
     const normalized = Object.freeze({ type, touches: touchPoints(event.touches), changedTouches: touchPoints(event.changedTouches) });
     for (const listener of [...inputListeners]) {
       if (stopped()) break;
+      stage = "input";
       try {
         const result = listener(normalized);
-        if (result?.then) Promise.resolve(result).catch(() => fail("GAME_RUNTIME_ERROR"));
-      } catch { fail("GAME_RUNTIME_ERROR"); }
+        if (result?.then) Promise.resolve(result).catch(error => fail("GAME_RUNTIME_ERROR", error, "input"));
+      } catch (error) { fail("GAME_RUNTIME_ERROR", error); }
     }
   }
 
@@ -130,6 +156,7 @@ export function createWechatGameHost(wxApi, { config, createGame, onError, sched
   }
 
   function resize(size) {
+    stage = "viewport";
     try {
       viewport = readViewport(wxApi, size);
       const pixelWidth = Math.round(viewport.width * viewport.pixelRatio);
@@ -137,7 +164,7 @@ export function createWechatGameHost(wxApi, { config, createGame, onError, sched
       if (canvas.width !== pixelWidth) canvas.width = pixelWidth;
       if (canvas.height !== pixelHeight) canvas.height = pixelHeight;
       invoke("resize", viewport);
-    } catch { fail("GAME_RUNTIME_ERROR"); }
+    } catch (error) { fail("GAME_RUNTIME_ERROR", error); }
   }
 
   function hide() {
@@ -175,21 +202,27 @@ export function createWechatGameHost(wxApi, { config, createGame, onError, sched
   async function initialize() {
     if (stopped()) return failure(lastError?.code || "DISPOSED");
     try {
+      stage = "canvas";
       canvas = wxApi.createCanvas();
-      const clock = scheduler || (typeof canvas.requestAnimationFrame === "function" && typeof canvas.cancelAnimationFrame === "function" ? canvas : globalThis);
+      stage = "scheduler";
+      const clock = frameScheduler(canvas, scheduler);
       if (typeof clock.requestAnimationFrame !== "function" || typeof clock.cancelAnimationFrame !== "function") throw new TypeError("Animation frame API unavailable");
       requestFrame = clock.requestAnimationFrame.bind(clock);
       cancelFrame = clock.cancelAnimationFrame.bind(clock);
+      stage = "platform";
       platform = createWechatAdapter(wxApi, config);
       resize();
       if (stopped()) return failure(lastError?.code || "DISPOSED");
+      stage = "events";
       bind("Hide", hide);
       bind("Show", show);
-      bind("Error", () => fail("PLATFORM_ERROR"));
+      bind("Error", error => fail("PLATFORM_ERROR", error, "platform"));
       bind("WindowResize", event => resize(event?.size || event));
       for (const type of ["Start", "Move", "End", "Cancel"]) bind(`Touch${type}`, event => notifyInput(type.toLowerCase(), event));
       const context = Object.freeze({
         canvas, platform, input,
+        createImage: typeof wxApi.createImage === "function" ? () => wxApi.createImage() : undefined,
+        setStage(value) { if (stages.has(value)) stage = value; },
         createOverlayCanvas() {
           if (stopped()) throw new Error("The game host is no longer active");
           const auxiliary = wxApi.createCanvas();
@@ -199,6 +232,7 @@ export function createWechatGameHost(wxApi, { config, createGame, onError, sched
         },
         get viewport() { return viewport; },
       });
+      stage = "game-create";
       const instance = await createGame(context);
       if (stopped()) {
         releaseGame(instance);
@@ -213,9 +247,9 @@ export function createWechatGameHost(wxApi, { config, createGame, onError, sched
       if (stopped()) return failure(lastError.code);
       schedule();
       return stopped() ? failure(lastError.code) : Object.freeze({ ok: true });
-    } catch {
-      if (phase !== "disposed") fail("START_FAILED");
-      return failure(lastError?.code || "DISPOSED");
+    } catch (error) {
+      if (phase !== "disposed") fail("START_FAILED", error);
+      return lastError ? Object.freeze({ ok: false, error: lastError }) : failure("DISPOSED");
     }
   }
 

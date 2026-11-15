@@ -12,6 +12,7 @@ import uiModule from "./vendor/canvas-ui.cjs";
 import { createPreviewSave } from "./platform/preview-save.js";
 import { createHomeController } from "./home-controller.js";
 import { createDiscoveryController } from "./discovery-controller.js";
+import { createThreeCanvas } from "./platform/three-canvas.js";
 
 const finite = (value, fallback = 0) => Number.isFinite(value) ? value : fallback;
 const distance = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
@@ -39,7 +40,9 @@ export function createGame(context) {
   const today = () => Daily.todayShanghai(clock());
   const session = createPreviewSave(context.platform.storage, clock);
   const state = session.state;
-  const THREE = context.three || threeModule.createScopedThreejs(context.canvas);
+  context.setStage?.("three-scope");
+  const renderCanvas = context.three ? context.canvas : createThreeCanvas(context.canvas, context.createImage);
+  const THREE = context.three || threeModule.createScopedThreejs(renderCanvas);
   const worlds = new Map();
   let renderer, overlayScene, ui, texture, overlayMaterial, unsubscribe, homeController, discoveryController;
   let active = 0, world, viewport = context.viewport;
@@ -128,9 +131,9 @@ export function createGame(context) {
     if (disposed || !size) return;
     clearInput(); viewport = size;
     const dpr = Math.min(2, Math.max(1, finite(size.pixelRatio, 1)));
-    renderer.setPixelRatio(dpr);
-    renderer.setSize(size.width, size.height, false);
+    renderer.setDrawingBufferSize(size.width, size.height, dpr);
     world?.resize(size.width, size.height);
+    context.setStage?.("ui-resize");
     ui.resize(size.width, size.height, dpr, size);
     // WebGL texture allocation is immutable on some runtimes after its first upload.
     texture?.dispose();
@@ -200,9 +203,11 @@ export function createGame(context) {
   }
 
   try {
-    renderer = new THREE.WebGLRenderer({ canvas: context.canvas, antialias: true });
+    context.setStage?.("renderer");
+    renderer = new THREE.WebGLRenderer({ canvas: renderCanvas, antialias: true });
     renderer.autoClear = false;
     if ("outputEncoding" in renderer) renderer.outputEncoding = THREE.sRGBEncoding;
+    context.setStage?.("ui-canvas");
     const uiCanvas = context.createOverlayCanvas();
     ui = uiModule.createCanvasUI({ canvas: uiCanvas, state, save: session.save, today, now: () => elapsed * 1000,
       onExternal: id => homeController.handleExternal(id), onAlbum: () => discoveryController.openAlbum(),
@@ -218,6 +223,7 @@ export function createGame(context) {
     texture.generateMipmaps = false;
     overlayMaterial = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthTest: false, depthWrite: false });
     overlayScene.add(new THREE.Mesh(new THREE.PlaneGeometry(2, 2), overlayMaterial));
+    context.setStage?.("scene");
     setScene(0);
     if (session.ok) session.transact(draft => Daily.refreshDaily(draft, lastDay));
     else ui.toast("原存档无法读取，已保留；当前进度不能保存");
