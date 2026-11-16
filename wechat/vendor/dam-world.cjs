@@ -93,6 +93,33 @@
     return Math.min(...polygon.map((p, index) => pointSegmentDistance(point, p, polygon[(index + 1) % polygon.length])));
   }
 
+  // —— 实体碰撞（逻辑修复轮 2026-11-16）：圆（移动者）vs 定向矩形（OBB）——
+  // solid = { x, z（世界中心）, cos, sin（局部系旋转）, hx, hz（半宽）, y0, y1（竖直跨度）, minR? }
+  // 局部→世界：wx = x + lx*cos + lz*sin；wz = z - lx*sin + lz*cos（与 rectangle()/Group.rotation.y 同口径）。
+  // 把圆心推出矩形（矩形按圆半径外扩）；返回是否发生了位移。竖直跨度由调用方先行判定。
+  function pushCircleOutOfObb(p, radius, s) {
+    const dx = p.x - s.x, dz = p.z - s.z;
+    let lx = dx * s.cos - dz * s.sin, lz = dx * s.sin + dz * s.cos;
+    const cx = Math.max(-s.hx, Math.min(s.hx, lx)), cz = Math.max(-s.hz, Math.min(s.hz, lz));
+    if (cx === lx && cz === lz) {
+      // 圆心已在矩形内：沿穿透最浅的轴整段推出
+      const px = s.hx - Math.abs(lx), pz = s.hz - Math.abs(lz);
+      if (px < pz) lx = (lx >= 0 ? 1 : -1) * (s.hx + radius);
+      else lz = (lz >= 0 ? 1 : -1) * (s.hz + radius);
+    } else {
+      const ex = lx - cx, ez = lz - cz, d = Math.hypot(ex, ez);
+      if (d >= radius) return false;
+      if (d < 1e-9) {
+        const px = s.hx - Math.abs(lx), pz = s.hz - Math.abs(lz);
+        if (px < pz) lx = (lx >= 0 ? 1 : -1) * (s.hx + radius);
+        else lz = (lz >= 0 ? 1 : -1) * (s.hz + radius);
+      } else { lx = cx + ex / d * radius; lz = cz + ez / d * radius; }
+    }
+    p.x = s.x + lx * s.cos + lz * s.sin;
+    p.z = s.z - lx * s.sin + lz * s.cos;
+    return true;
+  }
+
   function polygonRoadDistance(polygon, points) {
     let distance = Infinity;
     for (let i = 1; i < points.length; i++) {
@@ -395,6 +422,10 @@
     const FIELD_FORWARD = 3.0;    // 田组中心相对地块中心向前（+dir）的偏移
     const PLATFORM_HALF = 2.95;   // 认领平台（房子最大地面占地）半宽
     const BED_EXTENT = 1.57;      // 田组四畦的外接半宽（畦心 ±0.82 + 畦半宽 0.75）
+    // —— 动物区（逻辑修复轮）：地块局部系（lat=局部 X，along=局部 Z），位于房子/田块的东侧空地，
+    // 不与房（|lat|≤2.95）、田（|lat|≤1.57）重叠；四周有栅栏（视觉 + 玩家碰撞），动物以此为硬边界。——
+    const ANIMAL_ZONE = { minLat: 3.55, maxLat: 7.95, minAlong: -4.85, maxAlong: 4.85 };
+    const ANIMAL_DEFS = { chicken: { radius: 0.3, height: 0.85 }, sheep: { radius: 0.62, height: 1.35 }, rabbit: { radius: 0.34, height: 0.75 } };
 
     // —— 本坝的静态世界（地貌/江河/地标/集市/大厅由各坝 decorate 画）——
     const decoration = spec.decorate(root, M, H);
@@ -573,6 +604,153 @@
     function claimCustomPlot(x, z) { return addCustomPlot(x, z, false); }
     function restoreCustomPlot(x, z) { return addCustomPlot(x, z, true); }
 
+    // ══ 实体碰撞登记（逻辑修复轮 2026-11-16）══
+    // 根因（修复前）：玩家移动只过 land.resolve，其障碍集只有 spec.waters + 装饰 colliders（水/山/树）；
+    // 运行时在地块上建起的房子、栅栏从未登记为碰撞体，玩家径直穿墙。动物移动则完全不走任何碰撞，
+    // 目标点在地块中心半径 4.2 的圆盘内随机取——圆盘与房子占地大面积重叠，羊必然穿房。
+    // 现行口径：房子墙体/架空层/栅栏按新占地登记为 OBB 实体（带竖直跨度与门洞），平台/室内/台阶登记为
+    // 地面高度区；玩家、坐骑、家养动物移动统一过 resolveMover / resolveAnimalPosition。
+    let worldSolids = [], worldFloors = [];
+    function frameOf(x, z, face) { return { x, z, cos: Math.cos(face), sin: Math.sin(face) }; }
+    function makeSolid(frame, ox, oz, hx, hz, y0, y1, minR) {
+      return {
+        x: frame.x + ox * frame.cos + oz * frame.sin, z: frame.z - ox * frame.sin + oz * frame.cos,
+        cos: frame.cos, sin: frame.sin, hx, hz, y0, y1, minR: minR || 0,
+      };
+    }
+    function makeFloor(frame, ox, oz, hx, hz, h, rampZ) {
+      return {
+        fx: frame.x, fz: frame.z,
+        x: frame.x + ox * frame.cos + oz * frame.sin, z: frame.z - ox * frame.sin + oz * frame.cos,
+        cos: frame.cos, sin: frame.sin, hx, hz, h, rampZ: rampZ || null,
+      };
+    }
+    function refreshWorldCollision() {
+      worldSolids = [...(decoration?.solidRects || [])];
+      worldFloors = [];
+      for (const p of plotList) {
+        if (p._solids) worldSolids.push(...p._solids);
+        if (p._floors) worldFloors.push(...p._floors);
+      }
+    }
+    function yardFenceSolids(plotFrame) {
+      const Z = ANIMAL_ZONE, latC = (Z.minLat + Z.maxLat) / 2, latH = (Z.maxLat - Z.minLat) / 2, alongH = (Z.maxAlong - Z.minAlong) / 2;
+      return [
+        makeSolid(plotFrame, Z.maxLat, 0, 0.09, alongH + 0.09, 0, 1.05),
+        makeSolid(plotFrame, latC, Z.maxAlong, latH + 0.09, 0.09, 0, 1.05),
+        makeSolid(plotFrame, latC, Z.minAlong, latH + 0.09, 0.09, 0, 1.05),
+        makeSolid(plotFrame, Z.minLat, (Z.minAlong + 1.6) / 2, 0.09, (1.6 - Z.minAlong) / 2, 0, 1.05), // 内侧留门（along 1.6..3.2）
+        makeSolid(plotFrame, Z.minLat, (3.2 + Z.maxAlong) / 2, 0.09, (Z.maxAlong - 3.2) / 2, 0, 1.05),
+      ];
+    }
+    function refreshPlotCollision(plot) {
+      const solids = [], floors = [];
+      if (plot.claimed) {
+        const houseFrame = frameOf(plot.x - plot.dirX * HOME_BACK, plot.z - plot.dirZ * HOME_BACK, plot.face);
+        floors.push(makeFloor(houseFrame, 0, 0, PLATFORM_HALF, PLATFORM_HALF, 0.52)); // 认领平台顶面
+        if (plot.house >= 1) solids.push(...yardFenceSolids(frameOf(plot.x, plot.z, plot.face)));
+        if (plot.house === 1) {
+          // 草棚墙体（与 buildHutVisual 同占地）：后/左/右整墙，前墙两段，门洞 |x|<0.9
+          solids.push(makeSolid(houseFrame, 0, -2.66, 2.82, 0.16, 0.52, 3.05));
+          solids.push(makeSolid(houseFrame, -2.66, 0, 0.16, 2.82, 0.52, 3.05));
+          solids.push(makeSolid(houseFrame, 2.66, 0, 0.16, 2.82, 0.52, 3.05));
+          solids.push(makeSolid(houseFrame, -1.86, 2.66, 0.96, 0.16, 0.52, 3.05));
+          solids.push(makeSolid(houseFrame, 1.86, 2.66, 0.96, 0.16, 0.52, 3.05));
+          solids.push(makeSolid(houseFrame, 0, 2.66, 0.9, 0.16, 0.52, 3.05, 0.6)); // 门洞只挡大体型（坐骑）
+        } else if (plot.house === 2) {
+          // 竹楼：架空层整幅实体（裙边围合）+ 楼层墙体（门洞 |x|<0.9）；地面高度改由台阶斜面与楼板给出
+          floors.length = 0;
+          floors.push(makeFloor(houseFrame, 0, 0, 2.8, 2.8, 2.3));
+          floors.push(makeFloor(houseFrame, 0, 3.75, 0.85, 0.95, 0, { z0: 4.7, z1: 2.8, h0: 0, h1: 2.3 }));
+          solids.push(makeSolid(houseFrame, 0, 0, 2.55, 2.55, 0, 2.0));
+          solids.push(makeSolid(houseFrame, 0, -2.5, 2.62, 0.14, 2.15, 4.55));
+          solids.push(makeSolid(houseFrame, -2.5, 0, 0.14, 2.62, 2.15, 4.55));
+          solids.push(makeSolid(houseFrame, 2.5, 0, 0.14, 2.62, 2.15, 4.55));
+          solids.push(makeSolid(houseFrame, -1.76, 2.5, 0.86, 0.14, 2.15, 4.55));
+          solids.push(makeSolid(houseFrame, 1.76, 2.5, 0.86, 0.14, 2.15, 4.55));
+          solids.push(makeSolid(houseFrame, 0, 2.5, 0.88, 0.14, 2.15, 4.55, 0.6));
+        }
+      }
+      plot._solids = solids; plot._floors = floors;
+      refreshWorldCollision();
+    }
+    function floorHeightAt(x, z) {
+      let best = 0;
+      for (const f of worldFloors) {
+        const dx = x - f.x, dz = z - f.z;
+        const lx = dx * f.cos - dz * f.sin, lz = dx * f.sin + dz * f.cos;
+        if (Math.abs(lx) > f.hx || Math.abs(lz) > f.hz) continue;
+        let h = f.h;
+        if (f.rampZ) {
+          const fdx = x - f.fx, fdz = z - f.fz;
+          const flz = fdx * f.sin + fdz * f.cos;
+          const t = Math.max(0, Math.min(1, (flz - f.rampZ.z0) / (f.rampZ.z1 - f.rampZ.z0)));
+          h = f.rampZ.h0 + (f.rampZ.h1 - f.rampZ.h0) * t;
+        }
+        if (h > best) best = h;
+      }
+      return best;
+    }
+    // 玩家/坐骑移动解算：先过地形（水面/山树/坝界），再按竖直跨度逐个推出实体矩形。
+    // 近距离移动分步推进（单步 ≤0.15 < 最薄墙体 0.28）：逐段从上一段解算结果续推，
+    // 圆心不会跨过矩形中线被推到墙的另一侧（大步长直推会穿透，实测过）。
+    function resolveMover(x, z, prev, radius, height, useFloors) {
+      let p = land.resolve(x, z, prev);
+      const feetY = useFloors ? floorHeightAt(p.x, p.z) : 0;
+      const top = feetY + height;
+      const pushAll = q => {
+        let moved = false;
+        for (const s of worldSolids) {
+          if (radius < s.minR || top <= s.y0 || feetY >= s.y1) continue;
+          if (pushCircleOutOfObb(q, radius, s)) moved = true;
+        }
+        return moved;
+      };
+      const dist = Math.hypot(p.x - prev.x, p.z - prev.z);
+      if (dist > 1e-6 && dist <= 3) {
+        const steps = Math.max(1, Math.ceil(dist / 0.15));
+        const cur = { x: prev.x, z: prev.z };
+        for (let pass = 0; pass < 3 && pushAll(cur); pass++); // 起点若已陷在实体内，先弹到最近面再起步
+        const stepX = (p.x - cur.x) / steps, stepZ = (p.z - cur.z) / steps;
+        for (let i = 0; i < steps; i++) {
+          cur.x += stepX; cur.z += stepZ;
+          for (let pass = 0; pass < 3 && pushAll(cur); pass++);
+        }
+        p = cur;
+      } else {
+        for (let pass = 0; pass < 3 && pushAll(p); pass++);
+      }
+      if (!land.valid(p)) { p = land.resolve(p.x, p.z, prev); pushAll(p); }
+      return { x: p.x, z: p.z, feetY: useFloors ? floorHeightAt(p.x, p.z) : 0 };
+    }
+    // 家养动物位置解算：推出实体与树干圆，最后钳回动物区（硬边界，含身体半径内缩）。
+    function resolveAnimalPosition(a) {
+      const p = a.g.position;
+      for (let pass = 0; pass < 2; pass++) {
+        for (const s of worldSolids) {
+          if (a.radius < s.minR || a.height <= s.y0) continue;
+          pushCircleOutOfObb(p, a.radius, s);
+        }
+        for (const c of colliders) {
+          const dx = p.x - c.x, dz = p.z - c.z, rr = c.r + a.radius, d = Math.hypot(dx, dz);
+          if (d < rr && d > 1e-6) { p.x = c.x + dx / d * rr; p.z = c.z + dz / d * rr; }
+        }
+        const dx = p.x - a.px, dz = p.z - a.pz;
+        let lx = dx * a.cosF - dz * a.sinF, lz = dx * a.sinF + dz * a.cosF;
+        lx = Math.max(ANIMAL_ZONE.minLat + a.radius, Math.min(ANIMAL_ZONE.maxLat - a.radius, lx));
+        lz = Math.max(ANIMAL_ZONE.minAlong + a.radius, Math.min(ANIMAL_ZONE.maxAlong - a.radius, lz));
+        p.x = a.px + lx * a.cosF + lz * a.sinF;
+        p.z = a.pz - lx * a.sinF + lz * a.cosF;
+      }
+    }
+    function pickAnimalTarget(a) {
+      const lx = ANIMAL_ZONE.minLat + a.radius + rnd() * (ANIMAL_ZONE.maxLat - ANIMAL_ZONE.minLat - a.radius * 2);
+      const lz = ANIMAL_ZONE.minAlong + a.radius + rnd() * (ANIMAL_ZONE.maxAlong - ANIMAL_ZONE.minAlong - a.radius * 2);
+      a.tx = a.px + lx * a.cosF + lz * a.sinF;
+      a.tz = a.pz - lx * a.sinF + lz * a.cosF;
+    }
+    refreshWorldCollision(); // 初始登记场景侧静态实体（如样板牧场围栏）
+
     function markClaimedVisual(plot) {
       plot.claimed = true;
       plot.mesh.material = M.warm;
@@ -584,47 +762,155 @@
       f.add(box(0.28, 2.2, 0.28, M.woodDark, 3.2, 1.3, 3.2));
       f.add(box(1.5, 0.9, 0.12, M.cream, 3.2, 2.2, 3.2));
       root.add(f);
+      refreshPlotCollision(plot);
     }
+    // —— 动物区栅栏（逻辑修复轮）：与 yardFenceSolids 同界，内侧留门供玩家进出 ——
+    function buildYardFenceVisual(plot) {
+      if (plot.yardGroup) return;
+      const g = new THREE.Group();
+      g.position.set(plot.x, 0, plot.z);
+      g.rotation.y = plot.face;
+      const run = (x0, z0, x1, z1) => {
+        const len = Math.hypot(x1 - x0, z1 - z0), steps = Math.max(1, Math.round(len / 1.6));
+        for (let i = 0; i <= steps; i++) g.add(box(0.15, 1.05, 0.15, M.wood, x0 + (x1 - x0) * i / steps, 0.52, z0 + (z1 - z0) * i / steps));
+        for (const ry of [0.55, 0.92]) {
+          g.add(Math.abs(x1 - x0) > Math.abs(z1 - z0)
+            ? box(len, 0.09, 0.09, M.wood, (x0 + x1) / 2, ry, (z0 + z1) / 2)
+            : box(0.09, 0.09, len, M.wood, (x0 + x1) / 2, ry, (z0 + z1) / 2));
+        }
+      };
+      const Z = ANIMAL_ZONE;
+      run(Z.maxLat, Z.minAlong, Z.maxLat, Z.maxAlong);
+      run(Z.minLat, Z.maxAlong, Z.maxLat, Z.maxAlong);
+      run(Z.minLat, Z.minAlong, Z.maxLat, Z.minAlong);
+      run(Z.minLat, Z.minAlong, Z.minLat, 1.6);
+      run(Z.minLat, 3.2, Z.minLat, Z.maxAlong);
+      g.add(box(0.2, 1.25, 0.2, M.woodDark, Z.minLat, 0.62, 1.6));
+      g.add(box(0.2, 1.25, 0.2, M.woodDark, Z.minLat, 0.62, 3.2));
+      root.add(g);
+      plot.yardGroup = g;
+    }
+    // —— 草棚（逻辑修复轮重做）：米白墙身 + 木角柱、四面真墙、前墙真门洞（门板开着贴墙）、
+    // 两侧窗框、双坡茅草顶（脊沿前后向、出檐）+ 山墙，室内有床铺/低桌/凳/背篓轮廓；
+    // 占地与 refreshPlotCollision 的草棚实体逐项对应，门洞可进出、墙体不可穿。——
     function buildHutVisual(plot) {
       plot.hut = true; plot.house = 1;
       const g = new THREE.Group();
       g.position.set(plot.x - plot.dirX * HOME_BACK, 0, plot.z - plot.dirZ * HOME_BACK);
       g.rotation.y = plot.face;
-      const y0 = 0.52;
-      g.add(box(5.6, 2.5, 0.28, M.tunic, 0, y0 + 1.25, -2.66));
-      g.add(box(0.28, 2.5, 5.6, M.tunic, -2.66, y0 + 1.25, 0));
-      g.add(box(0.28, 2.5, 5.6, M.tunic, 2.66, y0 + 1.25, 0));
-      g.add(box(5.6, 0.85, 0.28, M.tunic, 0, y0 + 2.1, 2.66));
-      const roofL = box(3.6, 0.16, 6.6, M.roof, 0, y0 + 3.35, -1.5); roofL.rotation.x = 0.5; g.add(roofL);
-      const roofR = box(3.6, 0.16, 6.6, M.roof, 0, y0 + 3.35, 1.5); roofR.rotation.x = -0.5; g.add(roofR);
-      g.add(box(0.35, 0.3, 6.9, M.woodDark, 0, y0 + 4.06, 0));
+      const y0 = 0.52; // 平台顶面
+      g.add(box(4.7, 0.07, 4.7, M.earth, 0, y0 + 0.035, 0)); // 室内地席
+      g.add(box(5.6, 2.48, 0.24, M.cream, 0, y0 + 1.24, -2.66)); // 后墙
+      g.add(box(0.24, 2.48, 5.6, M.cream, -2.66, y0 + 1.24, 0)); // 左墙
+      g.add(box(0.24, 2.48, 5.6, M.cream, 2.66, y0 + 1.24, 0)); // 右墙
+      g.add(box(1.85, 2.48, 0.24, M.cream, -1.875, y0 + 1.24, 2.66)); // 前墙左段
+      g.add(box(1.85, 2.48, 0.24, M.cream, 1.875, y0 + 1.24, 2.66)); // 前墙右段
+      g.add(box(1.9, 0.48, 0.24, M.cream, 0, y0 + 2.24, 2.66)); // 门楣（门洞宽 1.9、高 2.0）
+      for (const [px, pz] of [[-2.66, -2.66], [2.66, -2.66], [-2.66, 2.66], [2.66, 2.66]]) {
+        g.add(box(0.32, 2.6, 0.32, M.woodDark, px, y0 + 1.3, pz)); // 木角柱
+      }
+      g.add(box(0.18, 2.05, 0.3, M.woodDark, -0.95, y0 + 1.02, 2.66)); // 门框
+      g.add(box(0.18, 2.05, 0.3, M.woodDark, 0.95, y0 + 1.02, 2.66));
+      const doorHinge = new THREE.Group(); // 门板开着，平贴前墙外侧，不堵门洞
+      doorHinge.position.set(0.95, y0, 2.95); doorHinge.rotation.y = Math.PI - 0.12;
+      doorHinge.add(box(1.7, 1.98, 0.07, M.wood, 0.85, 1.0, 0));
+      g.add(doorHinge);
+      for (const s of [-1, 1]) { // 两侧窗：深色窗芯 + 木框与十字棂
+        g.add(box(0.08, 1.05, 1.25, M.roofD, 2.79 * s, y0 + 1.55, 0));
+        g.add(box(0.1, 1.2, 0.12, M.woodDark, 2.8 * s, y0 + 1.55, -0.68));
+        g.add(box(0.1, 1.2, 0.12, M.woodDark, 2.8 * s, y0 + 1.55, 0.68));
+        g.add(box(0.1, 0.12, 1.44, M.woodDark, 2.8 * s, y0 + 2.18, 0));
+        g.add(box(0.1, 0.12, 1.44, M.woodDark, 2.8 * s, y0 + 0.92, 0));
+        g.add(box(0.1, 1.05, 0.09, M.woodDark, 2.8 * s, y0 + 1.55, 0));
+        g.add(box(0.1, 0.09, 1.25, M.woodDark, 2.8 * s, y0 + 1.55, 0));
+      }
+      const roofL = box(3.6, 0.18, 7.8, M.roof, -1.65, y0 + 3.35, 0); roofL.rotation.z = 0.415; g.add(roofL);
+      const roofR = box(3.6, 0.18, 7.8, M.roof, 1.65, y0 + 3.35, 0); roofR.rotation.z = -0.415; g.add(roofR);
+      g.add(box(0.3, 0.26, 8.1, M.woodDark, 0, y0 + 4.12, 0)); // 屋脊
+      for (const s of [-1, 1]) { // 山墙（菱形截面沉入屋面，只露上三角）
+        const gable = box(3.96, 3.96, 0.2, M.cream, 0, y0 + 1.28, 2.58 * s);
+        gable.rotation.z = Math.PI / 4; g.add(gable);
+      }
+      // 室内陈设轮廓：床铺、低桌、凳、背篓
+      g.add(box(1.1, 0.22, 2.2, M.tunic, -1.7, y0 + 0.18, -1.2));
+      g.add(box(0.7, 0.16, 0.5, M.cream, -1.7, y0 + 0.32, -2.0));
+      g.add(box(1.3, 0.1, 0.8, M.wood, 1.2, y0 + 0.5, -0.6));
+      for (const [lx, lz] of [[-0.55, -0.3], [0.55, -0.3], [-0.55, 0.3], [0.55, 0.3]]) g.add(box(0.09, 0.45, 0.09, M.woodDark, 1.2 + lx, y0 + 0.22, -0.6 + lz));
+      g.add(box(0.5, 0.42, 0.5, M.wood, 0.7, y0 + 0.21, 1.0));
+      const hutBasket = new THREE.Mesh(new THREE.CylinderGeometry(0.34, 0.26, 0.5, 8), M.bamboo);
+      hutBasket.position.set(1.95, y0 + 0.25, 1.5); g.add(hutBasket);
+      g.add(box(1.9, 0.16, 0.8, M.stone, 0, 0.3, 3.35)); // 门前踏石
       root.add(g);
       plot.hutGroup = g;
+      buildYardFenceVisual(plot);
+      refreshPlotCollision(plot);
     }
+    // —— 竹楼（逻辑修复轮重做）：高脚柱 + 架空层竹篱裙边（围合实体）、楼板、四面竹墙（深色横带）、
+    // 前墙真门洞（门板开着贴墙）、两侧窗框、对正门洞的台阶与扶手、双坡深色茅草顶 + 山墙 + 屋脊，
+    // 室内有地席/床铺/低桌轮廓。占地与 refreshPlotCollision 的竹楼实体/地面区逐项对应：
+    // 台阶斜面可拾级而上、由门洞进屋，架空层与墙体不可穿。——
     function buildBambooVisual(plot) {
       plot.hut = true; plot.house = 2;
       const g = new THREE.Group();
       g.position.set(plot.x - plot.dirX * HOME_BACK, 0, plot.z - plot.dirZ * HOME_BACK);
       g.rotation.y = plot.face;
       for (const [px, pz] of [[-2.3, -2.3], [2.3, -2.3], [-2.3, 2.3], [2.3, 2.3], [-2.3, 0], [2.3, 0]]) {
-        g.add(box(0.3, 2.1, 0.3, M.bamboo, px, 1.05, pz));
+        g.add(box(0.3, 2.15, 0.3, M.bamboo, px, 1.07, pz)); // 高脚柱
       }
-      g.add(box(5.6, 0.3, 5.6, M.bamboo, 0, 2.15, 0));
-      const wy = 3.35;
-      g.add(box(5.3, 2.3, 0.24, M.bamboo, 0, wy, -2.5));
-      g.add(box(0.24, 2.3, 5.3, M.bamboo, -2.5, wy, 0));
-      g.add(box(0.24, 2.3, 5.3, M.bamboo, 2.5, wy, 0));
-      g.add(box(1.7, 2.3, 0.24, M.bamboo, -1.75, wy, 2.5));
-      g.add(box(1.7, 2.3, 0.24, M.bamboo, 1.75, wy, 2.5));
-      const rL = box(3.9, 0.16, 7.2, M.roof, 0, 5.15, -1.62); rL.rotation.x = 0.52; g.add(rL);
-      const rR = box(3.9, 0.16, 7.2, M.roof, 0, 5.15, 1.62); rR.rotation.x = -0.52; g.add(rR);
-      g.add(box(0.4, 0.32, 7.5, M.woodDark, 0, 5.95, 0));
-      for (let s = 0; s < 4; s++) g.add(box(1.5, 0.14, 0.5, M.bamboo, 0, 0.45 + s * 0.48, 3.6 - s * 0.42));
-      g.add(box(0.18, 1.1, 0.18, M.bamboo, -1.9, 2.75, 3.1));
-      g.add(box(0.18, 1.1, 0.18, M.bamboo, 1.9, 2.75, 3.1));
-      g.add(box(4, 0.16, 0.16, M.bamboo, 0, 3.3, 3.1));
+      g.add(box(5.3, 1.7, 0.08, M.bamboo, 0, 1.0, -2.45)); // 架空层裙边（四面围合）
+      g.add(box(5.3, 1.7, 0.08, M.bamboo, 0, 1.0, 2.45));
+      g.add(box(0.08, 1.7, 5.3, M.bamboo, -2.45, 1.0, 0));
+      g.add(box(0.08, 1.7, 5.3, M.bamboo, 2.45, 1.0, 0));
+      g.add(box(5.6, 0.3, 5.6, M.bamboo, 0, 2.15, 0)); // 楼板（顶面 2.3）
+      g.add(box(5.85, 0.2, 5.85, M.woodDark, 0, 1.98, 0)); // 板边梁
+      const wy = 3.42; // 墙心高（墙 2.3..4.55）
+      g.add(box(5.3, 2.25, 0.22, M.bamboo, 0, wy, -2.5)); // 后墙
+      g.add(box(0.22, 2.25, 5.3, M.bamboo, -2.5, wy, 0)); // 左墙
+      g.add(box(0.22, 2.25, 5.3, M.bamboo, 2.5, wy, 0)); // 右墙
+      g.add(box(1.7, 2.25, 0.22, M.bamboo, -1.75, wy, 2.5)); // 前墙左段
+      g.add(box(1.7, 2.25, 0.22, M.bamboo, 1.75, wy, 2.5)); // 前墙右段
+      g.add(box(1.8, 0.45, 0.22, M.bamboo, 0, 4.32, 2.5)); // 门楣（门洞宽 1.8、高 1.8）
+      for (const zz of [-2.5, 2.5]) { g.add(box(5.34, 0.13, 0.26, M.woodDark, 0, 2.62, zz)); g.add(box(5.34, 0.13, 0.26, M.woodDark, 0, 4.22, zz)); }
+      for (const xx of [-2.5, 2.5]) { g.add(box(0.26, 0.13, 5.34, M.woodDark, xx, 2.62, 0)); g.add(box(0.26, 0.13, 5.34, M.woodDark, xx, 4.22, 0)); }
+      for (const s of [-1, 1]) { // 两侧窗：深色窗芯 + 木框与十字棂
+        g.add(box(0.08, 1.0, 1.2, M.roofD, 2.62 * s, 3.6, 0));
+        g.add(box(0.1, 1.14, 0.1, M.woodDark, 2.63 * s, 3.6, -0.62));
+        g.add(box(0.1, 1.14, 0.1, M.woodDark, 2.63 * s, 3.6, 0.62));
+        g.add(box(0.1, 0.1, 1.3, M.woodDark, 2.63 * s, 4.12, 0));
+        g.add(box(0.1, 0.1, 1.3, M.woodDark, 2.63 * s, 3.08, 0));
+        g.add(box(0.1, 1.0, 0.08, M.woodDark, 2.63 * s, 3.6, 0));
+        g.add(box(0.1, 0.08, 1.2, M.woodDark, 2.63 * s, 3.6, 0));
+      }
+      g.add(box(0.16, 1.85, 0.28, M.woodDark, -0.9, 3.22, 2.5)); // 门框
+      g.add(box(0.16, 1.85, 0.28, M.woodDark, 0.9, 3.22, 2.5));
+      const doorHinge = new THREE.Group(); // 门板开着，平贴前墙外侧
+      doorHinge.position.set(0.9, 2.3, 2.78); doorHinge.rotation.y = Math.PI - 0.12;
+      doorHinge.add(box(1.65, 1.8, 0.07, M.wood, 0.82, 0.92, 0));
+      g.add(doorHinge);
+      for (let s = 0; s < 5; s++) g.add(box(1.7, 0.16, 0.52, M.bamboo, 0, 0.28 + s * 0.46, 4.55 - s * 0.44)); // 台阶
+      for (const s of [-1, 1]) { // 扶手：立柱 + 斜栏
+        g.add(box(0.14, 1.5, 0.14, M.bamboo, 0.95 * s, 0.75, 4.55));
+        g.add(box(0.14, 2.4, 0.14, M.bamboo, 0.95 * s, 1.2, 3.6));
+        g.add(box(0.14, 3.1, 0.14, M.bamboo, 0.95 * s, 1.55, 2.85));
+        const rail = box(0.1, 0.1, 2.4, M.woodDark, 0.95 * s, 2.3, 3.7); rail.rotation.x = 0.81; g.add(rail);
+      }
+      const rL = box(3.9, 0.18, 8.3, M.roofD, -1.78, 5.5, 0); rL.rotation.z = 0.412; g.add(rL);
+      const rR = box(3.9, 0.18, 8.3, M.roofD, 1.78, 5.5, 0); rR.rotation.z = -0.412; g.add(rR);
+      g.add(box(0.32, 0.28, 8.6, M.woodDark, 0, 6.28, 0)); // 屋脊
+      for (const s of [-1, 1]) { // 山墙
+        const gable = box(3.54, 3.54, 0.2, M.bamboo, 0, 3.62, 2.42 * s);
+        gable.rotation.z = Math.PI / 4; g.add(gable);
+      }
+      // 室内陈设轮廓：地席、床铺、低桌
+      g.add(box(4.2, 0.06, 4.2, M.earth, 0, 2.33, 0));
+      g.add(box(1.1, 0.22, 2.2, M.tunic, -1.7, 2.41, -1.2));
+      g.add(box(0.7, 0.16, 0.5, M.cream, -1.7, 2.55, -2.0));
+      g.add(box(1.3, 0.1, 0.8, M.wood, 1.2, 2.73, -0.6));
+      for (const [lx, lz] of [[-0.55, -0.3], [0.55, -0.3], [-0.55, 0.3], [0.55, 0.3]]) g.add(box(0.09, 0.45, 0.09, M.woodDark, 1.2 + lx, 2.45, -0.6 + lz));
       root.add(g);
       plot.hutGroup = g;
+      buildYardFenceVisual(plot);
+      refreshPlotCollision(plot);
     }
     function setFieldStageVisual(plot, stage) {
       if (!plot.fieldGroup || ![0, 1, 2].includes(stage) || stage === plot.fieldStage) return;
@@ -718,14 +1004,19 @@
       const g = kind === "chicken" ? miniChicken() : kind === "sheep" ? miniSheep() : miniRabbit();
       const shadow = softShadow(kind === "sheep" ? 0.72 : 0.36);
       g.add(shadow);
-      const a = rnd() * Math.PI * 2;
-      g.position.set(plot.x + Math.cos(a) * 2.4, 0, plot.z + Math.sin(a) * 2.4);
-      root.add(g);
-      plot.animals.push({
-        g, kind, head: g.userData.head || null, shadow, cx: plot.x, cz: plot.z,
-        tx: g.position.x, tz: g.position.z,
+      const def = ANIMAL_DEFS[kind];
+      const animal = {
+        g, kind, head: g.userData.head || null, shadow,
+        px: plot.x, pz: plot.z, cosF: Math.cos(plot.face), sinF: Math.sin(plot.face),
+        radius: def.radius, height: def.height,
+        tx: plot.x, tz: plot.z,
         wait: 1 + rnd() * 3, phase: rnd() * 6,
-      });
+      };
+      pickAnimalTarget(animal); // 出生点直接取区内一点，不再落在地块中心（旧口径与房子占地重叠）
+      g.position.set(animal.tx, 0, animal.tz);
+      pickAnimalTarget(animal);
+      root.add(g);
+      plot.animals.push(animal);
     }
 
     // —— 玩家：原始居民 ——
@@ -795,6 +1086,8 @@
     const { stall, basket: harvestBasket } = createHomeProps(THREE, M, box);
     root.add(stall, harvestBasket);
     let resting = false, restBlend = 0;
+    // 地面高度（逻辑修复轮）：平台/楼板/台阶斜面给出的脚下高度，逐帧缓动跟随；姿态下沉在其上叠加。
+    let floorY = 0, targetFloorY = 0;
     // —— 寺院姿态与室内状态（纠偏样板）：跪姿/叩首缓动、持珠、spec.interior 室内模式 ——
     let kneelTarget = 0, kneelBlend = 0, bowTarget = 0, bowBlend = 0, beadsHeld = false;
     let beadAngle = 0, beadShown = 0, beadPulse = 0; // 念珠逐颗步进：rollBead() 推进一颗，缓动跟上
@@ -975,16 +1268,21 @@
             const d = Math.hypot(dx, dz);
             if (a.wait <= 0) {
               if (d < 0.4) {
-                const ang = rnd() * Math.PI * 2, rr = 1 + rnd() * 3.2;
-                a.tx = a.cx + Math.cos(ang) * rr;
-                a.tz = a.cz + Math.sin(ang) * rr;
+                pickAnimalTarget(a); // 目标只取动物区内（修复前是在地块中心圆盘内取，与房子占地重叠）
                 a.wait = 1.5 + rnd() * 3.5;
               } else {
                 const sp = a.kind === "rabbit" ? 2.6 : 1.1;
-                a.g.position.x += dx / d * sp * dt;
-                a.g.position.z += dz / d * sp * dt;
+                const stepX = dx / d * sp * dt, stepZ = dz / d * sp * dt;
+                const ox = a.g.position.x, oz = a.g.position.z;
+                a.g.position.x += stepX;
+                a.g.position.z += stepZ;
+                resolveAnimalPosition(a); // 实体推离 + 动物区硬边界钳制（修复前无任何解算，径直穿房）
                 a.g.rotation.y = Math.atan2(dx, dz);
-                a.wait = 0.1;
+                // 被挡住且几乎没动：放弃当前目标，停一停再换向（挡停，不穿模、不叠进实体）
+                if (Math.hypot(a.g.position.x - ox, a.g.position.z - oz) < Math.hypot(stepX, stepZ) * 0.25) {
+                  a.tx = a.g.position.x; a.tz = a.g.position.z;
+                  a.wait = 0.6 + rnd();
+                } else a.wait = 0.1;
               }
             }
             if (a.kind === "rabbit" && d >= 0.4 && a.wait <= 0.1) a.g.position.y = Math.abs(Math.sin(t * 9 + a.phase)) * 0.3;
@@ -1026,10 +1324,15 @@
           const rawX = mover.position.x + mx / mm * sp * dt, rawZ = mover.position.z + mz / mm * sp * dt;
           const next = interiorActive && mover === player
             ? resolveInterior(rawX, rawZ, mover.position)
-            : land.resolve(rawX, rawZ, mover.position);
+            : resolveMover(rawX, rawZ, mover.position, mounted ? 0.85 : 0.35, mounted ? 2.9 : 2.3, !mounted);
           mover.position.x = next.x; mover.position.z = next.z;
+          if (!mounted && !interiorActive) targetFloorY = next.feetY;
           mover.rotation.y = Math.atan2(mx, mz);
           walkPhase += dt * (mounted ? 13 : 9.5);
+        }
+        if (!mounted) {
+          floorY += (targetFloorY - floorY) * Math.min(1, dt * 9);
+          if (Math.abs(targetFloorY - floorY) < 0.01) floorY = targetFloorY;
         }
         if (mounted) {
           player.position.set(horse.position.x, 1.52, horse.position.z);
@@ -1066,7 +1369,7 @@
             const distance = Math.hypot(dx, dz);
             if (bondLevel >= BOND.FOLLOW_AT && distance > 15) {
               const step = Math.min(distance - 15, (distance > 45 ? 19 : 10.5) * dt);
-              const next = land.resolve(horse.position.x + dx / distance * step, horse.position.z + dz / distance * step, horse.position);
+              const next = resolveMover(horse.position.x + dx / distance * step, horse.position.z + dz / distance * step, horse.position, 0.85, 2.9, false);
               horse.position.x = next.x; horse.position.z = next.z;
               horse.rotation.y = Math.atan2(dx, dz); followPhase += dt * 9;
               const trot = Math.sin(followPhase) * 0.4;
@@ -1086,7 +1389,7 @@
         if (Math.abs(bowTarget - bowBlend) < 0.002) bowBlend = bowTarget;
         if (!mounted && !dancing) {
           const sink = 0.42 * restBlend + 0.52 * kneelBlend + 0.08 * bowBlend;
-          player.position.y = sink > 0 ? -sink : 0; // 全零时落回精确 0（避免 -0）
+          player.position.y = floorY - sink; // 地面高度（平台/楼板/台阶）托底，姿态下沉叠加其上
           pBody.rotation.x = prayerPose === 2 ? 0.55 : 0.62 * bowBlend + 0.1 * restBlend;
           if (restBlend > 0.01 && !prayerPose) { legL.rotation.x = -1.35 * restBlend; legR.rotation.x = -1.35 * restBlend; }
           if (kneelBlend > 0.01 && !moving) { legL.rotation.x = -1.45 * kneelBlend; legR.rotation.x = -1.32 * kneelBlend; }
@@ -1132,7 +1435,7 @@
       showHorse(x, z) {
         if (!Number.isFinite(x) || !Number.isFinite(z)) return;
         horseShown = true; horse.visible = true;
-        if (!mounted) { const p = land.resolve(x, z, horse.position); horse.position.set(p.x, 0, p.z); }
+        if (!mounted) { const p = resolveMover(x, z, horse.position, 0.85, 2.9, false); horse.position.set(p.x, 0, p.z); }
       },
       hideHorse() {
         stopDance();
@@ -1141,11 +1444,11 @@
         if (beadsHeld) { beadsHeld = false; beadGroup.visible = false; }
         if (interiorActive) { interiorActive = false; interiorReturn = null; if (lastSky) applySkyState(lastSky); }
         resting = false; restBlend = 0; pBody.rotation.x = 0;
-        player.position.y = 0;
         if (mounted) {
-          const p = land.resolve(horse.position.x + 2.2, horse.position.z + 0.6, horse.position);
-          player.position.set(p.x, 0, p.z);
-        }
+          const p = resolveMover(horse.position.x + 2.2, horse.position.z + 0.6, horse.position, 0.35, 2.3, true);
+          floorY = targetFloorY = p.feetY;
+          player.position.set(p.x, floorY, p.z);
+        } else player.position.y = floorY;
         horseShown = false; mounted = false; horse.visible = false; careT = 0;
         moveIn.x = 0; moveIn.z = 0; applyCamera(0);
       },
@@ -1178,6 +1481,7 @@
         if (!spec.dance || mounted) return false;
         if (dancing) return true;
         resting = false; restBlend = 0; pBody.rotation.x = 0;
+        floorY = 0; targetFloorY = 0; // 纵歌场是开阔地面，脚下高度归零
         moveIn.x = 0; moveIn.z = 0; dancing = true; danceAcc = 0; danceDone = false;
         danceAngle = Math.atan2(player.position.z - spec.dance.z, player.position.x - spec.dance.x);
         return true;
@@ -1207,8 +1511,9 @@
           player.position.set(horse.position.x, 1.52, horse.position.z);
           player.rotation.y = horse.rotation.y;
         } else {
-          const p = land.resolve(horse.position.x + 2.2, horse.position.z + 0.6, horse.position);
-          player.position.set(p.x, 0, p.z);
+          const p = resolveMover(horse.position.x + 2.2, horse.position.z + 0.6, horse.position, 0.35, 2.3, true);
+          floorY = targetFloorY = p.feetY;
+          player.position.set(p.x, floorY, p.z);
           hLegs.forEach(leg => { leg.rotation.x = 0; });
         }
         applyCamera(0);
@@ -1216,9 +1521,11 @@
       isMounted: () => mounted,
       getHorsePos: () => horseShown ? { x: horse.position.x, z: horse.position.z } : null,
       debugSetHorse(x, z) { if (Number.isFinite(x) && Number.isFinite(z)) horse.position.set(x, 0, z); },
-      getPlots: () => plotList.map(p => ({ site: p.site, idx: p.idx, id: p.id || null, reserved: !!p.reserved, x: p.x, z: p.z, claimed: p.claimed, hut: p.hut,
+      getPlots: () => plotList.map(p => ({ site: p.site, idx: p.idx, id: p.id || null, reserved: !!p.reserved, x: p.x, z: p.z, face: p.face, claimed: p.claimed, hut: p.hut,
         house: p.house, field: !!p.fieldGroup, fieldStage: p.fieldStage,
         animals: { chicken: p.animals.filter(a => a.kind === "chicken").length, sheep: p.animals.filter(a => a.kind === "sheep").length, rabbit: p.animals.filter(a => a.kind === "rabbit").length } })),
+      getAnimalsDebug: () => plotList.flatMap(p => p.animals.map(a => ({ site: p.site, idx: p.idx, kind: a.kind, x: a.g.position.x, z: a.g.position.z }))),
+      getPlayerFloorY: () => floorY,
       getSites: () => spec.sites.map(s => ({ x: s.x, z: s.z })),
       getHallPos: () => ({ ...spec.hallPos }),
       getCrystalPos: () => ({ ...spec.crystalPos }),
@@ -1261,6 +1568,7 @@
         moveIn.x = 0; moveIn.z = 0;
         interiorReturn = { x: player.position.x, z: player.position.z };
         interiorActive = true;
+        floorY = targetFloorY = 0; // 殿内地面高度由内景系统单独管理
         player.position.set(spec.interior.entry.x, 0, spec.interior.entry.z);
         if (Number.isFinite(spec.interior.entry.yaw)) player.rotation.y = spec.interior.entry.yaw;
         if (lastSky) applySkyState(lastSky);
@@ -1278,8 +1586,9 @@
         moveIn.x = 0; moveIn.z = 0;
         const back = interiorReturn || spec.interior.gate;
         interiorReturn = null;
-        const p = land.resolve(back.x, back.z, player.position);
-        player.position.set(p.x, 0, p.z);
+        const p = resolveMover(back.x, back.z, player.position, 0.35, 2.3, true);
+        floorY = targetFloorY = p.feetY;
+        player.position.set(p.x, floorY, p.z);
         if (lastSky) applySkyState(lastSky);
         camPos.set(p.x + radius * Math.sin(polar) * Math.sin(yaw), 14, p.z + radius * Math.sin(polar) * Math.cos(yaw));
         applyCamera(0);
@@ -1294,6 +1603,10 @@
         bedsAlong: [FIELD_FORWARD - BED_EXTENT, FIELD_FORWARD + BED_EXTENT],
         houseLat: [-PLATFORM_HALF, PLATFORM_HALF],
         bedsLat: [-BED_EXTENT, BED_EXTENT],
+        // 逻辑修复轮：动物区（地块局部系）与房门信息，供回归测试断言边界/可进出
+        animalZone: { ...ANIMAL_ZONE },
+        houseCenterAlong: -HOME_BACK,
+        doorHalfWidth: 0.9,
       }),
       getMapFeatures,
       setFestivalVisible(id) {
@@ -1332,22 +1645,25 @@
         moveIn.x = 0; moveIn.z = 0;
         if (interiorActive && insideInteriorRect(x, z)) {
           const inner = resolveInterior(x, z, player.position);
+          floorY = targetFloorY = 0;
           player.position.set(inner.x, 0, inner.z);
           camPos.set(inner.x + radius * Math.sin(polar) * Math.sin(yaw), 14, inner.z + radius * Math.sin(polar) * Math.cos(yaw));
           applyCamera(0);
           return;
         }
         if (interiorActive) { interiorActive = false; interiorReturn = null; if (lastSky) applySkyState(lastSky); }
-        const p = land.resolve(x, z, player.position);
+        const p = resolveMover(x, z, player.position, mounted ? 0.85 : 0.35, mounted ? 2.9 : 2.3, !mounted);
         if (mounted) horse.position.set(p.x, 0, p.z);
-        player.position.set(p.x, mounted ? 1.52 : 0, p.z);
+        else floorY = targetFloorY = p.feetY;
+        player.position.set(p.x, mounted ? 1.52 : floorY, p.z);
         camPos.set(p.x + radius * Math.sin(polar) * Math.sin(yaw), 14, p.z + radius * Math.sin(polar) * Math.cos(yaw));
         applyCamera(0);
       },
       debugSetPlayer(x, z) {
         if (!Number.isFinite(x) || !Number.isFinite(z)) return;
         if (interiorActive && !insideInteriorRect(x, z)) { interiorActive = false; interiorReturn = null; if (lastSky) applySkyState(lastSky); }
-        player.position.set(x, 0, z);
+        floorY = targetFloorY = interiorActive ? 0 : floorHeightAt(x, z);
+        player.position.set(x, floorY, z);
         camPos.set(x + radius * Math.sin(polar) * Math.sin(yaw), 14, z + radius * Math.sin(polar) * Math.cos(yaw));
         applyCamera(0);
       },

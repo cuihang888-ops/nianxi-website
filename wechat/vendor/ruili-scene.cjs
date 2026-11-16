@@ -547,6 +547,20 @@
         fenceRun(-1, 81, -1, 99);
         fenceRun(-19, 81, -19, 87); // 西侧留 6 宽缺口作牧场门（朝村落）
         fenceRun(-19, 93, -19, 99);
+        // —— 逻辑修复轮：牧场围栏登记为实体（与视觉同界，西侧门洞留空），玩家不再穿栏；
+        // 草棚/食槽/草料垛登记圆碰撞（玩家）；样例羊另有自己的避障表（可钻草棚下躲雨，不穿柱/槽/垛）。——
+        const pastureSolidRects = [
+          { x: -10, z: 81, cos: 1, sin: 0, hx: 9.1, hz: 0.14, y0: 0, y1: 1.05 },
+          { x: -10, z: 99, cos: 1, sin: 0, hx: 9.1, hz: 0.14, y0: 0, y1: 1.05 },
+          { x: -1, z: 90, cos: 1, sin: 0, hx: 0.14, hz: 9.1, y0: 0, y1: 1.05 },
+          { x: -19, z: 84, cos: 1, sin: 0, hx: 0.14, hz: 3.1, y0: 0, y1: 1.05 },
+          { x: -19, z: 96, cos: 1, sin: 0, hx: 0.14, hz: 3.1, y0: 0, y1: 1.05 },
+        ];
+        colliders.push({ x: -16.5, z: 84, r: 2.1 }, { x: -16, z: 95, r: 1.25 }, { x: -5, z: 84, r: 1.0 });
+        const sheepObstacles = [
+          { x: -18.1, z: 82.7, r: 0.3 }, { x: -14.9, z: 82.7, r: 0.3 }, { x: -18.1, z: 85.3, r: 0.3 }, { x: -14.9, z: 85.3, r: 0.3 },
+          { x: -16, z: 95, r: 1.15 }, { x: -5, z: 84, r: 0.95 },
+        ];
         const shelter = new THREE.Group();
         shelter.position.set(-16.5, 0, 84);
         for (const [px, pz] of [[-1.6, -1.3], [1.6, -1.3], [-1.6, 1.3], [1.6, 1.3]]) shelter.add(box(0.16, 2.0, 0.16, M.wood, px, 1.0, pz));
@@ -696,6 +710,14 @@
             }
             sheepState.headTarget = sheepState.mode === "graze" ? 0.72 : 0.05;
             sheepTail.rotation.y = Math.sin(t * 2.2) * 0.15;
+          }
+          sheep.position.x = Math.max(-17.5, Math.min(-2.5, sheep.position.x));
+          sheep.position.z = Math.max(82.5, Math.min(97.5, sheep.position.z));
+          // 逻辑修复轮：样例羊避障——草棚柱/食槽/草料垛都是实体，推出后重新钳回牧场围栏内
+          for (const o of sheepObstacles) {
+            const odx = sheep.position.x - o.x, odz = sheep.position.z - o.z;
+            const orr = o.r + 0.85, od = Math.hypot(odx, odz);
+            if (od < orr && od > 1e-6) { sheep.position.x = o.x + odx / od * orr; sheep.position.z = o.z + odz / od * orr; }
           }
           sheep.position.x = Math.max(-17.5, Math.min(-2.5, sheep.position.x));
           sheep.position.z = Math.max(82.5, Math.min(97.5, sheep.position.z));
@@ -871,7 +893,7 @@
           root.add(cl);
           clouds.push(cl);
         }
-        return { colliders, placement, festivalGroups: { songkran: splash, dengdeng: lamps }, api: sampleApi, animate(dt, t) {
+        return { colliders, placement, solidRects: pastureSolidRects, festivalGroups: { songkran: splash, dengdeng: lamps }, api: sampleApi, animate(dt, t) {
           updateSampleSheep(dt, t);
           if (fishT > 0) {
             fishT += dt;
