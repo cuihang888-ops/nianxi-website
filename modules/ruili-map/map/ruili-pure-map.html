@@ -1,0 +1,1588 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>瑞丽纯地图 · 真实比例版</title>
+<style>
+  html,body{margin:0;padding:0;background:#EFE9D8;}
+  canvas{display:block;}
+</style>
+</head>
+<body>
+<canvas id="cv"></canvas>
+<script>
+"use strict";
+const DATA = {
+ "bounds": {
+  "height": 2700,
+  "maxX": 4050,
+  "maxZ": 750,
+  "minX": -2650,
+  "minZ": -1950,
+  "width": 6700
+ },
+ "elements": [
+  {
+   "bounds": {
+    "maxX": -545,
+    "maxZ": 64,
+    "minX": -575,
+    "minZ": 32
+   },
+   "center": {
+    "x": -560,
+    "z": 48
+   },
+   "gate": {
+    "side": "东",
+    "x": -545,
+    "z": 48
+   },
+   "id": "mianmian-pasture",
+   "inside": {
+    "水槽": {
+     "x": -566,
+     "z": 59
+    },
+    "羊棚": {
+     "d": 6,
+     "w": 9,
+     "x": -569,
+     "z": 37
+    },
+    "草垛": {
+     "x": -550,
+     "z": 38
+    },
+    "食槽": {
+     "x": -552,
+     "z": 57
+    }
+   },
+   "kind": "绵绵牧场羊圈",
+   "note": "弄莫湖北岸草甸，瑞丽大道北侧；南缘距湖岸线约 16–17，南缘距大道中心线约 9–10；东门接牧场路"
+  },
+  {
+   "bounds": {
+    "maxX": -503,
+    "maxZ": 64,
+    "minX": -533,
+    "minZ": 32
+   },
+   "center": {
+    "x": -518,
+    "z": 48
+   },
+   "id": "reserved-homestead",
+   "kind": "预留宅地（空地）",
+   "note": "羊圈以东，隔 12 宽牧场路；南缘距瑞丽大道中心线约 8–9；留空待用户建房（30×32 ≈ 190×200 米）"
+  },
+  {
+   "gate": {
+    "x": 282,
+    "z": -303
+   },
+   "id": "shansi-temple",
+   "inside": {
+    "大殿": {
+     "d": 11,
+     "w": 24,
+     "x": 282,
+     "z": -327
+    },
+    "金塔": {
+     "x": 268,
+     "z": -314
+    },
+    "钟亭": {
+     "d": 6,
+     "w": 6,
+     "x": 295,
+     "z": -311
+    }
+   },
+   "kind": "山寺（姐勒金塔处）",
+   "landmark": {
+    "x": 280,
+    "z": -320
+   },
+   "note": "台地 44×34 以金塔点为中心；南门接塔下路末端 (282,−303)",
+   "precinct": {
+    "bounds": {
+     "maxX": 302,
+     "maxZ": -303,
+     "minX": 258,
+     "minZ": -337
+    },
+    "center": {
+     "x": 280,
+     "z": -320
+    }
+   }
+  },
+  {
+   "id": "lakeshore-path",
+   "kind": "湖岸小径",
+   "note": "羊圈西南角下至弄莫湖北岸的小径（示意）",
+   "points": [
+    [
+     -572,
+     64
+    ],
+    [
+     -573,
+     72
+    ],
+    [
+     -574,
+     79
+    ]
+   ]
+  }
+ ],
+ "meta": {
+  "description": "按真实地理比例重排：1 公里 ≈ 160 游戏单位，勐卯城区为原点 (0,0)，x+ 向东、z+ 向南。弄莫湖 144×80（约 0.9×0.5 公里）；瑞丽江宽约 55（约 340 米）。人文尺度不变：羊圈/宅地 30×32（约 190×200 米），寺台 44×34，大道宽约 7。位置为大概地理落位，非测绘坐标。",
+  "generatedAt": "2026-11-17",
+  "proportion": "1 km ≈ 160 units",
+  "scaledAt": "2026-11-17（真实比例重排，supersedes ×4 放大）",
+  "title": "瑞丽纯地图 · 地理底图（真实比例版）"
+ },
+ "places": [
+  {
+   "name": "瑞丽（勐卯）",
+   "tier": "主要",
+   "x": 0,
+   "z": 0
+  },
+  {
+   "name": "姐勒金塔",
+   "tier": "主要",
+   "x": 280,
+   "z": -320
+  },
+  {
+   "name": "弄莫湖",
+   "tier": "主要",
+   "x": -560,
+   "z": 120
+  },
+  {
+   "name": "姐告",
+   "tier": "主要",
+   "x": 60,
+   "z": 340
+  },
+  {
+   "name": "畹町",
+   "tier": "主要",
+   "x": 3840,
+   "z": 160
+  },
+  {
+   "name": "弄岛",
+   "tier": "主要",
+   "x": -2400,
+   "z": 300
+  },
+  {
+   "name": "莫里瀑布",
+   "tier": "主要",
+   "x": 1700,
+   "z": -1500
+  },
+  {
+   "name": "独树成林",
+   "tier": "主要",
+   "x": 1300,
+   "z": 420
+  },
+  {
+   "name": "莫里温泉",
+   "tier": "次要",
+   "x": 1850,
+   "z": -1380
+  },
+  {
+   "name": "雨林瀑布",
+   "tier": "次要",
+   "x": -800,
+   "z": -700
+  },
+  {
+   "name": "姐告桥·古渡",
+   "tier": "次要",
+   "x": 40,
+   "z": 300
+  },
+  {
+   "name": "喊沙",
+   "tier": "次要",
+   "x": -1280,
+   "z": 220
+  },
+  {
+   "name": "一寨两国",
+   "tier": "次要",
+   "x": -1760,
+   "z": 260
+  },
+  {
+   "name": "大等喊",
+   "tier": "次要",
+   "x": -2080,
+   "z": 280
+  },
+  {
+   "name": "湖畔",
+   "tier": "次要",
+   "x": -500,
+   "z": 84
+  },
+  {
+   "name": "湖南",
+   "tier": "次要",
+   "x": -560,
+   "z": 178
+  },
+  {
+   "name": "塔下",
+   "tier": "次要",
+   "x": 280,
+   "z": -255
+  },
+  {
+   "name": "塔麓",
+   "tier": "次要",
+   "x": 430,
+   "z": -310
+  },
+  {
+   "name": "江畔",
+   "tier": "次要",
+   "x": -900,
+   "z": 205
+  },
+  {
+   "name": "弄岛江畔",
+   "tier": "次要",
+   "x": -2250,
+   "z": 272
+  },
+  {
+   "name": "河谷",
+   "tier": "次要",
+   "x": 320,
+   "z": -350
+  },
+  {
+   "name": "上河谷",
+   "tier": "次要",
+   "x": 480,
+   "z": -1100
+  },
+  {
+   "name": "坝田",
+   "tier": "次要",
+   "x": 1100,
+   "z": 60
+  },
+  {
+   "name": "莫里山麓",
+   "tier": "次要",
+   "x": 950,
+   "z": -780
+  },
+  {
+   "name": "芒令",
+   "tier": "次要",
+   "x": 450,
+   "z": -55
+  }
+ ],
+ "referenceAnchors": [
+  {
+   "name": "集市",
+   "x": 0,
+   "z": 10
+  },
+  {
+   "name": "大厅",
+   "x": -30,
+   "z": -10
+  },
+  {
+   "name": "水晶",
+   "x": 8,
+   "z": 12
+  },
+  {
+   "name": "姐勒金塔",
+   "x": 280,
+   "z": -320
+  },
+  {
+   "name": "弄莫湖",
+   "x": -560,
+   "z": 120
+  },
+  {
+   "name": "独树成林",
+   "x": 1300,
+   "z": 420
+  },
+  {
+   "name": "湖畔村原点",
+   "x": -500,
+   "z": 84
+  },
+  {
+   "name": "瑞丽渡口",
+   "x": 30,
+   "z": 235
+  }
+ ],
+ "rivers": [
+  {
+   "name": "瑞丽江",
+   "points": [
+    [
+     4050,
+     210
+    ],
+    [
+     3200,
+     195
+    ],
+    [
+     2400,
+     225
+    ],
+    [
+     1600,
+     255
+    ],
+    [
+     1000,
+     268
+    ],
+    [
+     700,
+     278
+    ],
+    [
+     300,
+     272
+    ],
+    [
+     0,
+     275
+    ],
+    [
+     -300,
+     278
+    ],
+    [
+     -700,
+     282
+    ],
+    [
+     -1280,
+     270
+    ],
+    [
+     -1760,
+     285
+    ],
+    [
+     -2080,
+     300
+    ],
+    [
+     -2400,
+     325
+    ],
+    [
+     -2650,
+     345
+    ]
+   ],
+   "width": 55
+  },
+  {
+   "name": "南宛河",
+   "points": [
+    [
+     520,
+     -1950
+    ],
+    [
+     500,
+     -1600
+    ],
+    [
+     480,
+     -1100
+    ],
+    [
+     520,
+     -700
+    ],
+    [
+     560,
+     -300
+    ],
+    [
+     620,
+     50
+    ],
+    [
+     700,
+     278
+    ]
+   ],
+   "width": 20
+  },
+  {
+   "name": "团结大沟",
+   "points": [
+    [
+     -495,
+     152
+    ],
+    [
+     -350,
+     205
+    ],
+    [
+     -150,
+     245
+    ],
+    [
+     0,
+     272
+    ]
+   ],
+   "width": 8
+  },
+  {
+   "name": "莫里河",
+   "points": [
+    [
+     1750,
+     -1450
+    ],
+    [
+     1600,
+     -1000
+    ],
+    [
+     1450,
+     -600
+    ],
+    [
+     1300,
+     -200
+    ],
+    [
+     1150,
+     100
+    ],
+    [
+     1000,
+     262
+    ]
+   ],
+   "width": 14
+  }
+ ],
+ "roads": [
+  {
+   "ends": [
+    "往缅甸",
+    "往芒市"
+   ],
+   "id": "ruili-avenue",
+   "level": "trunk",
+   "name": "瑞丽大道",
+   "note": "东西主干（G320 走廊）：西经弄岛出境，东经畹町往芒市；城区段沿弄莫湖北岸擦过",
+   "points": [
+    [
+     -2650,
+     300
+    ],
+    [
+     -2400,
+     285
+    ],
+    [
+     -2080,
+     262
+    ],
+    [
+     -1760,
+     240
+    ],
+    [
+     -1280,
+     200
+    ],
+    [
+     -900,
+     150
+    ],
+    [
+     -700,
+     110
+    ],
+    [
+     -640,
+     80
+    ],
+    [
+     -575,
+     74
+    ],
+    [
+     -500,
+     72
+    ],
+    [
+     -400,
+     50
+    ],
+    [
+     -150,
+     18
+    ],
+    [
+     0,
+     8
+    ],
+    [
+     300,
+     20
+    ],
+    [
+     700,
+     40
+    ],
+    [
+     1100,
+     60
+    ],
+    [
+     1600,
+     90
+    ],
+    [
+     2400,
+     120
+    ],
+    [
+     3200,
+     145
+    ],
+    [
+     3760,
+     175
+    ],
+    [
+     3840,
+     160
+    ],
+    [
+     4050,
+     150
+    ]
+   ]
+  },
+  {
+   "ends": [
+    "",
+    "往陇川"
+   ],
+   "id": "north-road",
+   "level": "trunk",
+   "name": "北线古道",
+   "note": "沿南宛河西岸北上陇川方向",
+   "points": [
+    [
+     0,
+     8
+    ],
+    [
+     150,
+     -150
+    ],
+    [
+     320,
+     -350
+    ],
+    [
+     450,
+     -700
+    ],
+    [
+     480,
+     -1100
+    ],
+    [
+     500,
+     -1600
+    ],
+    [
+     520,
+     -1950
+    ]
+   ]
+  },
+  {
+   "ends": [
+    "",
+    "往莫里"
+   ],
+   "id": "east-road",
+   "level": "trunk",
+   "name": "东线古道",
+   "note": "东北向：经塔下、塔麓、莫里山麓上莫里瀑布",
+   "points": [
+    [
+     0,
+     8
+    ],
+    [
+     180,
+     -180
+    ],
+    [
+     280,
+     -255
+    ],
+    [
+     430,
+     -310
+    ],
+    [
+     700,
+     -500
+    ],
+    [
+     950,
+     -750
+    ],
+    [
+     1250,
+     -1050
+    ],
+    [
+     1500,
+     -1280
+    ],
+    [
+     1700,
+     -1480
+    ]
+   ]
+  },
+  {
+   "ends": [
+    "",
+    "往缅甸"
+   ],
+   "id": "west-river-road",
+   "level": "trunk",
+   "name": "西线江畔道",
+   "note": "沿瑞丽江北岸西行，经江畔、喊沙、一寨两国、大等喊至弄岛",
+   "points": [
+    [
+     0,
+     8
+    ],
+    [
+     -200,
+     120
+    ],
+    [
+     -450,
+     165
+    ],
+    [
+     -700,
+     200
+    ],
+    [
+     -900,
+     235
+    ],
+    [
+     -1280,
+     255
+    ],
+    [
+     -1760,
+     278
+    ],
+    [
+     -2080,
+     292
+    ],
+    [
+     -2400,
+     300
+    ],
+    [
+     -2650,
+     315
+    ]
+   ]
+  },
+  {
+   "ends": [
+    "",
+    "往木姐"
+   ],
+   "id": "jiegan-road",
+   "level": "trunk",
+   "name": "姐告道",
+   "note": "南下经姐告桥·古渡跨瑞丽江至姐告，再往木姐",
+   "points": [
+    [
+     0,
+     8
+    ],
+    [
+     20,
+     140
+    ],
+    [
+     40,
+     300
+    ],
+    [
+     60,
+     340
+    ],
+    [
+     80,
+     520
+    ]
+   ]
+  },
+  {
+   "ends": [
+    "",
+    ""
+   ],
+   "id": "hupan-road",
+   "level": "branch",
+   "name": "湖畔村路",
+   "note": "湖畔起，沿弄莫湖东岸、东南岸至湖南",
+   "points": [
+    [
+     -640,
+     80
+    ],
+    [
+     -570,
+     74
+    ],
+    [
+     -500,
+     84
+    ],
+    [
+     -478,
+     120
+    ],
+    [
+     -500,
+     160
+    ],
+    [
+     -560,
+     178
+    ]
+   ]
+  },
+  {
+   "ends": [
+    "",
+    ""
+   ],
+   "id": "taxia-road",
+   "level": "branch",
+   "name": "塔下路",
+   "note": "塔下村口北上山寺南门",
+   "points": [
+    [
+     280,
+     -255
+    ],
+    [
+     285,
+     -280
+    ],
+    [
+     282,
+     -303
+    ]
+   ]
+  },
+  {
+   "ends": [
+    "",
+    ""
+   ],
+   "id": "dukou-road",
+   "level": "branch",
+   "name": "渡口路",
+   "note": "城区南下瑞丽渡口（江北岸）",
+   "points": [
+    [
+     10,
+     60
+    ],
+    [
+     20,
+     150
+    ],
+    [
+     30,
+     235
+    ]
+   ]
+  },
+  {
+   "ends": [
+    "",
+    ""
+   ],
+   "id": "mangling-road",
+   "level": "branch",
+   "name": "芒令村路",
+   "note": "瑞丽大道向东北至芒令",
+   "points": [
+    [
+     300,
+     20
+    ],
+    [
+     380,
+     -20
+    ],
+    [
+     450,
+     -55
+    ]
+   ]
+  },
+  {
+   "ends": [
+    "",
+    ""
+   ],
+   "id": "nongdao-river-road",
+   "level": "branch",
+   "name": "弄岛江畔村路",
+   "note": "弄岛东至弄岛江畔",
+   "points": [
+    [
+     -2400,
+     300
+    ],
+    [
+     -2320,
+     285
+    ],
+    [
+     -2250,
+     272
+    ]
+   ]
+  },
+  {
+   "ends": [
+    "",
+    ""
+   ],
+   "id": "pasture-lane",
+   "level": "branch",
+   "name": "牧场路",
+   "note": "瑞丽大道北上：羊圈东门与预留宅地之间的村道",
+   "points": [
+    [
+     -539,
+     76
+    ],
+    [
+     -539,
+     64
+    ],
+    [
+     -539,
+     48
+    ]
+   ]
+  },
+  {
+   "ends": [
+    "",
+    ""
+   ],
+   "id": "dushu-road",
+   "level": "branch",
+   "name": "独树村路",
+   "note": "坝田南下，涉渡瑞丽江至独树成林",
+   "points": [
+    [
+     1100,
+     60
+    ],
+    [
+     1180,
+     220
+    ],
+    [
+     1300,
+     410
+    ]
+   ]
+  }
+ ],
+ "terrainZones": [
+  {
+   "cx": 700.0,
+   "cz": -30.0,
+   "name": "勐卯坝子",
+   "points": [
+    [
+     -2650,
+     -560
+    ],
+    [
+     -900,
+     -620
+    ],
+    [
+     200,
+     -560
+    ],
+    [
+     1500,
+     -350
+    ],
+    [
+     2900,
+     -300
+    ],
+    [
+     4050,
+     -260
+    ],
+    [
+     4050,
+     430
+    ],
+    [
+     2900,
+     560
+    ],
+    [
+     1500,
+     470
+    ],
+    [
+     300,
+     430
+    ],
+    [
+     -900,
+     470
+    ],
+    [
+     -2000,
+     520
+    ],
+    [
+     -2650,
+     460
+    ]
+   ],
+   "rx": 3350.0,
+   "rz": 590.0,
+   "shape": "polygon",
+   "type": "坝子平原"
+  },
+  {
+   "cx": 700.0,
+   "cz": -1295.0,
+   "name": "北部山地",
+   "points": [
+    [
+     -2650,
+     -1950
+    ],
+    [
+     4050,
+     -1950
+    ],
+    [
+     4050,
+     -900
+    ],
+    [
+     2400,
+     -820
+    ],
+    [
+     900,
+     -700
+    ],
+    [
+     -300,
+     -640
+    ],
+    [
+     -1500,
+     -700
+    ],
+    [
+     -2650,
+     -900
+    ]
+   ],
+   "rx": 3350.0,
+   "rz": 655.0,
+   "shape": "polygon",
+   "type": "山地"
+  },
+  {
+   "cx": 1850.0,
+   "cz": -1450.0,
+   "name": "莫里山",
+   "points": [
+    [
+     1050,
+     -1950
+    ],
+    [
+     2650,
+     -1950
+    ],
+    [
+     2600,
+     -1050
+    ],
+    [
+     1950,
+     -950
+    ],
+    [
+     1500,
+     -1150
+    ],
+    [
+     1200,
+     -1500
+    ]
+   ],
+   "rx": 800.0,
+   "rz": 500.0,
+   "shape": "polygon",
+   "type": "山地"
+  },
+  {
+   "cx": 1050.0,
+   "cz": -850.0,
+   "name": "莫里雨林",
+   "points": [
+    [
+     700,
+     -1150
+    ],
+    [
+     1250,
+     -1250
+    ],
+    [
+     1450,
+     -800
+    ],
+    [
+     1250,
+     -450
+    ],
+    [
+     850,
+     -500
+    ],
+    [
+     650,
+     -800
+    ]
+   ],
+   "rx": 400.0,
+   "rz": 400.0,
+   "shape": "polygon",
+   "type": "林地"
+  },
+  {
+   "cx": 285.0,
+   "cz": -325.0,
+   "name": "金塔山",
+   "points": [
+    [
+     130,
+     -440
+    ],
+    [
+     280,
+     -465
+    ],
+    [
+     430,
+     -430
+    ],
+    [
+     455,
+     -320
+    ],
+    [
+     400,
+     -215
+    ],
+    [
+     280,
+     -185
+    ],
+    [
+     160,
+     -215
+    ],
+    [
+     115,
+     -320
+    ]
+   ],
+   "rx": 170.0,
+   "rz": 140.0,
+   "shape": "polygon",
+   "type": "丘陵"
+  },
+  {
+   "cx": 700.0,
+   "cz": 605.0,
+   "name": "江南山地（对岸）",
+   "points": [
+    [
+     -2650,
+     470
+    ],
+    [
+     -1200,
+     500
+    ],
+    [
+     200,
+     460
+    ],
+    [
+     1500,
+     500
+    ],
+    [
+     2900,
+     590
+    ],
+    [
+     4050,
+     460
+    ],
+    [
+     4050,
+     750
+    ],
+    [
+     -2650,
+     750
+    ]
+   ],
+   "rx": 3350.0,
+   "rz": 145.0,
+   "shape": "polygon",
+   "type": "山地"
+  },
+  {
+   "cx": -1150.0,
+   "cz": -110.0,
+   "name": "西部林地",
+   "points": [
+    [
+     -1500,
+     -350
+    ],
+    [
+     -850,
+     -300
+    ],
+    [
+     -800,
+     60
+    ],
+    [
+     -1150,
+     130
+    ],
+    [
+     -1500,
+     40
+    ]
+   ],
+   "rx": 350.0,
+   "rz": 240.0,
+   "shape": "polygon",
+   "type": "林地"
+  },
+  {
+   "cx": 2100.0,
+   "cz": -85.0,
+   "name": "东部林地",
+   "points": [
+    [
+     1750,
+     -250
+    ],
+    [
+     2350,
+     -280
+    ],
+    [
+     2450,
+     60
+    ],
+    [
+     1850,
+     110
+    ]
+   ],
+   "rx": 350.0,
+   "rz": 195.0,
+   "shape": "polygon",
+   "type": "林地"
+  },
+  {
+   "cx": -835.0,
+   "cz": -785.0,
+   "name": "西北丘陵",
+   "points": [
+    [
+     -1250,
+     -1050
+    ],
+    [
+     -450,
+     -1000
+    ],
+    [
+     -420,
+     -600
+    ],
+    [
+     -900,
+     -520
+    ],
+    [
+     -1250,
+     -700
+    ]
+   ],
+   "rx": 415.0,
+   "rz": 265.0,
+   "shape": "polygon",
+   "type": "丘陵"
+  }
+ ],
+ "waterBodies": [
+  {
+   "cx": -560,
+   "cz": 120,
+   "name": "弄莫湖",
+   "rx": 72,
+   "rz": 40
+  }
+ ]
+};
+const S = 1.1;                       /* px per unit; 160 units = 1 km -> 176 px per km */
+const B = DATA.bounds;
+const OX = 150, OY = 215;
+const MW = B.width * S, MH = B.height * S;
+const W = OX + MW + 150, H = OY + MH + 235;
+const cv = document.getElementById('cv');
+cv.width = W; cv.height = H;
+const ctx = cv.getContext('2d');
+const X = x => OX + (x - B.minX) * S;
+const Y = z => OY + (z - B.minZ) * S;
+
+function hash(n){ let h = Math.sin(n * 127.1) * 43758.5453; return h - Math.floor(h); }
+function poly(pts){ ctx.beginPath(); pts.forEach((p,i)=> i ? ctx.lineTo(X(p[0]),Y(p[1])) : ctx.moveTo(X(p[0]),Y(p[1]))); ctx.closePath(); }
+function path(pts){ ctx.beginPath(); pts.forEach((p,i)=> i ? ctx.lineTo(X(p[0]),Y(p[1])) : ctx.moveTo(X(p[0]),Y(p[1]))); }
+function txt(t,x,y,size,color,align,weight,spacing){
+  ctx.font = (weight||'600') + ' ' + size + 'px "Yuanti SC","Hiragino Maru Gothic ProN","PingFang SC","Microsoft YaHei",sans-serif';
+  ctx.textAlign = align||'left'; ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round';
+  if(size>=20){ ctx.strokeStyle = 'rgba(253,249,238,0.88)'; ctx.lineWidth = Math.max(3, size/5.5); }
+  const draw = (cx2, ch) => { if(size>=20) ctx.strokeText(ch, cx2, y); ctx.fillStyle = color; ctx.fillText(ch, cx2, y); };
+  if(spacing){ let cx = x; const ws = [...t].map(ch=>ctx.measureText(ch).width); const tot = ws.reduce((a,b)=>a+b,0) + spacing*(t.length-1);
+    if((align||'left')==='center') cx = x - tot/2; [...t].forEach((ch,i)=>{ draw(cx, ch); cx += ws[i] + spacing; }); }
+  else { if(size>=20) ctx.strokeText(t, x, y); ctx.fillStyle = color; ctx.fillText(t, x, y); }
+}
+
+/* paper */
+ctx.fillStyle = '#F7F2E2'; ctx.fillRect(0,0,W,H);
+ctx.strokeStyle = '#C9BFA3'; ctx.lineWidth = 3; ctx.strokeRect(26,26,W-52,H-52);
+
+/* title block */
+txt('瑞丽 · 纯地图', 84, 92, 64, '#3D3626', 'left', '700');
+txt('真实地理比例：1 公里 ≈ 160 游戏单位 · 勐卯城区为原点 · 范围 ' + B.width + ' × ' + B.height + ' 单位（约 ' + (B.width/160).toFixed(0) + ' × ' + (B.height/160).toFixed(1) + ' 公里）· 地图比例 = 世界比例，建筑按真实占地绘制', 84, 152, 30, '#7A6C4E', 'left', '500');
+
+/* compass */
+(function(){
+  const cx = W-150, cy = 118, r = 62;
+  ctx.strokeStyle = '#8A6D3B'; ctx.lineWidth = 2.5;
+  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
+  ctx.fillStyle = '#B8443A';
+  ctx.beginPath(); ctx.moveTo(cx,cy-r+8); ctx.lineTo(cx-11,cy+12); ctx.lineTo(cx+11,cy+12); ctx.closePath(); ctx.fill();
+  txt('北', cx, cy-r-30, 32, '#B8443A', 'center', '700');
+  txt('南', cx, cy+r+30, 26, '#6D5A2E', 'center', '600');
+  txt('西', cx-r-30, cy, 26, '#6D5A2E', 'center', '600');
+  txt('东', cx+r+30, cy, 26, '#6D5A2E', 'center', '600');
+})();
+
+/* valley-floor backdrop (presentation only; zone data unchanged) */
+ctx.fillStyle = '#E7F3C7'; ctx.fillRect(X(B.minX), Y(B.minZ), MW, MH);
+
+/* terrain zones: soft storybook washes, edges feathered via offscreen blur */
+const ZC = { '坝子平原':'#E7F3C7', '林地':'#BEE0A6', '丘陵':'#D3E7B2', '山地':'#ABD096' };
+(function(){
+  const off = document.createElement('canvas'); off.width = W; off.height = H;
+  const octx = off.getContext('2d');
+  DATA.terrainZones.forEach(z=>{
+    octx.beginPath();
+    z.points.forEach((p,i)=> i ? octx.lineTo(X(p[0]),Y(p[1])) : octx.moveTo(X(p[0]),Y(p[1])));
+    octx.closePath(); octx.fillStyle = ZC[z.type]||'#E7F3C7'; octx.fill();
+  });
+  ctx.save();
+  try { ctx.filter = 'blur(7px)'; } catch(e) {}
+  ctx.drawImage(off, 0, 0);
+  ctx.restore();
+})();
+/* mountain relief speckle + forest speckle (deterministic) */
+DATA.terrainZones.forEach((z,zi)=>{
+  const xs = z.points.map(p=>p[0]), zs = z.points.map(p=>p[1]);
+  const minx=Math.min(...xs), maxx=Math.max(...xs), minz=Math.min(...zs), maxz=Math.max(...zs);
+  function inPoly(x,zz){ let inside=false; const pts=z.points;
+    for(let i=0,j=pts.length-1;i<pts.length;j=i++){
+      if(((pts[i][1]>zz)!==(pts[j][1]>zz)) && (x < (pts[j][0]-pts[i][0])*(zz-pts[i][1])/(pts[j][1]-pts[i][1])+pts[i][0])) inside=!inside; }
+    return inside; }
+  if(z.type==='山地'||z.type==='丘陵'){
+    /* soft rolling mounds: pale base + lighter top, no hard edges */
+    for(let i=0;i<210;i++){
+      const x = minx + hash(zi*10000+i*3.7)*(maxx-minx), zz = minz + hash(zi*20000+i*7.3)*(maxz-minz);
+      if(!inPoly(x,zz)) continue;
+      const r = 16 + hash(zi*30000+i*5.1)*26;
+      ctx.fillStyle = 'rgba(148,190,118,0.35)';
+      ctx.beginPath(); ctx.ellipse(X(x),Y(zz),r,r*0.52,0,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(214,238,182,0.5)';
+      ctx.beginPath(); ctx.ellipse(X(x)-r*0.18,Y(zz)-r*0.16,r*0.62,r*0.3,0,0,Math.PI*2); ctx.fill();
+    }
+  }
+  if(z.type==='林地'){
+    /* puffy rounded canopy clusters, two-tone soft greens */
+    for(let i=0;i<300;i++){
+      const x = minx + hash(zi*50000+i*3.3)*(maxx-minx), zz = minz + hash(zi*60000+i*6.9)*(maxz-minz);
+      if(!inPoly(x,zz)) continue;
+      const r = 9 + hash(zi*70000+i*4.3)*11;
+      ctx.fillStyle = 'rgba(84,138,72,0.55)';
+      ctx.beginPath(); ctx.arc(X(x),Y(zz),r,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(140,196,110,0.75)';
+      ctx.beginPath(); ctx.arc(X(x)-r*0.3,Y(zz)-r*0.3,r*0.62,0,Math.PI*2); ctx.fill();
+      ctx.beginPath(); ctx.arc(X(x)+r*0.42,Y(zz)+r*0.1,r*0.45,0,Math.PI*2); ctx.fill();
+    }
+  }
+  if(z.type==='坝子平原'){
+    /* tiny storybook flowers sprinkled through the meadow */
+    const FC = ['#F2A9C4','#FFF6E8','#F7D774','#C3B2E8','#F28BA8'];
+    for(let i=0;i<1500;i++){
+      const x = minx + hash(zi*80000+i*2.9)*(maxx-minx), zz = minz + hash(zi*90000+i*6.1)*(maxz-minz);
+      if(!inPoly(x,zz)) continue;
+      ctx.fillStyle = FC[i%FC.length];
+      ctx.beginPath(); ctx.arc(X(x),Y(zz),2.6,0,Math.PI*2); ctx.fill();
+    }
+  }
+});
+const ZLBL = [ ['勐卯坝子',1500,-170,46],['北部山地',-1250,-1520,50],['莫里山',2080,-1620,46],['莫里雨林',1060,-840,38],
+  ['金塔山',280,-110,32],['江南山地（对岸）',500,625,46],['西部林地',-1180,-150,36],['东部林地',2120,-70,36],['西北丘陵',-860,-790,36] ];
+ZLBL.forEach(l=> txt(l[0], X(l[1]), Y(l[2]), l[3], 'rgba(70,90,50,0.55)', 'center', '600'));
+
+/* rivers (true width) */
+DATA.rivers.forEach(r=>{
+  path(r.points); ctx.strokeStyle = '#F3E9C8'; ctx.lineWidth = Math.max(4, r.width*S+13); ctx.lineCap='round'; ctx.lineJoin='round'; ctx.stroke();
+  path(r.points); ctx.strokeStyle = '#BFE0F5'; ctx.lineWidth = Math.max(3, r.width*S+4); ctx.stroke();
+  path(r.points); ctx.strokeStyle = '#8FC3EE'; ctx.lineWidth = Math.max(1.6, r.width*S*0.68); ctx.stroke();
+});
+txt('瑞 丽 江', X(-1500), Y(352), 46, '#2F6DA3', 'center', '700', 6);
+txt('瑞 丽 江', X(2350), Y(300), 46, '#2F6DA3', 'center', '700', 6);
+txt('南宛河', X(625), Y(-820), 34, '#2F6DA3', 'left', '600');
+txt('莫里河', X(1445), Y(-430), 32, '#2F6DA3', 'left', '600');
+txt('团结大沟', X(-330), Y(242), 24, '#2F6DA3', 'left', '500');
+
+/* lake (true size) */
+DATA.waterBodies.forEach(w=>{
+  ctx.beginPath(); ctx.ellipse(X(w.cx),Y(w.cz),(w.rx+11)*S,(w.rz+11)*S,0,0,Math.PI*2);
+  ctx.fillStyle = '#F3E9C8'; ctx.fill();
+  ctx.beginPath(); ctx.ellipse(X(w.cx),Y(w.cz),(w.rx+4)*S,(w.rz+4)*S,0,0,Math.PI*2);
+  ctx.fillStyle = '#C4E2F5'; ctx.fill();
+  ctx.beginPath(); ctx.ellipse(X(w.cx),Y(w.cz),w.rx*S,w.rz*S,0,0,Math.PI*2);
+  ctx.fillStyle = '#9CCBF0'; ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.75)';
+  for(let i=0;i<26;i++){
+    const a = hash(i*3.77)*Math.PI*2, rr = Math.sqrt(hash(i*9.13));
+    ctx.beginPath(); ctx.arc(X(w.cx)+Math.cos(a)*w.rx*S*0.8*rr, Y(w.cz)+Math.sin(a)*w.rz*S*0.8*rr, 2.2, 0, Math.PI*2); ctx.fill();
+  }
+  txt('弄 莫 湖', X(w.cx-26), Y(w.cz)+4, 36, '#2F6DA3', 'center', '700', 4);
+});
+
+/* roads: trunk prominent, branch thin/pale */
+function drawRoads(level){
+  DATA.roads.filter(r=>r.level===level).forEach(r=>{
+    ctx.lineCap='round'; ctx.lineJoin='round';
+    if(level==='trunk'){
+      ctx.save(); ctx.translate(0,4); path(r.points); ctx.strokeStyle='rgba(160,128,74,0.30)'; ctx.lineWidth=15; ctx.stroke(); ctx.restore();
+      path(r.points); ctx.strokeStyle='#E3C078'; ctx.lineWidth=12.5; ctx.stroke();
+      path(r.points); ctx.strokeStyle='#F7E7B4'; ctx.lineWidth=8.5; ctx.stroke();
+    } else {
+      path(r.points); ctx.strokeStyle='#E8D199'; ctx.lineWidth=5.5; ctx.stroke();
+      path(r.points); ctx.strokeStyle='#F9EFC6'; ctx.lineWidth=3.4; ctx.stroke();
+    }
+  });
+}
+drawRoads('branch'); drawRoads('trunk');
+
+/* road name labels: trunk repeated ~every 1100 units, branch once; exit labels */
+function along(pts, frac){
+  let tot=0; const segs=[];
+  for(let i=0;i<pts.length-1;i++){ const l=Math.hypot(pts[i+1][0]-pts[i][0],pts[i+1][1]-pts[i][1]); segs.push(l); tot+=l; }
+  let want=tot*frac, acc=0;
+  for(let i=0;i<segs.length;i++){ if(acc+segs[i]>=want){ const t=segs[i]?(want-acc)/segs[i]:0;
+    return [pts[i][0]+(pts[i+1][0]-pts[i][0])*t, pts[i][1]+(pts[i+1][1]-pts[i][1])*t]; } acc+=segs[i]; }
+  return pts[pts.length-1];
+}
+DATA.roads.forEach(r=>{
+  let tot=0; for(let i=0;i<r.points.length-1;i++) tot+=Math.hypot(r.points[i+1][0]-r.points[i][0],r.points[i+1][1]-r.points[i][1]);
+  if(r.level==='trunk'){
+    const n = Math.max(2, Math.round(tot/1100));
+    for(let k=0;k<n;k++){ const p = along(r.points,(k+0.5)/n);
+      txt(r.name, X(p[0]), Y(p[1])-16, 27, '#8A6D3B', 'center', '700'); }
+  } else {
+    const BOV = { '牧场路': null, '湖畔村路': null, '塔下路': null, '渡口路': null };
+    if(r.name==='牧场路') txt(r.name, X(-539)+16, Y(60), 21, '#96793F', 'left', '600');
+    else if(r.name==='湖畔村路') txt(r.name, X(-478)+12, Y(126), 21, '#96793F', 'left', '600');
+    else if(r.name==='塔下路') txt(r.name, X(318), Y(-268), 21, '#96793F', 'left', '600');
+    else if(r.name==='渡口路') txt(r.name, X(30)+16, Y(196), 21, '#96793F', 'left', '600');
+    else { const p = along(r.points, BOV[r.name]||0.5);
+      txt(r.name, X(p[0]), Y(p[1])-13, 21, '#96793F', 'center', '600'); }
+  }
+  if(r.ends && r.ends[0]) txt(r.ends[0], X(r.points[0][0]), Y(r.points[0][1])+30, 25, '#6D5A2E', 'center', '700');
+  if(r.ends && r.ends[1]){ const lp=r.points[r.points.length-1]; txt(r.ends[1], X(lp[0]), Y(lp[1])+30, 25, '#6D5A2E', 'center', '700'); }
+});
+
+/* elements at TRUE world size */
+const EL = {}; DATA.elements.forEach(e=> EL[e.id]=e);
+(function(){
+  const pen = EL['mianmian-pasture'], hou = EL['reserved-homestead'], tem = EL['shansi-temple'];
+  /* lakeshore path */
+  const lp = EL['lakeshore-path'];
+  if(lp){ path(lp.points); ctx.strokeStyle='#D8C096'; ctx.lineWidth=3.4; ctx.setLineDash([7,6]); ctx.stroke(); ctx.setLineDash([]); }
+  /* pen: fence + interior marks */
+  const pb = pen.bounds;
+  ctx.fillStyle = '#CDE3AC'; ctx.fillRect(X(pb.minX),Y(pb.minZ),(pb.maxX-pb.minX)*S,(pb.maxZ-pb.minZ)*S);
+  ctx.strokeStyle = '#8A6D3B'; ctx.lineWidth = 3.4; ctx.strokeRect(X(pb.minX),Y(pb.minZ),(pb.maxX-pb.minX)*S,(pb.maxZ-pb.minZ)*S);
+  ctx.fillStyle = '#F7F2E2'; ctx.fillRect(X(pen.gate.x)-2, Y(pen.gate.z-4), 5, 8*S); /* east gate gap */
+  const sh = pen.inside['羊棚'];
+  ctx.fillStyle = '#B09A72'; ctx.fillRect(X(sh.x-sh.w/2),Y(sh.z-sh.d/2),sh.w*S,sh.d*S);
+  txt('绵绵牧场 · 羊圈 30×32', X(pb.maxX)-2, Y(pb.minZ)-30, 24, '#476B2F', 'right', '700');
+  txt('弄莫湖北岸 · 瑞丽大道北侧', X(-618), Y(71), 19, '#7A6C4E', 'center', '500');
+  /* house plot: true-size dashed outline, empty */
+  const hb = hou.bounds;
+  ctx.strokeStyle = '#8A6D3B'; ctx.lineWidth = 3; ctx.setLineDash([10,7]);
+  ctx.strokeRect(X(hb.minX),Y(hb.minZ),(hb.maxX-hb.minX)*S,(hb.maxZ-hb.minZ)*S); ctx.setLineDash([]);
+  txt('预留宅地 30×32（空地）', X(hb.minX)+2, Y(hb.minZ)-30, 24, '#8A6D3B', 'left', '700');
+  /* temple terrace at the pagoda point */
+  const tb = tem.precinct.bounds;
+  ctx.fillStyle = '#EFE3BC'; ctx.fillRect(X(tb.minX),Y(tb.minZ),(tb.maxX-tb.minX)*S,(tb.maxZ-tb.minZ)*S);
+  ctx.strokeStyle = '#8A6D3B'; ctx.lineWidth = 3.2; ctx.strokeRect(X(tb.minX),Y(tb.minZ),(tb.maxX-tb.minX)*S,(tb.maxZ-tb.minZ)*S);
+  const hall = tem.inside['大殿'];
+  ctx.fillStyle = '#7A4A3A'; ctx.fillRect(X(hall.x-hall.w/2),Y(hall.z-hall.d/2),hall.w*S,hall.d*S);
+  const pg = tem.inside['金塔'];
+  ctx.fillStyle = '#C9A227'; ctx.beginPath(); ctx.arc(X(pg.x),Y(pg.z),7,0,Math.PI*2); ctx.fill();
+  txt('山寺（台地 44×34）', X(tem.precinct.center.x), Y(tb.maxZ)+26, 25, '#6D5A2E', 'center', '700');
+})();
+
+/* places: visible markers + labels at true positions */
+const OFF = { '瑞丽（勐卯）':[18,34], '芒令':[-96,-16], '湖畔':[-150,-30], '湖南':[-24,52], '塔下':[16,10], '姐勒金塔':[-186,2],
+  '姐告':[16,20], '姐告桥·古渡':[16,-24], '畹町':[-120,-6], '弄岛':[16,-26], '莫里温泉':[16,6], '独树成林':[16,10] };
+DATA.places.forEach(p=>{
+  if(p.name==='弄莫湖') return;
+  const major = p.tier==='主要';
+  const o = OFF[p.name] || [13,-9];
+  const fs = major?31:23, lx = X(p.x)+o[0], ly = Y(p.z)+o[1];
+  ctx.font = (major?'700':'600') + ' ' + fs + 'px "Yuanti SC","Hiragino Maru Gothic ProN","PingFang SC","Microsoft YaHei",sans-serif';
+  const tw = ctx.measureText(p.name).width;
+  /* sign post + cream plaque */
+  ctx.strokeStyle = '#A98F5F'; ctx.lineWidth = 4;
+  ctx.beginPath(); ctx.moveTo(X(p.x), Y(p.z)); ctx.lineTo(X(p.x), Y(p.z)+13); ctx.stroke();
+  ctx.fillStyle = '#FFFDF4';
+  ctx.strokeStyle = '#B09A72'; ctx.lineWidth = 2.4;
+  ctx.beginPath();
+  const rx = lx-9, ry = ly-fs*0.68, rw = tw+18, rh = fs*1.36, rr2 = 10;
+  ctx.moveTo(rx+rr2,ry); ctx.lineTo(rx+rw-rr2,ry); ctx.quadraticCurveTo(rx+rw,ry,rx+rw,ry+rr2);
+  ctx.lineTo(rx+rw,ry+rh-rr2); ctx.quadraticCurveTo(rx+rw,ry+rh,rx+rw-rr2,ry+rh);
+  ctx.lineTo(rx+rr2,ry+rh); ctx.quadraticCurveTo(rx,ry+rh,rx,ry+rh-rr2);
+  ctx.lineTo(rx,ry+rr2); ctx.quadraticCurveTo(rx,ry,rx+rr2,ry);
+  ctx.closePath(); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = major ? '#C0562F' : '#8A6D3B';
+  ctx.beginPath(); ctx.arc(X(p.x),Y(p.z), major?7.5:5, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#FFFDF4'; ctx.lineWidth = 2.2; ctx.stroke();
+  txt(p.name, lx, ly, fs, '#4A3B26', 'left', major?'700':'600');
+});
+
+/* km scale bar: 1 km = 160 units = 176 px */
+(function(){
+  const bx = 84, by = H-118, seg = 160*S;
+  txt('比例尺', bx, by-34, 24, '#6D5A2E', 'left', '700');
+  for(let i=0;i<3;i++){ ctx.fillStyle = i%2? '#F7F2E2':'#8A6D3B'; ctx.fillRect(bx+i*seg, by, seg, 13); }
+  ctx.strokeStyle = '#8A6D3B'; ctx.lineWidth = 2; ctx.strokeRect(bx, by, seg*3, 13);
+  for(let i=0;i<=3;i++) txt(String(i), bx+i*seg, by+34, 22, '#6D5A2E', 'center', '600');
+  txt('公里（1 公里 = 160 单位）', bx+seg*3+18, by+8, 23, '#6D5A2E', 'left', '600');
+  txt('占地注记：羊圈 / 宅地 30×32 单位 ≈ 190×200 米 · 寺台 44×34 单位 ≈ 275×210 米 · 瑞丽江宽约 55 单位 ≈ 340 米', bx, by+76, 24, '#7A6C4E', 'left', '500');
+})();
+
+/* legend */
+(function(){
+  const lx = W-560, ly = H-205;
+  ctx.fillStyle = 'rgba(255,253,244,0.92)'; ctx.fillRect(lx,ly,470,150);
+  ctx.strokeStyle = '#C9BFA3'; ctx.lineWidth = 2; ctx.strokeRect(lx,ly,470,150);
+  txt('图例', lx+22, ly+30, 25, '#3D3626', 'left', '700');
+  ctx.strokeStyle='#C2A15C'; ctx.lineWidth=9; ctx.beginPath(); ctx.moveTo(lx+22,ly+66); ctx.lineTo(lx+86,ly+66); ctx.stroke();
+  txt('主干道（宽约 7 单位）', lx+100, ly+66, 22, '#4A4232', 'left', '500');
+  ctx.strokeStyle='#D3BC85'; ctx.lineWidth=5; ctx.beginPath(); ctx.moveTo(lx+22,ly+102); ctx.lineTo(lx+86,ly+102); ctx.stroke();
+  txt('支路', lx+100, ly+102, 22, '#4A4232', 'left', '500');
+  ctx.fillStyle='#8FBBE2'; ctx.fillRect(lx+22,ly+124,64,14);
+  txt('河流 / 湖泊（真实宽度）', lx+100, ly+131, 22, '#4A4232', 'left', '500');
+  txt('位置为大概地理落位，非测绘坐标 · 纯地理底图：无价格 / 地块 / 玩法字段', lx-16, ly+178, 22, '#7A6C4E', 'right', '500');
+})();
+
+window.__ready = true;
+</script>
+</body>
+</html>
