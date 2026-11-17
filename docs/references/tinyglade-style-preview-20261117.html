@@ -1,0 +1,642 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>林间小世界 · 风格预览</title>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;overflow:hidden;background:#dfe7e4;
+    font:12px/1.5 -apple-system,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;
+    -webkit-font-smoothing:antialiased;color:#4c4537}
+  canvas{position:fixed;inset:0;display:block;touch-action:none;cursor:grab}
+  canvas:active{cursor:grabbing}
+  #ui{position:fixed;left:14px;bottom:14px;width:268px;padding:11px 12px 12px;border-radius:15px;
+    background:rgba(252,249,242,.9);border:1px solid rgba(126,108,80,.2);
+    box-shadow:0 10px 30px rgba(72,58,36,.16);backdrop-filter:blur(12px);user-select:none}
+  #ui h1{font-size:12.5px;font-weight:600;letter-spacing:.2px;margin-bottom:9px;
+    display:flex;align-items:center;gap:7px;color:#3f3a2e}
+  #ui h1::before{content:"";width:8px;height:8px;border-radius:50%;
+    background:linear-gradient(160deg,#e0a86a,#c8794f);box-shadow:0 0 0 3px rgba(200,121,79,.14)}
+  .row{margin-top:9px}
+  .row>span{display:block;font-size:10.5px;color:#8a7f68;margin-bottom:5px;letter-spacing:.3px}
+  .row>span b{float:right;font-weight:400;color:#a2967c;font-variant-numeric:tabular-nums}
+  .pills{display:flex;gap:5px}
+  button{font:inherit;font-size:11.5px;padding:6px 0 5px;flex:1;border-radius:8px;cursor:pointer;
+    border:1px solid rgba(126,108,80,.2);background:rgba(255,255,255,.55);color:#6a6152;
+    transition:.15s}
+  button:hover{background:#fff}
+  button.on{background:linear-gradient(165deg,#8f6a4b,#79573d);color:#fdf7ec;
+    border-color:#6d4f37;box-shadow:0 2px 6px rgba(120,88,60,.28)}
+  input[type=range]{-webkit-appearance:none;width:100%;height:14px;background:none;cursor:pointer}
+  input[type=range]::-webkit-slider-runnable-track{height:4px;border-radius:2px;
+    background:linear-gradient(90deg,#bea57d,#d6c4a6)}
+  input[type=range]::-webkit-slider-thumb{-webkit-appearance:none;width:13px;height:13px;
+    margin-top:-4.5px;border-radius:50%;background:#fff;border:1px solid #7a5f45;
+    box-shadow:0 1px 3px rgba(80,60,40,.3)}
+  .foot{display:flex;gap:6px;margin-top:11px}
+  .foot button{padding:6px 10px;flex:0 0 auto}
+  .foot .sp{margin-left:auto;font-size:10px;color:#a2967c;align-self:center}
+  .tip{margin-top:8px;font-size:10px;color:#a79b83}
+</style>
+</head>
+<body>
+<canvas id="c"></canvas>
+<div id="ui">
+  <h1>林间小世界 · 风格预览</h1>
+  <div class="row"><span>时段</span>
+    <div class="pills" id="pTime">
+      <button data-v="dawn">清晨</button><button data-v="noon" class="on">正午</button>
+      <button data-v="dusk">黄昏</button><button data-v="night">夜晚</button>
+    </div></div>
+  <div class="row"><span>季节</span>
+    <div class="pills" id="pSeason">
+      <button data-v="spring">春</button><button data-v="summer" class="on">夏</button>
+      <button data-v="autumn">秋</button><button data-v="winter">冬</button>
+    </div></div>
+  <div class="row"><span>雾气 <b id="vFog">45%</b></span>
+    <input type="range" id="sFog" min="0" max="100" value="45"></div>
+  <div class="row"><span>植被密度 <b id="vVeg">70%</b></span>
+    <input type="range" id="sVeg" min="0" max="100" value="70"></div>
+  <div class="foot">
+    <button id="btnReroll">换个布局</button>
+    <button id="btnRot" class="on">自动旋转</button>
+    <span class="sp" id="stat">—</span>
+  </div>
+  <div class="tip">拖动旋转 · 滚轮缩放</div>
+</div>
+<script>
+const cv=document.getElementById('c'),ctx=cv.getContext('2d');
+const TAU=Math.PI*2;
+let W=0,H=0,DPR=1;
+function resize(){
+  DPR=Math.min(2,devicePixelRatio||1);W=innerWidth;H=innerHeight;
+  cv.width=W*DPR;cv.height=H*DPR;cv.style.width=W+'px';cv.style.height=H+'px';
+  ctx.setTransform(DPR,0,0,DPR,0,0);
+}
+addEventListener('resize',resize);
+
+/* ---------- 数学小工具 ---------- */
+const cl=(v,a,b)=>v<a?a:v>b?b:v;
+const lerp=(a,b,t)=>a+(b-a)*t;
+const ss=(a,b,x)=>{const t=cl((x-a)/(b-a),0,1);return t*t*(3-2*t);};
+function sub(a,b){return{x:a.x-b.x,y:a.y-b.y,z:a.z-b.z};}
+function dot(a,b){return a.x*b.x+a.y*b.y+a.z*b.z;}
+function crs(a,b){return{x:a.y*b.z-a.z*b.y,y:a.z*b.x-a.x*b.z,z:a.x*b.y-a.y*b.x};}
+function nrm(a){const l=Math.hypot(a.x,a.y,a.z)||1;return{x:a.x/l,y:a.y/l,z:a.z/l};}
+function hexc(h){const n=parseInt(h.slice(1),16);return[(n>>16&255)/255,(n>>8&255)/255,(n&255)/255];}
+function mix(a,b,t){return[a[0]+(b[0]-a[0])*t,a[1]+(b[1]-a[1])*t,a[2]+(b[2]-a[2])*t];}
+function mul(a,k){return[a[0]*k,a[1]*k,a[2]*k];}
+function rng(s){return()=>{s=s+0x6D2B79F5|0;let t=Math.imul(s^s>>>15,1|s);
+  t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296;};}
+
+/* ---------- 调色：风格的核心就这几张表 ---------- */
+const THEMES={
+  dawn:{sky:['#8fb3c9','#cfd9d2','#f2e7cf'],sun:nrm({x:.55,y:.42,z:.72}),
+        amb:[.54,.59,.68],sunc:[1.02,.93,.78],sunI:.62,fog:'#dfe5dd',fogX:0,win:.18,cloud:'#dde5e4'},
+  noon:{sky:['#79b8dd','#b6d9e8','#e7f1ee'],sun:nrm({x:.34,y:.86,z:.38}),
+        amb:[.56,.61,.66],sunc:[1,.99,.94],sunI:.74,fog:'#dcebe6',fogX:0,win:0,cloud:'#ffffff'},
+  dusk:{sky:['#5f5b88','#c9857a','#f7c48d'],sun:nrm({x:-.72,y:.24,z:.4}),
+        amb:[.44,.4,.48],sunc:[1.18,.72,.42],sunI:.82,fog:'#e3b193',fogX:.12,win:.62,cloud:'#eeae98'},
+  night:{sky:['#0a1022','#182440','#3a4866'],sun:nrm({x:-.4,y:.52,z:.52}),
+        amb:[.17,.21,.33],sunc:[.52,.62,.98],sunI:.3,fog:'#28324c',fogX:.45,win:1,cloud:'#2b3450'}
+};
+const SEASONS={
+  spring:{g:['#8ec075','#a6ce86'],leaf:['#9ccb70','#7fb45e','#b6da8d'],trunk:'#8b6750',
+    stone:'#f1e8d5',ston2:'#ded1b8',roofA:'#cd7f5e',roofB:'#8e9fb6',
+    path:'#e2d5b8',rock:'#bab4a6',wood:'#6d4c3a',snow:false},
+  summer:{g:['#79b060','#8fc274'],leaf:['#6fa758','#58924a','#8bbf66'],trunk:'#7d5c46',
+    stone:'#f3ebd9',ston2:'#e2d6be',roofA:'#c86f50',roofB:'#8697b0',
+    path:'#dccfae',rock:'#b2ac9f',wood:'#64452f',snow:false},
+  autumn:{g:['#9caa62','#b5b678'],leaf:['#d99a4e','#c96b3f','#e2b95f'],trunk:'#7a5741',
+    stone:'#eee2ca',ston2:'#dbc9ab',roofA:'#b3603f',roofB:'#8a8fa0',
+    path:'#dcc9a4',rock:'#b0a696',wood:'#5f4030',snow:false},
+  winter:{g:['#e6eef1','#d8e4e9'],leaf:['#c3d3da','#b2c6d1','#dbe7ec'],trunk:'#6e5a4c',
+    stone:'#f5f2eb',ston2:'#e4dfd4',roofA:'#c2c2c0',roofB:'#a9b2bd',
+    path:'#e8edee',rock:'#c3c6c4',wood:'#5a4a3e',snow:true}
+};
+
+const state={time:'noon',season:'summer',fog:.45,veg:.7,scale:10,seed:20261117,auto:true};
+let TH=THEMES.noon,SE=SEASONS.summer;
+
+/* ---------- 三角形缓冲 ---------- */
+let TRI=[],FOOT=[],PATH=[];
+let SXA,SYA,RA,GA,BA,DEP;
+
+function shade(n,c){
+  let col=c;
+  if(SE.snow){const s=ss(.42,.9,n.y);if(s>.001)col=mix(c,[.95,.97,1],s*.85);}
+  const d=Math.max(0,dot(n,TH.sun));
+  const k=TH.sunI*(.2+.62*Math.pow(d,.85));
+  return[col[0]*(TH.amb[0]+TH.sunc[0]*k),
+         col[1]*(TH.amb[1]+TH.sunc[1]*k),
+         col[2]*(TH.amb[2]+TH.sunc[2]*k)];
+}
+function tri(a,b,c,col,hint,dbl,emis){
+  const n0=crs(sub(b,a),sub(c,a));
+  let L=Math.hypot(n0.x,n0.y,n0.z);if(L<1e-7)return;
+  let n={x:n0.x/L,y:n0.y/L,z:n0.z/L};
+  const X=(a.x+b.x+c.x)/3,Y=(a.y+b.y+c.y)/3,Z=(a.z+b.z+c.z)/3;
+  if(hint&&(n.x*(X-hint.x)+n.y*(Y-hint.y)+n.z*(Z-hint.z))<0){
+    const t=b;b=c;c=t;n={x:-n.x,y:-n.y,z:-n.z};
+  }
+  TRI.push({ax:a.x,ay:a.y,az:a.z,bx:b.x,by:b.y,bz:b.z,cx:c.x,cy:c.y,cz:c.z,
+    nx:n.x,ny:n.y,nz:n.z,X,Y,Z,c:emis?col:shade(n,col),dbl:dbl?1:0});
+}
+function quad(a,b,c,d,col,hint,dbl,emis){tri(a,b,c,col,hint,dbl,emis);tri(a,c,d,col,hint,dbl,emis);}
+
+function box(cx,cy,cz,sx,sy,sz,ry,col){
+  const C=Math.cos(ry),S=Math.sin(ry);
+  const P=(x,y,z)=>({x:cx+x*C+z*S,y:cy+y,z:cz-x*S+z*C});
+  const hx=sx/2,hy=sy/2,hz=sz/2,o={x:cx,y:cy,z:cz};
+  const A=P(-hx,-hy,-hz),B=P(hx,-hy,-hz),Cc=P(hx,hy,-hz),D=P(-hx,hy,-hz);
+  const E=P(-hx,-hy,hz),F=P(hx,-hy,hz),G=P(hx,hy,hz),Hp=P(-hx,hy,hz);
+  quad(A,B,Cc,D,col,o);quad(F,E,Hp,G,col,o);quad(E,A,D,Hp,col,o);
+  quad(B,F,G,Cc,col,o);quad(D,Cc,G,Hp,col,o);quad(E,F,B,A,col,o);
+}
+function cyl(cx,cz,y0,y1,r0,r1,seg,col,capTop){
+  const o={x:cx,y:(y0+y1)/2,z:cz};
+  for(let i=0;i<seg;i++){
+    const a0=i/seg*TAU,a1=(i+1)/seg*TAU;
+    quad({x:cx+Math.cos(a0)*r0,y:y0,z:cz+Math.sin(a0)*r0},
+         {x:cx+Math.cos(a1)*r0,y:y0,z:cz+Math.sin(a1)*r0},
+         {x:cx+Math.cos(a1)*r1,y:y1,z:cz+Math.sin(a1)*r1},
+         {x:cx+Math.cos(a0)*r1,y:y1,z:cz+Math.sin(a0)*r1},col,o);
+  }
+  if(capTop){
+    const tp={x:cx,y:y1,z:cz},dn={x:cx,y:y1-1,z:cz};
+    for(let i=0;i<seg;i++){
+      const a0=i/seg*TAU,a1=(i+1)/seg*TAU;
+      tri(tp,{x:cx+Math.cos(a0)*r1,y:y1,z:cz+Math.sin(a0)*r1},
+             {x:cx+Math.cos(a1)*r1,y:y1,z:cz+Math.sin(a1)*r1},col,dn);
+    }
+  }
+}
+function cone(cx,cz,y0,y1,r,seg,col){
+  const o={x:cx,y:(y0+y1)/2,z:cz},ap={x:cx,y:y1,z:cz};
+  for(let i=0;i<seg;i++){
+    const a0=i/seg*TAU,a1=(i+1)/seg*TAU;
+    tri({x:cx+Math.cos(a0)*r,y:y0,z:cz+Math.sin(a0)*r},
+        {x:cx+Math.cos(a1)*r,y:y0,z:cz+Math.sin(a1)*r},ap,col,o);
+  }
+}
+function gable(cx,cy,cz,w,d,h,ry,col){
+  const C=Math.cos(ry),S=Math.sin(ry);
+  const P=(x,y,z)=>({x:cx+x*C+z*S,y:cy+y,z:cz-x*S+z*C});
+  const hw=w/2,hd=d/2,o=P(0,h*.32,0);
+  const b1=P(-hw,0,-hd),b2=P(hw,0,-hd),b3=P(hw,0,hd),b4=P(-hw,0,hd);
+  const r1=P(0,h,-hd),r2=P(0,h,hd);
+  quad(b1,b4,r2,r1,col,o);quad(b3,b2,r1,r2,col,o);
+  tri(b1,b2,r1,col,o);tri(b4,b3,r2,col,o);
+}
+function blob(cx,cy,cz,r,col,seg,ring,jit,R,sy){
+  sy=sy||1;
+  const rows=[];
+  for(let i=0;i<=ring;i++){
+    const phi=i/ring*Math.PI,row=[];
+    for(let j=0;j<seg;j++){
+      const t=j/seg*TAU,rr=r*(1+(R()-.5)*jit);
+      row.push({x:cx+Math.sin(phi)*Math.cos(t)*rr,y:cy+Math.cos(phi)*rr*sy,
+                z:cz+Math.sin(phi)*Math.sin(t)*rr});
+    }
+    rows.push(row);
+  }
+  const o={x:cx,y:cy,z:cz};
+  for(let i=0;i<ring;i++)for(let j=0;j<seg;j++){
+    const j2=(j+1)%seg;
+    tri(rows[i][j],rows[i][j2],rows[i+1][j2],col,o);
+    tri(rows[i][j],rows[i+1][j2],rows[i+1][j],col,o);
+  }
+}
+
+/* ---------- 地形 / 路径 ---------- */
+function gh(x,z){
+  const d=Math.hypot(x,z),f=ss(10.5,26,d);
+  return(Math.sin(x*.14+1.3)*.85+Math.cos(z*.11-.7)*.7+Math.sin((x+z)*.06)*.55)*f;
+}
+function distPath(x,z){
+  let best=1e9;
+  for(let i=0;i<PATH.length-1;i++){
+    const a=PATH[i],b=PATH[i+1];
+    const dx=b.x-a.x,dz=b.z-a.z,L=dx*dx+dz*dz||1;
+    let t=((x-a.x)*dx+(z-a.z)*dz)/L;t=cl(t,0,1);
+    const d=Math.hypot(x-(a.x+dx*t),z-(a.z+dz*t));
+    if(d<best)best=d;
+  }
+  return best;
+}
+
+/* ---------- 场景生成 ---------- */
+function build(){
+  TRI=[];FOOT=[];PATH=[];
+  TH=THEMES[state.time];SE=SEASONS[state.season];
+  const R=rng(state.seed);
+  const stone=hexc(SE.stone),ston2=hexc(SE.ston2),roofA=hexc(SE.roofA),
+        roofB=hexc(SE.roofB),wood=hexc(SE.wood);
+
+  const gate=castle(R,stone,ston2,roofA,roofB,wood);
+
+  const ga=Math.atan2(gate.z,gate.x),gr=Math.hypot(gate.x,gate.z);
+  for(let t=0;t<=1.0001;t+=.08){
+    const rr=gr+t*15,aa=ga+Math.sin(t*3.2)*.34+t*.1;
+    PATH.push({x:Math.cos(aa)*rr,z:Math.sin(aa)*rr});
+  }
+  for(let i=0;i<3;i++){
+    const a=ga+Math.PI+(i-1)*.85+(R()-.5)*.35,r=15+R()*6;
+    const hx=Math.cos(a)*r,hz=Math.sin(a)*r;
+    if(distPath(hx,hz)<3)continue;
+    hut(R,hx,hz,-a+Math.PI/2+(R()-.5)*.5,2.9+R()*1.1,2.6+R()*.9,
+        2+R()*.5,1.2+R()*.4,stone,roofA,roofB,wood);
+  }
+  ruin(R,ga+2.3,28,stone,ston2);
+  ground(R);
+  far(R);
+  veg(R);
+
+  const n=TRI.length;
+  SXA=new Float32Array(n*3);SYA=new Float32Array(n*3);
+  RA=new Uint8Array(n*3);GA=new Uint8Array(n*3);BA=new Uint8Array(n*3);
+  DEP=new Float32Array(n);
+}
+
+function castle(R,stone,ston2,roofA,roofB,wood){
+  const S=state.scale,n=8,pts=[];
+  for(let i=0;i<n;i++){
+    const a=(i+.45)/n*TAU+(R()-.5)*.1,r=S*(.88+R()*.26);
+    pts.push({x:Math.cos(a)*r,z:Math.sin(a)*r,a});
+  }
+  let gi=0,gb=-1e9;
+  pts.forEach((p,i)=>{if(p.z>gb){gb=p.z;gi=i;}});
+  const H0=2.7+R()*.6,TH0=.85;
+
+  for(let i=0;i<n;i++){
+    const p=pts[i],q=pts[(i+1)%n];
+    const dx=q.x-p.x,dz=q.z-p.z,len=Math.hypot(dx,dz),ang=Math.atan2(dx,dz);
+    const mx=(p.x+q.x)/2,mz=(p.z+q.z)/2;
+    box(mx,H0/2,mz,TH0,H0,len,ang,stone);
+    box(mx,H0+.09,mz,TH0*1.2,.18,len,ang,ston2);
+    FOOT.push({x:mx,z:mz,r:len*.52+1.1,s:.45});
+    if(i!==gi&&R()<.72){
+      const cnt=Math.max(2,Math.floor(len/1.15));
+      for(let k=0;k<cnt;k++){
+        const t=(k+.5)/cnt,bx=lerp(p.x,q.x,t),bz=lerp(p.z,q.z,t);
+        if(Math.hypot(bx-pts[gi].x,bz-pts[gi].z)<2.4)continue;
+        box(bx,H0+.36,bz,TH0*.88,.5,.58,ang,stone);
+      }
+    }
+  }
+  for(let i=0;i<n;i++){
+    if(i===gi||R()>.62)continue;
+    const v=pts[i],hh=H0+1+R()*.8,rad=.95+R()*.25;
+    cyl(v.x,v.z,0,hh,rad,rad*.95,9,stone);
+    cyl(v.x,v.z,hh-.16,hh+.12,rad*1.22,rad*1.22,9,ston2,true);
+    cone(v.x,v.z,hh+.12,hh+1.55+R()*.5,rad*1.35,9,R()<.5?roofA:roofB);
+    FOOT.push({x:v.x,z:v.z,r:rad*2,s:.6});
+  }
+  const g=pts[gi],tx=-Math.sin(g.a),tz=Math.cos(g.a);
+  for(const s of[-1,1]){
+    const px=g.x+tx*1.95*s,pz=g.z+tz*1.95*s,ghh=H0+1.15;
+    cyl(px,pz,0,ghh,.92,.86,9,stone);
+    cyl(px,pz,ghh-.15,ghh+.13,1.14,1.14,9,ston2,true);
+    cone(px,pz,ghh+.13,ghh+1.5,1.26,9,roofA);
+    FOOT.push({x:px,z:pz,r:2,s:.62});
+  }
+  box(g.x,H0+.58,g.z,.92,.52,4.6,-g.a,ston2);
+  box(g.x,H0+.86,g.z,.72,.16,4.9,-g.a,stone);
+
+  const kh=7.6+R()*1.8;
+  cyl(0,0,0,kh,1.95,1.78,11,stone);
+  cyl(0,0,kh-.22,kh+.16,2.25,2.25,11,ston2,true);
+  cone(0,0,kh+.16,kh+3.1,2.55,11,roofB);
+  FOOT.push({x:0,z:0,r:4.2,s:.72});
+
+  const winC=mix(hexc('#4d3d34'),hexc('#ffcf86'),TH.win);
+  for(let w=0;w<7;w++){
+    const wa=w/7*TAU+.3,wy=2.4+Math.floor(R()*3)*1.6;
+    if(wy>kh-1)continue;
+    winCyl(0,0,wy,1.83,wa,.34,.62,winC);
+  }
+  hut(R,3.6,2.4,.55,2.6,2.2,1.9,1.05,stone,roofA,roofB,wood);
+  return{x:g.x,z:g.z};
+}
+
+function winCyl(cx,cz,y,r,ang,w,h,col){
+  const nx=Math.cos(ang),nz=Math.sin(ang),tx=-nz,tz=nx;
+  const px=cx+nx*(r+.03),pz=cz+nz*(r+.03);
+  const A={x:px+tx*w/2,y:y-h/2,z:pz+tz*w/2},B={x:px-tx*w/2,y:y-h/2,z:pz-tz*w/2};
+  const C={x:px-tx*w/2,y:y+h/2,z:pz-tz*w/2},D={x:px+tx*w/2,y:y+h/2,z:pz+tz*w/2};
+  quad(A,B,C,D,col,{x:cx,y,z:cz},0,1);
+}
+
+function hut(R,x,z,ry,w,d,h,rh,stone,roofA,roofB,wood){
+  const y=gh(x,z),wall=mix(stone,hexc('#e8dcc4'),R()*.5),rf=R()<.55?roofA:roofB;
+  box(x,y-0.8+(h+0.8)/2,z,w,h+0.8,d,ry,wall);
+  gable(x,y+h,z,w+.42,d+.34,rh,ry,rf);
+  const C=Math.cos(ry),S=Math.sin(ry);
+  const P=(lx,ly,lz)=>({x:x+lx*C+lz*S,y:y+ly,z:z-lx*S+lz*C});
+  const dz=d/2+.02,dw=.62,dh=Math.min(1.2,h*.62);
+  quad(P(-dw/2,.02,dz),P(dw/2,.02,dz),P(dw/2,dh,dz),P(-dw/2,dh,dz),wood,{x,y:y+.6,z});
+  const wc=mix(hexc('#4d3d34'),hexc('#ffcf86'),TH.win),wx=w*.28;
+  quad(P(wx-.24,h*.45,dz+.02),P(wx+.24,h*.45,dz+.02),
+       P(wx+.24,h*.45+.52,dz+.02),P(wx-.24,h*.45+.52,dz+.02),
+       wc,{x,y:y+h*.6,z},0,1);
+  const ch=P(w*.28,0,-d*.12);
+  box(ch.x,y+h+rh*.55+.55,ch.z,.34,1.5,.34,ry,hexc('#c9b9a3'));
+  FOOT.push({x,z,r:Math.max(w,d)*.82,s:.55});
+}
+
+function ruin(R,ang,radius,stone,ston2){
+  const x=Math.cos(ang)*radius,z=Math.sin(ang)*radius,y=gh(x,z),h=4.2+R()*1.6;
+  cyl(x,z,y-.6,y+h,1.55,1.35,9,stone);
+  for(let i=0;i<9;i++){
+    if(R()<.45)continue;
+    const a=i/9*TAU;
+    box(x+Math.cos(a)*1.45,y+h+.22,z+Math.sin(a)*1.45,.42,.44,.42,a,ston2);
+  }
+  for(let k=0;k<14;k++){
+    if(R()>.75)continue;
+    const bx=x+(R()-.5)*5.2,bz=z+(R()-.5)*5.2;
+    blob(bx,gh(bx,bz)+.12,bz,.28+R()*.32,stone,5,3,.35,R,.55);
+  }
+  FOOT.push({x,z,r:3.4,s:.55});
+}
+
+function ground(R){
+  const RINGS=14,SEGS=40,RMAX=85,radii=[];
+  for(let i=0;i<=RINGS;i++)radii.push(RMAX*Math.pow(i/RINGS,1.9));
+  const gA=hexc(SE.g[0]),gB=hexc(SE.g[1]),pC=hexc(SE.path);
+  const pt=(r,a)=>{const p={x:Math.cos(a)*r,z:Math.sin(a)*r};p.y=gh(p.x,p.z);return p;};
+  for(let i=0;i<RINGS;i++){
+    const r0=radii[i],r1=radii[i+1];
+    for(let j=0;j<SEGS;j++){
+      const a0=j/SEGS*TAU,a1=(j+1)/SEGS*TAU;
+      const A=pt(r0,a0),B=pt(r1,a0),C=pt(r1,a1),D=pt(r0,a1);
+      const mx=(A.x+B.x+C.x+D.x)/4,mz=(A.z+B.z+C.z+D.z)/4;
+      let base=mix(gA,gB,R());
+      const pf=ss(1.9,.75,distPath(mx,mz));
+      if(pf>0)base=mix(base,mul(pC,.94+R()*.12),pf);
+      let ao=1;
+      for(const f of FOOT)ao-=f.s*ss(f.r*1.35,f.r*.35,Math.hypot(mx-f.x,mz-f.z))*.62;
+      base=mul(base,cl(ao,.4,1.03));
+      const hint={x:mx,y:-40,z:mz};
+      tri(A,B,C,base,hint,1);tri(A,C,D,base,hint,1);
+    }
+  }
+}
+
+function far(R){
+  const fogC=hexc(TH.fog);
+  for(let i=0;i<14;i++){
+    const a=i/14*TAU+R()*.2,r=62+R()*22;
+    const x=Math.cos(a)*r,z=Math.sin(a)*r;
+    blob(x,-2,z,13+R()*8,mix(hexc(SE.g[1]),fogC,.55+R()*.16),7,3,.18,R,.3);
+  }
+  for(let k=0;k<70;k++){
+    const a=R()*TAU,r=40+R()*24,x=Math.cos(a)*r,z=Math.sin(a)*r;
+    cone(x,z,gh(x,z),gh(x,z)+3.2*(1.1+R()*.9),1.05*(1.1+R()*.9),6,
+      mix(hexc(SE.leaf[1]),fogC,.35+R()*.25));
+  }
+}
+
+function veg(R){
+  const leaf=SE.leaf.map(hexc),trunkC=hexc(SE.trunk),rockC=hexc(SE.rock);
+  const gA=hexc(SE.g[0]),gB=hexc(SE.g[1]);
+  const nTree=Math.round(lerp(12,48,state.veg));
+  let placed=0,guard=0;
+  while(placed<nTree&&guard<4000){
+    guard++;
+    const a=R()*TAU,r=12+Math.pow(R(),.75)*26;
+    const x=Math.cos(a)*r,z=Math.sin(a)*r;
+    if(distPath(x,z)<2.6)continue;
+    addTree(R,x,z,.8+R()*.85,leaf,trunkC);placed++;
+  }
+  for(let i=0;i<Math.round(lerp(8,40,state.veg));i++){
+    const a=R()*TAU,r=3+R()*30,x=Math.cos(a)*r,z=Math.sin(a)*r;
+    if(distPath(x,z)<1.2)continue;
+    blob(x,gh(x,z)+.22,z,.34+R()*.34,leaf[Math.floor(R()*leaf.length)],5,3,.3,R,.72);
+  }
+  for(let i=0;i<Math.round(lerp(8,30,state.veg));i++){
+    const a=R()*TAU,r=3.5+R()*28,x=Math.cos(a)*r,z=Math.sin(a)*r;
+    if(distPath(x,z)<.9)continue;
+    blob(x,gh(x,z)+.1,z,.22+R()*.34,mul(rockC,.92+R()*.16),5,3,.34,R,.55);
+  }
+  const tufts=Math.round(lerp(150,760,state.veg));
+  for(let k=0;k<tufts;k++){
+    const a=R()*TAU,r=2.2+Math.pow(R(),.6)*30,x=Math.cos(a)*r,z=Math.sin(a)*r;
+    if(distPath(x,z)<1)continue;
+    tuft(R,x,z,mix(gA,gB,R()),.34+R()*.42);
+  }
+}
+
+function addTree(R,x,z,s,leaf,trunkC){
+  const y=gh(x,z),th=1.15*s;
+  cyl(x,z,y-.2,y+th,.17*s,.115*s,5,trunkC);
+  if(SE.snow)for(let b=0;b<3;b++){
+    const a=R()*TAU;
+    cyl(x+Math.cos(a)*.5*s,z+Math.sin(a)*.5*s,y+th*.9,y+th+.5*s,.05,.03,4,trunkC);
+  }
+  const nb=2+Math.floor(R()*2),baseR=.88*s;
+  for(let k=0;k<nb;k++){
+    const rr=baseR*(.62+R()*.42);
+    const ox=(R()-.5)*baseR*.95,oz=(R()-.5)*baseR*.95;
+    const oy=y+th+baseR*.6+k*baseR*.58+R()*.22;
+    blob(x+ox,oy,z+oz,rr,mul(leaf[Math.floor(R()*leaf.length)],.94+R()*.14),6,3,.24,R,.9);
+  }
+}
+
+function tuft(R,x,z,col,h){
+  const y=gh(x,z),lit=shade({x:0,y:1,z:0},col);
+  for(let k=0;k<3;k++){
+    const a=k/3*TAU+R()*.9,w=.075+R()*.05,dx=Math.cos(a),dz=Math.sin(a);
+    const px=x+(R()-.5)*.22,pz=z+(R()-.5)*.22;
+    tri({x:px-dx*w,y,z:pz-dz*w},{x:px+dx*w,y,z:pz+dz*w},
+        {x:px+(R()-.5)*.3,y:y+h*(.7+R()*.6),z:pz+(R()-.5)*.3},lit,null,1,1);
+  }
+}
+
+/* ---------- 相机 ---------- */
+let yaw=.85,pitch=.4,dist=44;
+const tgt={x:0,y:3.4,z:0};
+let dragging=false,lx=0,ly=0;
+cv.addEventListener('pointerdown',e=>{dragging=true;lx=e.clientX;ly=e.clientY;});
+addEventListener('pointerup',()=>dragging=false);
+addEventListener('pointermove',e=>{
+  if(!dragging)return;
+  yaw-=(e.clientX-lx)*.0068;
+  pitch=cl(pitch+(e.clientY-ly)*.0045,.08,1.12);
+  lx=e.clientX;ly=e.clientY;
+});
+cv.addEventListener('wheel',e=>{e.preventDefault();
+  dist=cl(dist*(e.deltaY>0?1.07:.93),18,78);},{passive:false});
+
+/* ---------- 天空 / 云 / 萤火 ---------- */
+const CLOUDS=[],MOTES=[];
+for(let i=0;i<8;i++)CLOUDS.push({x:Math.random(),y:.06+Math.random()*.3,
+  s:.1+Math.random()*.16,v:.004+Math.random()*.01});
+for(let i=0;i<70;i++)MOTES.push({a:Math.random()*TAU,r:5+Math.random()*26,
+  y:.4+Math.random()*9,ph:Math.random()*TAU,sp:.3+Math.random()*.7});
+
+function sky(t){
+  const g=ctx.createLinearGradient(0,0,0,H*.92);
+  g.addColorStop(0,TH.sky[0]);g.addColorStop(.52,TH.sky[1]);g.addColorStop(1,TH.sky[2]);
+  ctx.fillStyle=g;ctx.fillRect(0,0,W,H);
+  for(let i=0;i<CLOUDS.length;i++){
+    const c=CLOUDS[i];
+    const cx=((c.x+t*c.v)%1.3-.15)*W,cy=c.y*H,rw=c.s*W*2.2;
+    const rg=ctx.createRadialGradient(cx,cy,0,cx,cy,rw);
+    rg.addColorStop(0,TH.cloud);rg.addColorStop(.55,TH.cloud);
+    rg.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.globalAlpha=.26+(i%3)*.11;ctx.fillStyle=rg;
+    ctx.save();ctx.translate(cx,cy);ctx.scale(1,.4);
+    ctx.beginPath();ctx.arc(0,0,rw,0,TAU);ctx.fill();ctx.restore();
+  }
+  ctx.globalAlpha=1;
+}
+
+/* ---------- 渲染 ---------- */
+const NB=340,BU=[];
+for(let i=0;i<NB;i++)BU.push([]);
+
+function render(t){
+  sky(t);
+  const cam={x:Math.sin(yaw)*Math.cos(pitch)*dist,
+             y:Math.sin(pitch)*dist+tgt.y,
+             z:Math.cos(yaw)*Math.cos(pitch)*dist};
+  const fwd=nrm(sub(tgt,cam));
+  const right=nrm(crs(fwd,{x:0,y:1,z:0}));
+  const upv=crs(right,fwd);
+  const focal=Math.min(W*1.15,H*.95);
+
+  /* 太阳光晕 */
+  const sp={x:cam.x+TH.sun.x*400,y:cam.y+TH.sun.y*400,z:cam.z+TH.sun.z*400};
+  const sd=sub(sp,cam),sz=dot(sd,fwd);
+  if(sz>.4){
+    const sxp=W/2+focal*dot(sd,right)/sz,syp=H/2-focal*dot(sd,upv)/sz;
+    const Rr=Math.max(W,H)*.5;
+    const rg=ctx.createRadialGradient(sxp,syp,0,sxp,syp,Rr);
+    const core=state.time==='night'?'rgba(200,220,255,.5)':'rgba(255,248,225,.92)';
+    rg.addColorStop(0,core);rg.addColorStop(.07,core);
+    rg.addColorStop(.26,'rgba(255,228,175,.14)');
+    rg.addColorStop(1,'rgba(255,255,255,0)');
+    ctx.save();ctx.globalCompositeOperation='lighter';ctx.fillStyle=rg;
+    ctx.beginPath();ctx.arc(sxp,syp,Rr,0,TAU);ctx.fill();ctx.restore();
+  }
+
+  for(let b=0;b<NB;b++)BU[b].length=0;
+  const fogC=hexc(TH.fog);
+  const fk=.010+(state.fog+TH.fogX*.6)*.026;
+
+  for(let i=0;i<TRI.length;i++){
+    const T=TRI[i];
+    if(!T.dbl){
+      const vx=cam.x-T.X,vy=cam.y-T.Y,vz=cam.z-T.Z;
+      if(T.nx*vx+T.ny*vy+T.nz*vz<=0)continue;
+    }
+    const ax=T.ax-cam.x,ay=T.ay-cam.y,az=T.az-cam.z;
+    const bx=T.bx-cam.x,by=T.by-cam.y,bz=T.bz-cam.z;
+    const cx=T.cx-cam.x,cy=T.cy-cam.y,cz=T.cz-cam.z;
+    const za=ax*fwd.x+ay*fwd.y+az*fwd.z;
+    const zb=bx*fwd.x+by*fwd.y+bz*fwd.z;
+    const zc=cx*fwd.x+cy*fwd.y+cz*fwd.z;
+    if(za<.5||zb<.5||zc<.5)continue;
+    const i3=i*3;
+    SXA[i3]  =W/2+focal*(ax*right.x+ay*right.y+az*right.z)/za;
+    SYA[i3]  =H/2-focal*(ax*upv.x+ay*upv.y+az*upv.z)/za;
+    SXA[i3+1]=W/2+focal*(bx*right.x+by*right.y+bz*right.z)/zb;
+    SYA[i3+1]=H/2-focal*(bx*upv.x+by*upv.y+bz*upv.z)/zb;
+    SXA[i3+2]=W/2+focal*(cx*right.x+cy*right.y+cz*right.z)/zc;
+    SYA[i3+2]=H/2-focal*(cx*upv.x+cy*upv.y+cz*upv.z)/zc;
+
+    const d=(za+zb+zc)/3;
+    DEP[i]=d;
+    let f=1-Math.exp(-Math.pow(d*fk,2.15));
+    if(f>1)f=1;
+    RA[i3]=cl((T.c[0]*(1-f)+fogC[0]*f)*255,0,255);
+    GA[i3]=cl((T.c[1]*(1-f)+fogC[1]*f)*255,0,255);
+    BA[i3]=cl((T.c[2]*(1-f)+fogC[2]*f)*255,0,255);
+
+    let bi=(d*3.4)|0;if(bi<0)bi=0;if(bi>=NB)bi=NB-1;
+    BU[bi].push(i);
+  }
+
+  ctx.lineJoin='round';ctx.lineWidth=.7;
+  let curKey=-2;
+  for(let b=NB-1;b>=0;b--){
+    const arr=BU[b];
+    for(let m=0;m<arr.length;m++){
+      const i3=arr[m]*3;
+      const r=RA[i3]&248,g=GA[i3]&248,bl=BA[i3]&248;
+      const key=(r<<16)|(g<<8)|bl;
+      if(key!==curKey){
+        if(curKey!==-2){ctx.fill();ctx.stroke();}
+        ctx.beginPath();
+        ctx.fillStyle=ctx.strokeStyle='rgb('+r+','+g+','+bl+')';
+        curKey=key;
+      }
+      ctx.moveTo(SXA[i3],SYA[i3]);
+      ctx.lineTo(SXA[i3+1],SYA[i3+1]);
+      ctx.lineTo(SXA[i3+2],SYA[i3+2]);
+      ctx.closePath();
+    }
+  }
+  if(curKey!==-2){ctx.fill();ctx.stroke();}
+
+  /* 夜晚/黄昏的萤火 */
+  if(TH.win>.3){
+    ctx.save();ctx.globalCompositeOperation='lighter';ctx.fillStyle='#ffe3a4';
+    for(const m of MOTES){
+      const a=m.a+t*.03*m.sp;
+      const p={x:Math.cos(a)*m.r,y:m.y+Math.sin(t*.7*m.sp+m.ph)*.55,z:Math.sin(a)*m.r};
+      const d=sub(p,cam),z=dot(d,fwd);
+      if(z<1)continue;
+      const sx=W/2+focal*dot(d,right)/z,sy=H/2-focal*dot(d,upv)/z;
+      ctx.globalAlpha=.28*(.35+.65*Math.abs(Math.sin(t*1.1*m.sp+m.ph*3.1)));
+      ctx.beginPath();ctx.arc(sx,sy,Math.max(.7,140/z),0,TAU);ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  /* 暗角 */
+  const vg=ctx.createRadialGradient(W/2,H*.46,Math.min(W,H)*.3,
+                                    W/2,H*.46,Math.max(W,H)*.82);
+  vg.addColorStop(0,'rgba(60,45,30,0)');vg.addColorStop(1,'rgba(52,38,26,.24)');
+  ctx.fillStyle=vg;ctx.fillRect(0,0,W,H);
+}
+
+/* ---------- 循环 ---------- */
+let last=0,need=true,acc=0,cnt=0;
+const stat=document.getElementById('stat');
+function loop(ts){
+  const t=ts*.001,dt=last?Math.min(.1,(ts-last)/1000):0;
+  last=ts;
+  if(need){build();need=false;}
+  if(state.auto&&!dragging)yaw+=dt*.055;
+  render(t);
+  acc+=dt;cnt++;
+  if(acc>.5){stat.textContent=(TRI.length/1000).toFixed(1)+'k 面 · '+
+    Math.round(cnt/acc)+'fps';acc=0;cnt=0;}
+  requestAnimationFrame(loop);
+}
+
+/* ---------- UI ---------- */
+function pills(id,key){
+  const el=document.getElementById(id);
+  el.addEventListener('click',e=>{
+    const b=e.target.closest('button');if(!b)return;
+    el.querySelectorAll('button').forEach(x=>x.classList.remove('on'));
+    b.classList.add('on');state[key]=b.dataset.v;need=true;
+  });
+}
+pills('pTime','time');pills('pSeason','season');
+const sFog=document.getElementById('sFog'),sVeg=document.getElementById('sVeg');
+sFog.oninput=()=>{state.fog=+sFog.value/100;document.getElementById('vFog').textContent=sFog.value+'%';};
+sVeg.oninput=()=>{state.veg=+sVeg.value/100;document.getElementById('vVeg').textContent=sVeg.value+'%';need=true;};
+document.getElementById('btnReroll').onclick=()=>{state.seed=(Math.random()*1e9)|0;need=true;};
+const btnRot=document.getElementById('btnRot');
+btnRot.onclick=()=>{state.auto=!state.auto;btnRot.classList.toggle('on',state.auto);};
+
+resize();
+requestAnimationFrame(loop);
+</script>
+</body>
+</html>

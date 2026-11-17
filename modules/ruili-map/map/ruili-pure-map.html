@@ -1312,337 +1312,765 @@ const DATA = {
   }
  ]
 };
-const S = 1.1;                       /* px per unit; 160 units = 1 km -> 176 px per km */
+/* ===== Tiny Glade-style illustrated renderer (unit space; DATA untouched) ===== */
+const DETAIL = /[?&]view=detail/.test(location.search);
 const B = DATA.bounds;
-const OX = 150, OY = 215;
-const MW = B.width * S, MH = B.height * S;
-const W = OX + MW + 150, H = OY + MH + 235;
+let S, OX, OY, CW, CH, FURN = true;
+if (DETAIL) {
+  /* crop: lake – downtown – pagoda, x∈[-950,650], z∈[-520,420]; unit-space origin already includes -minX/-minZ */
+  S = 3.4; OX = 40 - (-950 - B.minX) * S; OY = 40 - (-520 - B.minZ) * S; FURN = false;
+  CW = 1600 * S + 80; CH = 940 * S + 80;
+} else {
+  S = 1.5; OX = 205; OY = 290;
+  CW = OX + B.width * S + 205; CH = OY + B.height * S + 330;
+}
 const cv = document.getElementById('cv');
-cv.width = W; cv.height = H;
+cv.width = CW; cv.height = CH;
 const ctx = cv.getContext('2d');
-const X = x => OX + (x - B.minX) * S;
-const Y = z => OY + (z - B.minZ) * S;
+const X = x => x - B.minX, Y = z => z - B.minZ;   /* unit-space coords (pre-transform) */
 
 function hash(n){ let h = Math.sin(n * 127.1) * 43758.5453; return h - Math.floor(h); }
-function poly(pts){ ctx.beginPath(); pts.forEach((p,i)=> i ? ctx.lineTo(X(p[0]),Y(p[1])) : ctx.moveTo(X(p[0]),Y(p[1]))); ctx.closePath(); }
-function path(pts){ ctx.beginPath(); pts.forEach((p,i)=> i ? ctx.lineTo(X(p[0]),Y(p[1])) : ctx.moveTo(X(p[0]),Y(p[1]))); }
-function txt(t,x,y,size,color,align,weight,spacing){
-  ctx.font = (weight||'600') + ' ' + size + 'px "Yuanti SC","Hiragino Maru Gothic ProN","PingFang SC","Microsoft YaHei",sans-serif';
-  ctx.textAlign = align||'left'; ctx.textBaseline = 'middle';
-  ctx.lineJoin = 'round';
-  if(size>=20){ ctx.strokeStyle = 'rgba(253,249,238,0.88)'; ctx.lineWidth = Math.max(3, size/5.5); }
-  const draw = (cx2, ch) => { if(size>=20) ctx.strokeText(ch, cx2, y); ctx.fillStyle = color; ctx.fillText(ch, cx2, y); };
-  if(spacing){ let cx = x; const ws = [...t].map(ch=>ctx.measureText(ch).width); const tot = ws.reduce((a,b)=>a+b,0) + spacing*(t.length-1);
-    if((align||'left')==='center') cx = x - tot/2; [...t].forEach((ch,i)=>{ draw(cx, ch); cx += ws[i] + spacing; }); }
-  else { if(size>=20) ctx.strokeText(t, x, y); ctx.fillStyle = color; ctx.fillText(t, x, y); }
+function rng(seed){ let s = seed % 2147483647; if (s <= 0) s += 2147483646; return () => (s = s * 16807 % 2147483647) / 2147483647; }
+function hx(c){ if (c[0] !== '#') return c.match(/\d+/g).map(Number); return [parseInt(c.slice(1,3),16), parseInt(c.slice(3,5),16), parseInt(c.slice(5,7),16)]; }
+function lerpC(c1, c2, t){ const a = hx(c1), b = hx(c2); return `rgb(${a.map((v,i)=>Math.round(v+(b[i]-v)*t)).join(',')})`; }
+function rgba(c, a){ const v = hx(c); return `rgba(${v[0]},${v[1]},${v[2]},${a})`; }
+function polyPath(pts){ ctx.beginPath(); pts.forEach((p,i)=> i ? ctx.lineTo(X(p[0]),Y(p[1])) : ctx.moveTo(X(p[0]),Y(p[1]))); ctx.closePath(); }
+function smoothPath(pts){
+  ctx.beginPath(); ctx.moveTo(X(pts[0][0]), Y(pts[0][1]));
+  for (let i = 1; i < pts.length - 1; i++){
+    const mx = (pts[i][0] + pts[i+1][0]) / 2, mz = (pts[i][1] + pts[i+1][1]) / 2;
+    ctx.quadraticCurveTo(X(pts[i][0]), Y(pts[i][1]), X(mx), Y(mz));
+  }
+  const l = pts[pts.length-1]; ctx.lineTo(X(l[0]), Y(l[1]));
+}
+function inPoly(pts, x, z){ let inside = false;
+  for (let i = 0, j = pts.length - 1; i < pts.length; j = i++){
+    if (((pts[i][1] > z) !== (pts[j][1] > z)) && (x < (pts[j][0]-pts[i][0]) * (z-pts[i][1]) / (pts[j][1]-pts[i][1]) + pts[i][0])) inside = !inside;
+  } return inside; }
+function rr(x, y, w, h, r){ ctx.beginPath();
+  ctx.moveTo(x+r, y); ctx.lineTo(x+w-r, y); ctx.quadraticCurveTo(x+w, y, x+w, y+r);
+  ctx.lineTo(x+w, y+h-r); ctx.quadraticCurveTo(x+w, y+h, x+w-r, y+h);
+  ctx.lineTo(x+r, y+h); ctx.quadraticCurveTo(x, y+h, x, y+h-r);
+  ctx.lineTo(x, y+r); ctx.quadraticCurveTo(x, y, x+r, y); ctx.closePath(); }
+function ell(x, z, rx, rz){ ctx.beginPath(); ctx.ellipse(X(x), Y(z), rx, rz, 0, 0, Math.PI*2); }
+function softBlob(x, z, rx, rz, color, a0){
+  const g = ctx.createRadialGradient(X(x), Y(z), 0, X(x), Y(z), rx);
+  g.addColorStop(0, rgba(color, a0)); g.addColorStop(1, rgba(color, 0));
+  ctx.save(); ctx.translate(X(x), Y(z)); ctx.scale(1, rz/rx); ctx.translate(-X(x), -Y(z));
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X(x), Y(z), rx, 0, Math.PI*2); ctx.fill(); ctx.restore();
+}
+const FONT = '"Yuanti SC","Hiragino Maru Gothic ProN","PingFang SC","Microsoft YaHei",sans-serif';
+function txt(t, x, y, size, color, align, weight, spacing){
+  ctx.font = (weight||'600') + ' ' + size + 'px ' + FONT;
+  ctx.textAlign = align || 'left'; ctx.textBaseline = 'middle'; ctx.lineJoin = 'round';
+  const halo = size >= 15;
+  if (halo){ ctx.strokeStyle = 'rgba(253,249,238,0.85)'; ctx.lineWidth = Math.max(2, size/5); }
+  const draw = (cx2, ch) => { if (halo) ctx.strokeText(ch, cx2, y); ctx.fillStyle = color; ctx.fillText(ch, cx2, y); };
+  if (spacing){ let cx = x; const ws = [...t].map(ch => ctx.measureText(ch).width);
+    const tot = ws.reduce((a,b)=>a+b,0) + spacing * (t.length - 1);
+    if ((align||'left') === 'center') cx = x - tot/2;
+    [...t].forEach((ch,i)=>{ draw(cx, ch); cx += ws[i] + spacing; });
+  } else draw(x, t);
+}
+function along(pts, frac){
+  let tot = 0; const segs = [];
+  for (let i = 0; i < pts.length-1; i++){ const l = Math.hypot(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1]); segs.push(l); tot += l; }
+  let want = tot * frac, acc = 0;
+  for (let i = 0; i < segs.length; i++){ if (acc + segs[i] >= want){ const t = segs[i] ? (want-acc)/segs[i] : 0;
+    return [pts[i][0] + (pts[i+1][0]-pts[i][0])*t, pts[i][1] + (pts[i+1][1]-pts[i][1])*t]; } acc += segs[i]; }
+  return pts[pts.length-1];
+}
+function riverZAt(river, x){
+  const pts = river.points;
+  for (let i = 0; i < pts.length-1; i++){
+    const [x1,z1] = pts[i], [x2,z2] = pts[i+1];
+    if ((x >= Math.min(x1,x2)) && (x <= Math.max(x1,x2)) && x1 !== x2) return z1 + (z2-z1) * (x-x1) / (x2-x1);
+  } return pts[pts.length-1][1];
 }
 
-/* paper */
-ctx.fillStyle = '#F7F2E2'; ctx.fillRect(0,0,W,H);
-ctx.strokeStyle = '#C9BFA3'; ctx.lineWidth = 3; ctx.strokeRect(26,26,W-52,H-52);
+/* ---------- paper & furniture (device space) ---------- */
+ctx.fillStyle = '#F6EFDB'; ctx.fillRect(0, 0, CW, CH);
+if (FURN){
+  ctx.strokeStyle = '#C9BFA3'; ctx.lineWidth = 3; ctx.strokeRect(26, 26, CW-52, CH-52);
+  ctx.save(); ctx.translate(84, 96);
+  ctx.font = '700 62px ' + FONT; ctx.fillStyle = '#3D3626'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+  ctx.fillText('瑞丽 · 纯地图', 0, 0); ctx.restore();
+  txt('真实地理比例：1 公里 ≈ 160 游戏单位 · 勐卯城区为原点 · 范围 ' + B.width + ' × ' + B.height + ' 单位（约 ' + (B.width/160).toFixed(0) + ' × ' + (B.height/160).toFixed(1) + ' 公里）· 地图比例 = 世界比例，建筑按真实占地绘制',
+      84, 158, 29, '#7A6C4E', 'left', '500');
+  (function(){
+    const cx = CW-150, cy = 118, r = 60;
+    ctx.strokeStyle = '#7d5c46'; ctx.lineWidth = 2.5;
+    ctx.beginPath(); ctx.arc(cx, cy, r, 0, Math.PI*2); ctx.stroke();
+    ctx.fillStyle = '#B8443A';
+    ctx.beginPath(); ctx.moveTo(cx, cy-r+8); ctx.lineTo(cx-11, cy+12); ctx.lineTo(cx+11, cy+12); ctx.closePath(); ctx.fill();
+    txt('北', cx, cy-r-28, 31, '#B8443A', 'center', '700');
+    txt('南', cx, cy+r+28, 25, '#6D5A2E', 'center', '600');
+    txt('西', cx-r-28, cy, 25, '#6D5A2E', 'center', '600');
+    txt('东', cx+r+28, cy, 25, '#6D5A2E', 'center', '600');
+  })();
+}
 
-/* title block */
-txt('瑞丽 · 纯地图', 84, 92, 64, '#3D3626', 'left', '700');
-txt('真实地理比例：1 公里 ≈ 160 游戏单位 · 勐卯城区为原点 · 范围 ' + B.width + ' × ' + B.height + ' 单位（约 ' + (B.width/160).toFixed(0) + ' × ' + (B.height/160).toFixed(1) + ' 公里）· 地图比例 = 世界比例，建筑按真实占地绘制', 84, 152, 30, '#7A6C4E', 'left', '500');
+/* ---------- into unit space ---------- */
+ctx.translate(OX, OY); ctx.scale(S, S);
+ctx.lineCap = 'round'; ctx.lineJoin = 'round';
 
-/* compass */
+/* base: warm valley light */
 (function(){
-  const cx = W-150, cy = 118, r = 62;
-  ctx.strokeStyle = '#8A6D3B'; ctx.lineWidth = 2.5;
-  ctx.beginPath(); ctx.arc(cx,cy,r,0,Math.PI*2); ctx.stroke();
-  ctx.fillStyle = '#B8443A';
-  ctx.beginPath(); ctx.moveTo(cx,cy-r+8); ctx.lineTo(cx-11,cy+12); ctx.lineTo(cx+11,cy+12); ctx.closePath(); ctx.fill();
-  txt('北', cx, cy-r-30, 32, '#B8443A', 'center', '700');
-  txt('南', cx, cy+r+30, 26, '#6D5A2E', 'center', '600');
-  txt('西', cx-r-30, cy, 26, '#6D5A2E', 'center', '600');
-  txt('东', cx+r+30, cy, 26, '#6D5A2E', 'center', '600');
+  const g = ctx.createLinearGradient(0, 0, 0, B.height);
+  g.addColorStop(0, '#9cc47c'); g.addColorStop(0.55, '#8fc274'); g.addColorStop(1, '#7fb566');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, B.width, B.height);
 })();
 
-/* valley-floor backdrop (presentation only; zone data unchanged) */
-ctx.fillStyle = '#E7F3C7'; ctx.fillRect(X(B.minX), Y(B.minZ), MW, MH);
+const zoneByName = {}; DATA.terrainZones.forEach(z => zoneByName[z.name] = z);
+const PLAIN = zoneByName['勐卯坝子'];
 
-/* terrain zones: soft storybook washes, edges feathered via offscreen blur */
-const ZC = { '坝子平原':'#E7F3C7', '林地':'#BEE0A6', '丘陵':'#D3E7B2', '山地':'#ABD096' };
+/* plain: storybook patchwork of meadow / field tones */
 (function(){
-  const off = document.createElement('canvas'); off.width = W; off.height = H;
-  const octx = off.getContext('2d');
-  DATA.terrainZones.forEach(z=>{
-    octx.beginPath();
-    z.points.forEach((p,i)=> i ? octx.lineTo(X(p[0]),Y(p[1])) : octx.moveTo(X(p[0]),Y(p[1])));
-    octx.closePath(); octx.fillStyle = ZC[z.type]||'#E7F3C7'; octx.fill();
-  });
-  ctx.save();
-  try { ctx.filter = 'blur(7px)'; } catch(e) {}
-  ctx.drawImage(off, 0, 0);
+  ctx.save(); polyPath(PLAIN.points); ctx.clip();
+  const tones = ['#8fc274', '#79b060', '#a5ce8a', '#9cc47c', '#86bd6d', '#d9d09c'];
+  const R = rng(7101);
+  for (let i = 0; i < 110; i++){
+    const x = B.minX + R() * B.width, z = B.minZ + R() * B.height;
+    softBlob(x, z, 150 + R()*300, 90 + R()*170, tones[i % tones.length], 0.34);
+  }
+  /* fine grass speckle */
+  for (let i = 0; i < 5200; i++){
+    const x = B.minX + hash(i*1.37) * B.width, z = B.minZ + hash(i*2.91) * B.height;
+    if (!inPoly(PLAIN.points, x, z)) continue;
+    ctx.fillStyle = i % 3 ? 'rgba(89,146,74,0.22)' : 'rgba(255,252,225,0.25)';
+    ctx.beginPath(); ctx.arc(X(x), Y(z), 1.6 + hash(i*5.3)*2.2, 0, Math.PI*2); ctx.fill();
+  }
+  /* flower drifts */
+  const FC = ['#F2A9C4', '#FFF3DC', '#F7D774', '#C3B2E8', '#F28BA8'];
+  for (let dI = 0; dI < 44; dI++){
+    const dx = B.minX + hash(dI*3.17+50) * B.width, dz = B.minZ + hash(dI*5.71+90) * B.height;
+    if (!inPoly(PLAIN.points, dx, dz)) continue;
+    const drx = 30 + hash(dI*7.3)*70, drz = drx * 0.55, col = FC[dI % FC.length];
+    softBlob(dx, dz, drx, drz, col, 0.22);
+    for (let j = 0; j < 200; j++){
+      const a = hash(dI*131+j*1.7) * Math.PI*2, r2 = Math.sqrt(hash(dI*97+j*2.3));
+      const fx = dx + Math.cos(a)*drx*r2, fz = dz + Math.sin(a)*drz*r2;
+      if (!inPoly(PLAIN.points, fx, fz)) continue;
+      ctx.fillStyle = col; ctx.beginPath(); ctx.arc(X(fx), Y(fz), 2.8, 0, Math.PI*2); ctx.fill();
+    }
+  }
   ctx.restore();
 })();
-/* mountain relief speckle + forest speckle (deterministic) */
-DATA.terrainZones.forEach((z,zi)=>{
-  const xs = z.points.map(p=>p[0]), zs = z.points.map(p=>p[1]);
-  const minx=Math.min(...xs), maxx=Math.max(...xs), minz=Math.min(...zs), maxz=Math.max(...zs);
-  function inPoly(x,zz){ let inside=false; const pts=z.points;
-    for(let i=0,j=pts.length-1;i<pts.length;j=i++){
-      if(((pts[i][1]>zz)!==(pts[j][1]>zz)) && (x < (pts[j][0]-pts[i][0])*(zz-pts[i][1])/(pts[j][1]-pts[i][1])+pts[i][0])) inside=!inside; }
-    return inside; }
-  if(z.type==='山地'||z.type==='丘陵'){
-    /* soft rolling mounds: pale base + lighter top, no hard edges */
-    for(let i=0;i<300;i++){
-      const x = minx + hash(zi*10000+i*3.7)*(maxx-minx), zz = minz + hash(zi*20000+i*7.3)*(maxz-minz);
-      if(!inPoly(x,zz)) continue;
-      const r = 16 + hash(zi*30000+i*5.1)*26;
-      ctx.fillStyle = 'rgba(148,190,118,0.35)';
-      ctx.beginPath(); ctx.ellipse(X(x),Y(zz),r,r*0.52,0,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle = 'rgba(214,238,182,0.5)';
-      ctx.beginPath(); ctx.ellipse(X(x)-r*0.18,Y(zz)-r*0.16,r*0.62,r*0.3,0,0,Math.PI*2); ctx.fill();
+
+/* ---------- mountains: layered ridges with mist ---------- */
+function ridgeBand(zone, opt){
+  const { ridges = 5, seed = 1, far = '#B7D2BE', near = '#74AC66', tex = 3000, flip = false, mist = '#dcebe6', mistA = 0.30 } = opt || {};
+  const xs = zone.points.map(p=>p[0]), zs = zone.points.map(p=>p[1]);
+  const minx = Math.min(...xs), maxx = Math.max(...xs), minz = Math.min(...zs), maxz = Math.max(...zs);
+  const depth = maxz - minz, step = depth / ridges;
+  ctx.save(); polyPath(zone.points); ctx.clip();
+  for (let i = 0; i < ridges; i++){
+    const t = ridges === 1 ? 1 : i / (ridges - 1);
+    const baseZ = flip ? maxz - (i + 0.55) * step : minz + (i + 0.55) * step;
+    const amp = step * 0.46;
+    const ph1 = hash(seed*13.7 + i*7.1) * 10, ph2 = hash(seed*29.3 + i*3.9) * 10;
+    const crest = x => baseZ + Math.sin(x*0.0016 + ph1) * amp * 0.6 + Math.sin(x*0.0043 + ph2) * amp * 0.38
+                        + (hash(Math.floor((x-minx)/90) + seed*101 + i*17) - .5) * amp * 0.3;
+    const colTop = lerpC(flip ? near : far, flip ? far : near, flip ? 1 - t : t);
+    const g = ctx.createLinearGradient(0, Y(baseZ - amp), 0, Y(baseZ + step * (flip ? -1.3 : 1.3)));
+    g.addColorStop(0, colTop); g.addColorStop(1, lerpC(colTop, '#3e6b34', 0.28));
+    ctx.beginPath();
+    for (let x = minx; x <= maxx; x += 45){ const xx = Math.min(x, maxx); ctx.lineTo(X(xx), Y(crest(xx))); if (x === minx) { ctx.moveTo(X(xx), Y(crest(xx))); } }
+    if (flip){ ctx.lineTo(X(maxx), Y(minz - 60)); ctx.lineTo(X(minx), Y(minz - 60)); }
+    else { ctx.lineTo(X(maxx), Y(maxz + 60)); ctx.lineTo(X(minx), Y(maxz + 60)); }
+    ctx.closePath(); ctx.fillStyle = g; ctx.fill();
+    /* canopy texture on the slope */
+    const R = rng(seed * 1000 + i * 77);
+    const per = Math.round(tex / ridges);
+    for (let k = 0; k < per; k++){
+      const x = minx + R() * (maxx - minx);
+      const cy = crest(x), off = Math.pow(R(), 1.4) * step * 1.25;
+      const z = flip ? cy - off : cy + off;
+      if (!inPoly(zone.points, x, z)) continue;
+      const r = 2.6 + R() * 4.4;
+      const CC = ['#4a7f3e', '#58924a', '#6fa758', '#79b060', '#8bbf66'];
+      ctx.fillStyle = R() < 0.72 ? rgba(CC[Math.floor(R() * CC.length)], 0.5) : 'rgba(220,240,200,0.45)';
+      ctx.beginPath(); ctx.arc(X(x), Y(z), r, 0, Math.PI*2); ctx.fill();
     }
-  }
-  if(z.type==='林地'){
-    /* puffy rounded canopy clusters, grouped like little woods, three-tone soft greens */
-    for(let i=0;i<620;i++){
-      const clu = Math.floor(i/6);
-      const cx0 = minx + hash(zi*51000+clu*3.3)*(maxx-minx), cz0 = minz + hash(zi*61000+clu*6.9)*(maxz-minz);
-      const x = cx0 + (hash(zi*52000+i*3.3)-.5)*52, zz = cz0 + (hash(zi*62000+i*6.9)-.5)*34;
-      if(!inPoly(x,zz)) continue;
-      const r = 9 + hash(zi*70000+i*4.3)*12;
-      ctx.fillStyle = 'rgba(84,138,72,0.55)';
-      ctx.beginPath(); ctx.arc(X(x),Y(zz),r,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle = 'rgba(140,196,110,0.75)';
-      ctx.beginPath(); ctx.arc(X(x)-r*0.3,Y(zz)-r*0.3,r*0.62,0,Math.PI*2); ctx.fill();
-      ctx.beginPath(); ctx.arc(X(x)+r*0.42,Y(zz)+r*0.1,r*0.45,0,Math.PI*2); ctx.fill();
-      ctx.fillStyle = 'rgba(196,232,160,0.5)';
-      ctx.beginPath(); ctx.arc(X(x)-r*0.12,Y(zz)-r*0.42,r*0.3,0,Math.PI*2); ctx.fill();
-    }
-  }
-  if(z.type==='坝子平原'){
-    /* flower meadows in soft single-colour DRIFTS (wash + dense dots) + a sparse sprinkle */
-    const FC = ['#F2A9C4','#FFF6E8','#F7D774','#C3B2E8','#F28BA8'];
-    for(let dI=0;dI<30;dI++){
-      const dx = minx + hash(zi*81000+dI*2.9)*(maxx-minx), dz = minz + hash(zi*91000+dI*6.1)*(maxz-minz);
-      if(!inPoly(dx,dz)) continue;
-      const drx = 26+hash(zi*82000+dI*4.1)*60, drz = drx*0.55;
-      ctx.fillStyle = FC[dI%FC.length]; ctx.globalAlpha = 0.13;
-      ctx.beginPath(); ctx.ellipse(X(dx),Y(dz),drx*S,drz*S,0,0,Math.PI*2); ctx.fill();
-      ctx.globalAlpha = 1;
-      for(let j2=0;j2<130;j2++){
-        const a = hash(zi*83000+dI*131+j2*1.7)*Math.PI*2, rr = Math.sqrt(hash(zi*84000+dI*97+j2*2.3));
-        const fx = dx+Math.cos(a)*drx*rr, fz = dz+Math.sin(a)*drz*rr;
-        if(!inPoly(fx,fz)) continue;
-        ctx.fillStyle = FC[dI%FC.length];
-        ctx.beginPath(); ctx.arc(X(fx),Y(fz),2.4,0,Math.PI*2); ctx.fill();
+    /* sunlit crest line */
+    ctx.beginPath();
+    for (let x = minx; x <= maxx; x += 45){ const xx = Math.min(x, maxx); x === minx ? ctx.moveTo(X(xx), Y(crest(xx))) : ctx.lineTo(X(xx), Y(crest(xx))); }
+    ctx.strokeStyle = 'rgba(255,252,230,0.35)'; ctx.lineWidth = 2.6; ctx.stroke();
+    /* mist band below crest (not on the nearest ridge) */
+    if (i < ridges - 1){
+      const mz = flip ? baseZ - step * 0.85 : baseZ + step * 0.85;
+      for (let m = 0; m < 5; m++){
+        const mx = minx + (m + 0.5 + (hash(seed*7+m*3.1+i) - .5) * 0.5) * (maxx - minx) / 5;
+        softBlob(mx, mz + (hash(seed*11+m*7.7+i*3) - .5) * step * 0.3, 200 + hash(seed*13+m*5.9) * 260, 26 + hash(seed*17+m) * 22, mist, mistA);
       }
     }
-    for(let i=0;i<450;i++){
-      const x = minx + hash(zi*80000+i*2.9)*(maxx-minx), zz = minz + hash(zi*90000+i*6.1)*(maxz-minz);
-      if(!inPoly(x,zz)) continue;
-      ctx.fillStyle = FC[i%FC.length];
-      ctx.beginPath(); ctx.arc(X(x),Y(zz),2.6,0,Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+  /* soften the zone edge with a wide low-alpha stroke */
+  polyPath(zone.points); ctx.strokeStyle = rgba(near, 0.16); ctx.lineWidth = 30; ctx.stroke();
+}
+ridgeBand(zoneByName['北部山地'], { ridges: 6, seed: 11, far: '#b7d3c2', near: '#639a52', tex: 5600 });
+ridgeBand(zoneByName['莫里山'],   { ridges: 4, seed: 23, far: '#a9c8ae', near: '#58924a', tex: 4300, mist: '#e3b193', mistA: 0.15 });
+ridgeBand(zoneByName['江南山地（对岸）'], { ridges: 3, seed: 37, far: '#bfd8c6', near: '#79b060', tex: 1700, flip: true, mistA: 0.26 });
+
+/* NW hills: soft rolling mounds */
+(function(){
+  const z = zoneByName['西北丘陵'];
+  ctx.save(); polyPath(z.points); ctx.clip();
+  const R = rng(4402);
+  for (let i = 0; i < 150; i++){
+    const x = -1250 + R() * 830, zz = -1050 + R() * 530;
+    if (!inPoly(z.points, x, zz)) continue;
+    const r = 20 + R() * 34;
+    softBlob(x, zz + r * 0.3, r, r * 0.5, '#79b060', 0.30);
+    softBlob(x - r * 0.2, zz - r * 0.15, r * 0.6, r * 0.3, '#b5d69a', 0.35);
+  }
+  for (let i = 0; i < 700; i++){
+    const x = -1250 + R() * 830, zz = -1050 + R() * 530;
+    if (!inPoly(z.points, x, zz)) continue;
+    const CC2 = ['#4a7f3e', '#58924a', '#6fa758', '#8bbf66'];
+    ctx.fillStyle = rgba(CC2[Math.floor(R() * CC2.length)], 0.45);
+    ctx.beginPath(); ctx.arc(X(x), Y(zz), 2.4 + R() * 3.6, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.restore();
+})();
+
+/* Jinta hill: one lush mound under the pagoda */
+(function(){
+  const z = zoneByName['金塔山'];
+  ell(285, -318, 178, 148); ctx.fillStyle = '#79b060'; ctx.fill();
+  ell(272, -330, 140, 112); ctx.fillStyle = '#8fc274'; ctx.fill();
+  ell(262, -342, 96, 74);  ctx.fillStyle = '#a5ce8a'; ctx.fill();
+  const R = rng(8803);
+  for (let i = 0; i < 850; i++){
+    const a = R() * Math.PI * 2, r2 = Math.sqrt(R());
+    const x = 285 + Math.cos(a) * 168 * r2, zz = -320 + Math.sin(a) * 138 * r2;
+    if (!inPoly(z.points, x, zz)) continue;
+    const CC3 = ['#4a7f3e', '#58924a', '#6fa758', '#8bbf66'];
+    ctx.fillStyle = R() < 0.75 ? rgba(CC3[Math.floor(R() * CC3.length)], 0.5) : 'rgba(220,242,186,0.5)';
+    ctx.beginPath(); ctx.arc(X(x), Y(zz), 2.4 + R() * 3.8, 0, Math.PI*2); ctx.fill();
+  }
+  softBlob(215, -395, 60, 26, '#dcebe6', 0.22);
+})();
+
+/* ---------- forests & trees ---------- */
+const CANOPY = ['#58924a', '#6fa758', '#8bbf66', '#79b060'];
+function treeCluster(x, z, R, seed, blossom){
+  softBlob(x, z + R * 0.35, R * 1.05, R * 0.5, '#466f38', 0.20);
+  const Rr = rng(seed);
+  ctx.strokeStyle = '#7d5c46'; ctx.lineWidth = Math.max(1.2, R * 0.14);
+  ctx.beginPath(); ctx.moveTo(X(x), Y(z + R * 0.3)); ctx.lineTo(X(x), Y(z - R * 0.1)); ctx.stroke();
+  const n = 6 + Math.floor(Rr() * 4);
+  for (let i = 0; i < n; i++){
+    const a = Rr() * Math.PI * 2, d = Rr() * R * 0.55;
+    const cx = x + Math.cos(a) * d, cz = z - R * 0.15 + Math.sin(a) * d * 0.6, cr = R * (0.42 + Rr() * 0.3);
+    ctx.fillStyle = CANOPY[Math.floor(Rr() * CANOPY.length)];
+    ctx.beginPath(); ctx.arc(X(cx), Y(cz), cr, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(196,226,164,0.55)';
+  ctx.beginPath(); ctx.arc(X(x - R * 0.3), Y(z - R * 0.45), R * 0.3, 0, Math.PI*2); ctx.fill();
+  ctx.beginPath(); ctx.arc(X(x + R * 0.35), Y(z - R * 0.1), R * 0.2, 0, Math.PI*2); ctx.fill();
+  if (blossom){
+    for (let i = 0; i < 26; i++){
+      const a = Rr() * Math.PI * 2, d = Math.sqrt(Rr()) * R * 0.8;
+      ctx.fillStyle = blossom;
+      ctx.beginPath(); ctx.arc(X(x + Math.cos(a) * d), Y(z - R * 0.15 + Math.sin(a) * d * 0.6), 1.5 + Rr() * 1.3, 0, Math.PI*2); ctx.fill();
     }
   }
-});
-const ZLBL = [ ['勐卯坝子',1500,-170,46],['北部山地',-1250,-1520,50],['莫里山',2080,-1620,46],['莫里雨林',1060,-840,38],
-  ['金塔山',280,-110,32],['江南山地（对岸）',500,625,46],['西部林地',-1180,-150,36],['东部林地',2120,-70,36],['西北丘陵',-860,-790,36] ];
-ZLBL.forEach(l=> txt(l[0], X(l[1]), Y(l[2]), l[3], 'rgba(70,90,50,0.55)', 'center', '600'));
+}
+function forestZone(zone, count, seed){
+  const xs = zone.points.map(p=>p[0]), zs = zone.points.map(p=>p[1]);
+  const minx = Math.min(...xs), maxx = Math.max(...xs), minz = Math.min(...zs), maxz = Math.max(...zs);
+  const R = rng(seed);
+  for (let i = 0; i < count; i++){
+    const clu = Math.floor(i / 5);
+    const bx = minx + hash(seed + clu * 3.3) * (maxx - minx), bz = minz + hash(seed * 2 + clu * 6.9) * (maxz - minz);
+    const x = bx + (R() - .5) * 90, z = bz + (R() - .5) * 60;
+    if (!inPoly(zone.points, x, z)) continue;
+    const bl = R(); treeCluster(x, z, 13 + R() * 12, seed * 100 + i, bl < 0.10 ? '#F6C6D8' : bl < 0.16 ? '#FFFFFF' : null);
+  }
+}
+forestZone(zoneByName['莫里雨林'], 560, 3101);
+forestZone(zoneByName['西部林地'], 330, 3202);
+forestZone(zoneByName['东部林地'], 300, 3303);
 
-/* rivers (true width) */
-DATA.rivers.forEach(r=>{
-  path(r.points); ctx.strokeStyle = '#F3E9C8'; ctx.lineWidth = Math.max(4, r.width*S+13); ctx.lineCap='round'; ctx.lineJoin='round'; ctx.stroke();
-  path(r.points); ctx.strokeStyle = '#BFE0F5'; ctx.lineWidth = Math.max(3, r.width*S+4); ctx.stroke();
-  path(r.points); ctx.strokeStyle = '#8FC3EE'; ctx.lineWidth = Math.max(1.6, r.width*S*0.68); ctx.stroke();
-});
-txt('瑞 丽 江', X(-1500), Y(352), 46, '#2F6DA3', 'center', '700', 6);
-txt('瑞 丽 江', X(2350), Y(300), 46, '#2F6DA3', 'center', '700', 6);
-txt('南宛河', X(625), Y(-820), 34, '#2F6DA3', 'left', '600');
-txt('莫里河', X(1445), Y(-430), 32, '#2F6DA3', 'left', '600');
-txt('团结大沟', X(-330), Y(242), 24, '#2F6DA3', 'left', '500');
+/* scattered lone trees on the plain + kapok (red blossom) row along the river */
+(function(){
+  const R = rng(9090);
+  const river = DATA.rivers[0];
+  for (let i = 0; i < 750; i++){
+    const x = B.minX + R() * B.width, z = B.minZ + R() * B.height;
+    if (!inPoly(PLAIN.points, x, z)) continue;
+    if (Math.abs(z - riverZAt(river, x)) < 46) continue;
+    const lake = DATA.waterBodies[0];
+    if (((x - lake.cx) / (lake.rx + 26)) ** 2 + ((z - lake.cz) / (lake.rz + 26)) ** 2 < 1) continue;
+    treeCluster(x, z, 8 + R() * 7, 5000 + i, R() < 0.12 ? '#F6C6D8' : null);
+  }
+  /* roadside shade trees along the avenue */
+  const avenue = DATA.roads.find(r => r.name === '瑞丽大道');
+  for (let f = 0.015; f < 0.99; f += 0.012){
+    const p = along(avenue.points, f);
+    const side = R() < 0.62 ? -1 : 1;
+    const tx = p[0] + (R() - .5) * 26, tz = p[1] + side * (13 + R() * 9);
+    if (!inPoly(PLAIN.points, tx, tz)) continue;
+    treeCluster(tx, tz, 8.5 + R() * 5, 6600 + Math.round(f * 10000), R() < 0.14 ? '#F6C6D8' : null);
+  }
+  for (let x = -2450; x < 4050; x += 150){
+    const jx = x + (R() - .5) * 90, jz = riverZAt(river, x) - 52 - R() * 26;
+    if (!inPoly(PLAIN.points, jx, jz)) continue;
+    treeCluster(jx, jz, 13 + R() * 6, 6000 + x, '#E2483A');
+  }
+})();
 
-/* river sparkle: light dancing on the water along every river */
-DATA.rivers.forEach(r=>{
-  ctx.fillStyle = 'rgba(255,255,255,0.7)';
-  for(let i=0;i<46;i++){
-    const p = along(r.points, hash(i*3.71+r.points.length)*0.98+0.01);
-    const off = (hash(i*9.31)-.5)*r.width*0.5;
-    ctx.beginPath(); ctx.arc(X(p[0])+off*S, Y(p[1])+off*S*0.4, 1.9, 0, Math.PI*2); ctx.fill();
+/* bamboo clusters helper (used along banks later) */
+function bamboo(x, z, seed){
+  const R = rng(seed);
+  ctx.lineCap = 'round';
+  for (let i = 0; i < 6; i++){
+    const bx = x + (R() - .5) * 9, lean = (R() - .5) * 5, h = 11 + R() * 7;
+    ctx.strokeStyle = i % 2 ? '#58924a' : '#6fa758'; ctx.lineWidth = 1.7;
+    ctx.beginPath(); ctx.moveTo(X(bx), Y(z)); ctx.quadraticCurveTo(X(bx + lean * 0.4), Y(z - h * 0.6), X(bx + lean), Y(z - h)); ctx.stroke();
+    ctx.fillStyle = 'rgba(139,191,102,0.8)';
+    ctx.beginPath(); ctx.ellipse(X(bx + lean), Y(z - h), 3.4, 1.8, lean * 0.1, 0, Math.PI*2); ctx.fill();
+  }
+}
+
+/* ---------- rivers ---------- */
+DATA.rivers.forEach(r => {
+  ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+  smoothPath(r.points); ctx.strokeStyle = 'rgba(240,227,188,0.95)'; ctx.lineWidth = r.width + 17; ctx.stroke();
+  smoothPath(r.points); ctx.strokeStyle = '#b6d9e8'; ctx.lineWidth = r.width + 7; ctx.stroke();
+  smoothPath(r.points); ctx.strokeStyle = '#97c8e2'; ctx.lineWidth = r.width; ctx.stroke();
+  smoothPath(r.points); ctx.strokeStyle = 'rgba(70,140,195,0.5)'; ctx.lineWidth = r.width * 0.52; ctx.stroke();
+  /* sparkle */
+  for (let i = 0; i < 110; i++){
+    const p = along(r.points, hash(i * 3.71 + r.width) * 0.98 + 0.01);
+    const off = (hash(i * 9.31 + r.width) - .5) * r.width * 0.55;
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.beginPath(); ctx.arc(X(p[0]) + off, Y(p[1]) + off * 0.35, 1.8, 0, Math.PI*2); ctx.fill();
+  }
+  /* bamboo + reeds on the banks */
+  const R = rng(1200 + r.width * 31);
+  const nb = Math.round(900 / Math.max(6, r.width));
+  for (let i = 0; i < nb; i++){
+    const p = along(r.points, 0.02 + 0.96 * R());
+    const side = R() < 0.5 ? -1 : 1;
+    const bx = p[0] + (R() - .5) * 30, bz = p[1] + side * (r.width / 2 + 9 + R() * 7);
+    if (bz < B.minZ + 20 || bz > B.maxZ - 10) continue;
+    if (R() < 0.45) bamboo(bx, bz, 2000 + i * 7 + r.width);
+    else { ctx.strokeStyle = 'rgba(89,146,74,0.6)'; ctx.lineWidth = 1.5;
+      for (let k = 0; k < 4; k++){ const rx = bx + (R() - .5) * 7;
+        ctx.beginPath(); ctx.moveTo(X(rx), Y(bz)); ctx.lineTo(X(rx - 1), Y(bz - 5 - R() * 3)); ctx.stroke(); } }
   }
 });
+txt('瑞 丽 江', X(-1500), Y(358), 40, '#2F6DA3', 'center', '700', 6);
+txt('瑞 丽 江', X(2350), Y(306), 40, '#2F6DA3', 'center', '700', 6);
+txt('南宛河', X(632), Y(-820), 30, '#2F6DA3', 'left', '600');
+txt('莫里河', X(1452), Y(-430), 28, '#2F6DA3', 'left', '600');
+txt('团结大沟', X(-330), Y(246), 21, '#2F6DA3', 'left', '500');
 
-/* lake (true size) */
-DATA.waterBodies.forEach(w=>{
-  ctx.beginPath(); ctx.ellipse(X(w.cx),Y(w.cz),(w.rx+11)*S,(w.rz+11)*S,0,0,Math.PI*2);
-  ctx.fillStyle = '#F3E9C8'; ctx.fill();
-  ctx.beginPath(); ctx.ellipse(X(w.cx),Y(w.cz),(w.rx+4)*S,(w.rz+4)*S,0,0,Math.PI*2);
-  ctx.fillStyle = '#C4E2F5'; ctx.fill();
-  ctx.beginPath(); ctx.ellipse(X(w.cx),Y(w.cz),w.rx*S,w.rz*S,0,0,Math.PI*2);
-  ctx.fillStyle = '#9CCBF0'; ctx.fill();
-  ctx.fillStyle = 'rgba(255,255,255,0.75)';
-  for(let i=0;i<64;i++){
-    const a = hash(i*3.77)*Math.PI*2, rr = Math.sqrt(hash(i*9.13));
-    ctx.beginPath(); ctx.arc(X(w.cx)+Math.cos(a)*w.rx*S*0.8*rr, Y(w.cz)+Math.sin(a)*w.rz*S*0.8*rr, 2.2, 0, Math.PI*2); ctx.fill();
+/* ---------- lake ---------- */
+DATA.waterBodies.forEach(w => {
+  ell(w.cx, w.cz, w.rx + 13, w.rz + 13); ctx.fillStyle = '#e2d6be'; ctx.fill();
+  ell(w.cx, w.cz, w.rx + 6, w.rz + 6); ctx.fillStyle = '#b6d9e8'; ctx.fill();
+  ctx.save();
+  ctx.translate(X(w.cx), Y(w.cz)); ctx.scale(1, w.rz / w.rx); ctx.translate(-X(w.cx), -Y(w.cz));
+  const g = ctx.createRadialGradient(X(w.cx), Y(w.cz), 4, X(w.cx), Y(w.cz), w.rx);
+  g.addColorStop(0, '#79b8dd'); g.addColorStop(0.62, '#97c8e2'); g.addColorStop(1, '#b6d9e8');
+  ctx.fillStyle = g; ctx.beginPath(); ctx.arc(X(w.cx), Y(w.cz), w.rx, 0, Math.PI*2); ctx.fill();
+  ctx.restore();
+  for (let i = 0; i < 70; i++){
+    const a = hash(i * 3.77) * Math.PI * 2, r2 = Math.sqrt(hash(i * 9.13));
+    ctx.fillStyle = 'rgba(255,255,255,0.8)';
+    ctx.beginPath(); ctx.arc(X(w.cx) + Math.cos(a) * w.rx * 0.82 * r2, Y(w.cz) + Math.sin(a) * w.rz * 0.82 * r2, 2, 0, Math.PI*2); ctx.fill();
   }
-  /* lotus corner in the south-west bay: green pads, every third with a pink bloom */
-  for(let li=0;li<42;li++){
-    const a = 2.2 + hash(li*4.31)*0.9, rr = 0.78 + hash(li*6.17)*0.18;
-    const lx2 = X(w.cx)+Math.cos(a)*w.rx*S*rr, ly2 = Y(w.cz)+Math.sin(a)*w.rz*S*rr;
-    ctx.fillStyle = 'rgba(94,150,80,0.85)';
-    ctx.beginPath(); ctx.arc(lx2,ly2,3.1,0,Math.PI*2); ctx.fill();
-    if(li%3===0){ ctx.fillStyle = '#E8A4C0'; ctx.beginPath(); ctx.arc(lx2,ly2,1.7,0,Math.PI*2); ctx.fill(); }
+  /* lotus corner, SW bay */
+  for (let li = 0; li < 48; li++){
+    const a = 2.15 + hash(li * 4.31) * 0.95, r2 = 0.74 + hash(li * 6.17) * 0.2;
+    const lx = w.cx + Math.cos(a) * w.rx * r2, lz = w.cz + Math.sin(a) * w.rz * r2;
+    ctx.fillStyle = 'rgba(89,146,74,0.9)';
+    ctx.beginPath(); ctx.arc(X(lx), Y(lz), 3, 0, Math.PI*2); ctx.fill();
+    ctx.fillStyle = 'rgba(70,120,58,0.8)';
+    ctx.beginPath(); ctx.arc(X(lx) + 1, Y(lz) - 0.6, 1.8, 0, Math.PI*2); ctx.fill();
+    if (li % 3 === 0){ ctx.fillStyle = '#F0A8C4'; ctx.beginPath(); ctx.arc(X(lx), Y(lz), 1.8, 0, Math.PI*2); ctx.fill(); }
   }
-  /* reed ticks ringing the shore */
-  ctx.strokeStyle = 'rgba(96,140,70,0.55)'; ctx.lineWidth = 1.6; ctx.lineCap='round';
-  ctx.beginPath();
-  for(let ri=0;ri<130;ri++){
-    const a = ri/130*Math.PI*2 + hash(ri*3.3)*0.03;
-    const rx3 = X(w.cx)+Math.cos(a)*(w.rx+7)*S, ry3 = Y(w.cz)+Math.sin(a)*(w.rz+7)*S;
-    ctx.moveTo(rx3,ry3); ctx.lineTo(rx3-1.5,ry3-6-hash(ri*7.1)*3);
+  /* reed fringe + bamboo at the shore */
+  const R = rng(777);
+  for (let ri = 0; ri < 150; ri++){
+    const a = ri / 150 * Math.PI * 2 + hash(ri * 3.3) * 0.03;
+    const bx = w.cx + Math.cos(a) * (w.rx + 8), bz = w.cz + Math.sin(a) * (w.rz + 8);
+    if (ri % 17 === 0) bamboo(bx, bz, 3100 + ri);
+    ctx.strokeStyle = 'rgba(89,146,74,0.6)'; ctx.lineWidth = 1.5;
+    for (let k = 0; k < 3; k++){ const rx = bx + (R() - .5) * 6;
+      ctx.beginPath(); ctx.moveTo(X(rx), Y(bz)); ctx.lineTo(X(rx - 1.2), Y(bz - 5.5 - R() * 3)); ctx.stroke(); }
   }
-  ctx.stroke();
-  txt('弄 莫 湖', X(w.cx-26), Y(w.cz)+4, 36, '#2F6DA3', 'center', '700', 4);
+  txt('弄 莫 湖', X(w.cx - 20), Y(w.cz) + 3, 32, '#1F5C8C', 'center', '700', 4);
 });
 
-/* roads: trunk prominent, branch thin/pale */
-function drawRoads(level){  DATA.roads.filter(r=>r.level===level).forEach(r=>{
-    ctx.lineCap='round'; ctx.lineJoin='round';
-    if(level==='trunk'){
-      ctx.save(); ctx.translate(0,4); path(r.points); ctx.strokeStyle='rgba(160,128,74,0.30)'; ctx.lineWidth=15; ctx.stroke(); ctx.restore();
-      path(r.points); ctx.strokeStyle='#E3C078'; ctx.lineWidth=12.5; ctx.stroke();
-      path(r.points); ctx.strokeStyle='#F7E7B4'; ctx.lineWidth=8.5; ctx.stroke();
+/* ---------- roads ---------- */
+function drawRoads(level){
+  DATA.roads.filter(r => r.level === level).forEach(r => {
+    ctx.lineCap = 'round'; ctx.lineJoin = 'round';
+    if (level === 'trunk'){
+      ctx.save(); ctx.translate(0, 3.2); smoothPath(r.points); ctx.strokeStyle = 'rgba(120,100,60,0.25)'; ctx.lineWidth = 13.5; ctx.stroke(); ctx.restore();
+      smoothPath(r.points); ctx.strokeStyle = '#c9b489'; ctx.lineWidth = 11.5; ctx.stroke();
+      smoothPath(r.points); ctx.strokeStyle = '#e9dfc2'; ctx.lineWidth = 8; ctx.stroke();
+      smoothPath(r.points); ctx.strokeStyle = 'rgba(180,160,110,0.5)'; ctx.lineWidth = 1.4; ctx.setLineDash([2, 26]); ctx.stroke(); ctx.setLineDash([]);
     } else {
-      path(r.points); ctx.strokeStyle='#E8D199'; ctx.lineWidth=5.5; ctx.stroke();
-      path(r.points); ctx.strokeStyle='#F9EFC6'; ctx.lineWidth=3.4; ctx.stroke();
+      smoothPath(r.points); ctx.strokeStyle = '#dccfae'; ctx.lineWidth = 5.2; ctx.stroke();
+      smoothPath(r.points); ctx.strokeStyle = '#eee4c8'; ctx.lineWidth = 3.2; ctx.stroke();
     }
   });
 }
 drawRoads('branch'); drawRoads('trunk');
-
-/* road name labels: trunk repeated ~every 1100 units, branch once; exit labels */
-function along(pts, frac){
-  let tot=0; const segs=[];
-  for(let i=0;i<pts.length-1;i++){ const l=Math.hypot(pts[i+1][0]-pts[i][0],pts[i+1][1]-pts[i][1]); segs.push(l); tot+=l; }
-  let want=tot*frac, acc=0;
-  for(let i=0;i<segs.length;i++){ if(acc+segs[i]>=want){ const t=segs[i]?(want-acc)/segs[i]:0;
-    return [pts[i][0]+(pts[i+1][0]-pts[i][0])*t, pts[i][1]+(pts[i+1][1]-pts[i][1])*t]; } acc+=segs[i]; }
-  return pts[pts.length-1];
-}
-DATA.roads.forEach(r=>{
-  let tot=0; for(let i=0;i<r.points.length-1;i++) tot+=Math.hypot(r.points[i+1][0]-r.points[i][0],r.points[i+1][1]-r.points[i][1]);
-  if(r.level==='trunk'){
-    const n = Math.max(2, Math.round(tot/1100));
-    for(let k=0;k<n;k++){ const p = along(r.points,(k+0.5)/n);
-      txt(r.name, X(p[0]), Y(p[1])-16, 27, '#8A6D3B', 'center', '700'); }
+DATA.roads.forEach(r => {
+  let tot = 0; for (let i = 0; i < r.points.length-1; i++) tot += Math.hypot(r.points[i+1][0]-r.points[i][0], r.points[i+1][1]-r.points[i][1]);
+  if (r.level === 'trunk'){
+    const n = Math.max(2, Math.round(tot / 1100));
+    for (let k = 0; k < n; k++){ const p = along(r.points, (k + 0.5) / n);
+      txt(r.name, X(p[0]), Y(p[1]) - 15, 23, '#7d5c46', 'center', '700'); }
   } else {
-    const BOV = { '牧场路': null, '湖畔村路': null, '塔下路': null, '渡口路': null };
-    if(r.name==='牧场路') txt(r.name, X(-539)+16, Y(60), 21, '#96793F', 'left', '600');
-    else if(r.name==='湖畔村路') txt(r.name, X(-478)+12, Y(126), 21, '#96793F', 'left', '600');
-    else if(r.name==='塔下路') txt(r.name, X(318), Y(-268), 21, '#96793F', 'left', '600');
-    else if(r.name==='渡口路') txt(r.name, X(30)+16, Y(196), 21, '#96793F', 'left', '600');
-    else { const p = along(r.points, BOV[r.name]||0.5);
-      txt(r.name, X(p[0]), Y(p[1])-13, 21, '#96793F', 'center', '600'); }
+    if (r.name === '牧场路') txt(r.name, X(-539) + 14, Y(58), 17, '#96793F', 'left', '600');
+    else if (r.name === '湖畔村路') txt(r.name, X(-478) + 10, Y(128), 17, '#96793F', 'left', '600');
+    else if (r.name === '塔下路') txt(r.name, X(314), Y(-272), 17, '#96793F', 'left', '600');
+    else if (r.name === '渡口路') txt(r.name, X(30) + 13, Y(196), 17, '#96793F', 'left', '600');
+    else { const p = along(r.points, 0.5); txt(r.name, X(p[0]), Y(p[1]) - 12, 17, '#96793F', 'center', '600'); }
   }
-  if(r.ends && r.ends[0]) txt(r.ends[0], X(r.points[0][0]), Y(r.points[0][1])+30, 25, '#6D5A2E', 'center', '700');
-  if(r.ends && r.ends[1]){ const lp=r.points[r.points.length-1]; txt(r.ends[1], X(lp[0]), Y(lp[1])+30, 25, '#6D5A2E', 'center', '700'); }
+  if (r.ends && r.ends[0]) txt(r.ends[0], X(r.points[0][0]), Y(r.points[0][1]) + 28, 21, '#6D5A2E', 'center', '700');
+  if (r.ends && r.ends[1]){ const lp = r.points[r.points.length-1]; txt(r.ends[1], X(lp[0]), Y(lp[1]) + 28, 21, '#6D5A2E', 'center', '700'); }
 });
+
+/* ---------- village site clearings (empty by design: sign only) ---------- */
+const SITES = ['湖畔', '湖南', '塔下', '塔麓', '江畔', '弄岛江畔', '河谷', '上河谷', '坝田', '莫里山麓', '芒令'];
+function woodSign(x, z, s){
+  ctx.strokeStyle = '#7d5c46'; ctx.lineWidth = 1.6;
+  ctx.beginPath(); ctx.moveTo(X(x), Y(z)); ctx.lineTo(X(x), Y(z - 6 * (s || 1))); ctx.stroke();
+  ctx.fillStyle = '#dccfae'; ctx.strokeStyle = '#7d5c46'; ctx.lineWidth = 1.1;
+  const w = 11 * (s || 1), h = 5 * (s || 1);
+  rr(X(x) - w/2, Y(z - 6 * (s || 1)) - h/2, w, h, 1.6); ctx.fill(); ctx.stroke();
+}
+DATA.places.filter(p => SITES.includes(p.name)).forEach((p, i) => {
+  softBlob(p.x, p.z, 34, 22, '#dccfae', 0.45);
+  softBlob(p.x, p.z, 20, 12, '#e8dfc2', 0.5);
+  woodSign(p.x + 4, p.z + 6, 1);
+  treeCluster(p.x - 22, p.z - 8, 9, 7000 + i * 13, null);
+  treeCluster(p.x + 24, p.z + 10, 7.5, 7100 + i * 13, null);
+});
+
+/* ---------- backdrop towns: tiny rooftop clusters ---------- */
+function distToPolyline(pts, x, z){
+  let m = 1e9;
+  for (let i = 0; i < pts.length-1; i++){
+    const [x1,z1] = pts[i], [x2,z2] = pts[i+1];
+    const dx = x2-x1, dz = z2-z1, L2 = dx*dx + dz*dz;
+    let t = L2 ? ((x-x1)*dx + (z-z1)*dz) / L2 : 0; t = Math.max(0, Math.min(1, t));
+    m = Math.min(m, Math.hypot(x - (x1 + dx*t), z - (z1 + dz*t)));
+  } return m;
+}
+function drawTown(cx, cz, R, count, seed){
+  softBlob(cx, cz, R * 1.05, R * 0.8, '#e2d6be', 0.4);
+  const Rr = rng(seed);
+  const avenue = DATA.roads.find(r => r.name === '瑞丽大道');
+  const river = DATA.rivers[0];
+  const ROOFS = ['#c86f50', '#8697b0', '#d0835f', '#77879e', '#c9856a', '#93a5ba'];
+  for (let i = 0; i < count; i++){
+    const a = Rr() * Math.PI * 2, d = Math.sqrt(Rr()) * R;
+    const x = cx + Math.cos(a) * d, z = cz + Math.sin(a) * d * 0.78;
+    if (distToPolyline(avenue.points, x, z) < 13) continue;
+    if (Math.abs(z - riverZAt(river, x)) < 42) continue;
+    const w = 5.5 + Rr() * 4.5, dpt = 4.5 + Rr() * 3.5;
+    softBlob(x, z + 1.5, w * 0.62, dpt * 0.6, '#7A6A45', 0.18);
+    ctx.fillStyle = '#f3ebd9'; ctx.fillRect(X(x - w/2), Y(z - dpt/2), w, dpt);
+    ctx.fillStyle = ROOFS[Math.floor(Rr() * ROOFS.length)];
+    rr(X(x - w/2 - 0.7), Y(z - dpt/2 - 0.7), w + 1.4, dpt + 1.4, 1.6); ctx.fill();
+    ctx.strokeStyle = 'rgba(100,69,47,0.35)'; ctx.lineWidth = 0.8;
+    ctx.beginPath(); ctx.moveTo(X(x - w/2), Y(z)); ctx.lineTo(X(x + w/2), Y(z)); ctx.stroke();
+  }
+  treeCluster(cx - R * 0.5, cz - R * 0.3, 10, seed + 5, null);
+  treeCluster(cx + R * 0.55, cz + R * 0.25, 9, seed + 9, '#F6C6D8');
+}
+drawTown(0, 0, 135, 66, 101);
+drawTown(3840, 160, 95, 46, 202);
+drawTown(-2400, 300, 85, 38, 303);
+drawTown(60, 345, 70, 32, 404);
+
+/* ---------- landmark miniatures ---------- */
+function drawPagoda(x, z, baseW, tiers, tierH){
+  softBlob(x, z + 2, baseW * 0.9, baseW * 0.4, '#6B4E12', 0.25);
+  const g = ctx.createLinearGradient(0, Y(z - tiers * tierH - 6), 0, Y(z));
+  g.addColorStop(0, '#F2CE5F'); g.addColorStop(1, '#C79A2B');
+  for (let i = 0; i < tiers; i++){
+    const wBot = baseW * (1 - i * 0.13), wTop = baseW * (1 - (i + 1) * 0.13) + 1.2;
+    const yBot = z - i * tierH, yTop = z - (i + 1) * tierH;
+    ctx.beginPath();
+    ctx.moveTo(X(x - wBot/2), Y(yBot)); ctx.lineTo(X(x + wBot/2), Y(yBot));
+    ctx.lineTo(X(x + wTop/2), Y(yTop)); ctx.lineTo(X(x - wTop/2), Y(yTop));
+    ctx.closePath(); ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = 'rgba(122,84,16,0.6)'; ctx.lineWidth = 0.9; ctx.stroke();
+    ctx.strokeStyle = 'rgba(122,84,16,0.75)'; ctx.lineWidth = 1.6;
+    ctx.beginPath(); ctx.moveTo(X(x - wBot/2 - 1), Y(yBot)); ctx.lineTo(X(x + wBot/2 + 1), Y(yBot)); ctx.stroke();
+  }
+  const topY = z - tiers * tierH;
+  ctx.beginPath(); ctx.moveTo(X(x - 2), Y(topY)); ctx.lineTo(X(x + 2), Y(topY)); ctx.lineTo(X(x), Y(topY - 4.5)); ctx.closePath();
+  ctx.fillStyle = '#A87C1E'; ctx.fill();
+  ctx.fillStyle = '#8A5E12'; ctx.beginPath(); ctx.arc(X(x), Y(topY - 5.4), 1.3, 0, Math.PI*2); ctx.fill();
+}
+function roofTop(x, z, w, d, col, ridge){
+  softBlob(x, z + 2, w * 0.62, d * 0.8, '#5A4A30', 0.20);
+  ctx.fillStyle = col; rr(X(x - w/2), Y(z - d/2), w, d, 2); ctx.fill();
+  ctx.fillStyle = 'rgba(255,255,255,0.13)'; rr(X(x - w/2 + 1.6), Y(z - d/2 + 1.6), w - 3.2, d - 3.2, 1.6); ctx.fill();
+  ctx.strokeStyle = ridge || '#dccfae'; ctx.lineWidth = 1.3;
+  ctx.beginPath(); ctx.moveTo(X(x - w/2 + 1.5), Y(z)); ctx.lineTo(X(x + w/2 - 1.5), Y(z)); ctx.stroke();
+}
+function drawWaterfall(x, z, h, seed){
+  const R = rng(seed);
+  ctx.fillStyle = 'rgba(178,172,159,0.8)';
+  ctx.beginPath(); ctx.moveTo(X(x - h * 0.4), Y(z - h)); ctx.lineTo(X(x + h * 0.4), Y(z - h));
+  ctx.lineTo(X(x + h * 0.24), Y(z + 2)); ctx.lineTo(X(x - h * 0.24), Y(z + 2)); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = 'rgba(140,134,122,0.45)';
+  ctx.beginPath(); ctx.moveTo(X(x - h * 0.4), Y(z - h)); ctx.lineTo(X(x - h * 0.1), Y(z - h)); ctx.lineTo(X(x - h * 0.05), Y(z)); ctx.lineTo(X(x - h * 0.24), Y(z + 2)); ctx.closePath(); ctx.fill();
+  for (let i = 0; i < 3; i++){
+    const off = (i - 1) * h * 0.15;
+    ctx.strokeStyle = i === 1 ? 'rgba(253,255,255,0.98)' : 'rgba(205,235,252,0.9)';
+    ctx.lineWidth = h * 0.13;
+    ctx.beginPath(); ctx.moveTo(X(x + off), Y(z - h + 2));
+    ctx.quadraticCurveTo(X(x + off + 3), Y(z - h * 0.5), X(x + off * 1.5), Y(z)); ctx.stroke();
+  }
+  ell(x, z + h * 0.16, h * 0.55, h * 0.2); ctx.fillStyle = 'rgba(182,217,232,0.95)'; ctx.fill();
+  ell(x, z + h * 0.16, h * 0.38, h * 0.13); ctx.fillStyle = 'rgba(255,255,255,0.85)'; ctx.fill();
+  for (let i = 0; i < 5; i++) softBlob(x + (R() - .5) * h * 0.8, z + (R() - .5) * 5, 10 + R() * 11, 5 + R() * 5, '#FFFFFF', 0.34);
+  ctx.lineWidth = 3.4;
+  ['rgba(255,140,140,0.5)', 'rgba(255,210,110,0.5)', 'rgba(130,195,255,0.5)'].forEach((c, i) => {
+    ctx.strokeStyle = c; ctx.beginPath(); ctx.arc(X(x), Y(z + h * 0.12), h * (0.62 + i * 0.12), Math.PI * 1.13, Math.PI * 1.58); ctx.stroke();
+  });
+}
+function drawBridge(x){
+  const river = DATA.rivers[0], zc = riverZAt(river, x), hw = river.width / 2;
+  const zN = zc - hw - 8, zS = zc + hw + 8;
+  [-0.33, 0.33].forEach(f => { ell(x, zc + f * river.width, 5, 3.4); ctx.fillStyle = 'rgba(178,172,159,0.9)'; ctx.fill(); });
+  ctx.lineCap = 'round';
+  ctx.strokeStyle = '#64452f'; ctx.lineWidth = 10.6;
+  ctx.beginPath(); ctx.moveTo(X(x), Y(zN)); ctx.quadraticCurveTo(X(x - 7), Y(zc), X(x), Y(zS)); ctx.stroke();
+  ctx.strokeStyle = '#dccfae'; ctx.lineWidth = 7.8;
+  ctx.beginPath(); ctx.moveTo(X(x), Y(zN)); ctx.quadraticCurveTo(X(x - 7), Y(zc), X(x), Y(zS)); ctx.stroke();
+  ctx.strokeStyle = 'rgba(100,69,47,0.55)'; ctx.lineWidth = 1.1;
+  for (let t = 0.08; t < 0.95; t += 0.11){
+    const px = x - 14 * t * (1 - t) * 2 * 0.5 - 0, pz = zN + (zS - zN) * t;
+    const qx = (1-t)*(1-t)*x + 2*(1-t)*t*(x-7) + t*t*x, qz = (1-t)*(1-t)*zN + 2*(1-t)*t*zc + t*t*zS;
+    ctx.beginPath(); ctx.moveTo(X(qx - 3.4), Y(qz)); ctx.lineTo(X(qx + 3.4), Y(qz)); ctx.stroke();
+  }
+}
 
 /* elements at TRUE world size */
-const EL = {}; DATA.elements.forEach(e=> EL[e.id]=e);
+const EL = {}; DATA.elements.forEach(e => EL[e.id] = e);
 (function(){
   const pen = EL['mianmian-pasture'], hou = EL['reserved-homestead'], tem = EL['shansi-temple'];
-  /* lakeshore path */
   const lp = EL['lakeshore-path'];
-  if(lp){ path(lp.points); ctx.strokeStyle='#D8C096'; ctx.lineWidth=3.4; ctx.setLineDash([7,6]); ctx.stroke(); ctx.setLineDash([]); }
-  /* pen: fence + interior marks */
+  if (lp){ ctx.beginPath(); lp.points.forEach((p,i)=> i ? ctx.lineTo(X(p[0]),Y(p[1])) : ctx.moveTo(X(p[0]),Y(p[1])));
+    ctx.strokeStyle = '#dccfae'; ctx.lineWidth = 3; ctx.setLineDash([7,6]); ctx.stroke(); ctx.setLineDash([]); }
+  /* --- sheep pen --- */
   const pb = pen.bounds;
-  ctx.fillStyle = '#CDE3AC'; ctx.fillRect(X(pb.minX),Y(pb.minZ),(pb.maxX-pb.minX)*S,(pb.maxZ-pb.minZ)*S);
-  ctx.strokeStyle = '#8A6D3B'; ctx.lineWidth = 3.4; ctx.strokeRect(X(pb.minX),Y(pb.minZ),(pb.maxX-pb.minX)*S,(pb.maxZ-pb.minZ)*S);
-  ctx.fillStyle = '#F7F2E2'; ctx.fillRect(X(pen.gate.x)-2, Y(pen.gate.z-4), 5, 8*S); /* east gate gap */
-  const sh = pen.inside['羊棚'];
-  ctx.fillStyle = '#B09A72'; ctx.fillRect(X(sh.x-sh.w/2),Y(sh.z-sh.d/2),sh.w*S,sh.d*S);
-  txt('绵绵牧场 · 羊圈 30×32', X(pb.maxX)-2, Y(pb.minZ)-30, 24, '#476B2F', 'right', '700');
-  txt('弄莫湖北岸 · 瑞丽大道北侧', X(-618), Y(71), 19, '#7A6C4E', 'center', '500');
-  /* house plot: true-size dashed outline, empty */
+  ctx.fillStyle = '#93c478'; ctx.fillRect(X(pb.minX), Y(pb.minZ), pb.maxX - pb.minX, pb.maxZ - pb.minZ);
+  for (let i = 0; i < 130; i++){
+    const fx = pb.minX + hash(i * 3.3) * (pb.maxX - pb.minX), fz = pb.minZ + hash(i * 7.9) * (pb.maxZ - pb.minZ);
+    ctx.fillStyle = i % 4 ? 'rgba(89,146,74,0.35)' : '#F2A9C4';
+    ctx.beginPath(); ctx.arc(X(fx), Y(fz), 1.1, 0, Math.PI*2); ctx.fill();
+  }
+  const sh = pen.inside['羊棚']; roofTop(sh.x, sh.z, sh.w + 1.6, sh.d + 1.6, '#c86f50', '#7d5c46');
+  const hs = pen.inside['草垛'];
+  ell(hs.x, hs.z, 2.8, 2.2); ctx.fillStyle = '#E5C558'; ctx.fill();
+  ctx.strokeStyle = 'rgba(150,120,40,0.6)'; ctx.lineWidth = 0.7;
+  ctx.beginPath(); ctx.moveTo(X(hs.x - 2.4), Y(hs.z)); ctx.lineTo(X(hs.x + 2.4), Y(hs.z)); ctx.stroke();
+  const ft = pen.inside['食槽']; ctx.fillStyle = '#64452f'; ctx.fillRect(X(ft.x - 2.2), Y(ft.z - 1.1), 4.4, 2.2);
+  const wt = pen.inside['水槽']; ell(wt.x, wt.z, 2.4, 1.6); ctx.fillStyle = '#b6d9e8'; ctx.fill();
+  /* fence: rails + posts, gap at the east gate */
+  ctx.strokeStyle = '#9A7B4F'; ctx.lineWidth = 1.5;
+  [[pb.minX, pb.minZ, pb.maxX, pb.minZ], [pb.minX, pb.maxZ, pb.maxX, pb.maxZ], [pb.minX, pb.minZ, pb.minX, pb.maxZ]].forEach(sg => {
+    ctx.beginPath(); ctx.moveTo(X(sg[0]), Y(sg[1])); ctx.lineTo(X(sg[2]), Y(sg[3])); ctx.stroke(); });
+  ctx.beginPath(); ctx.moveTo(X(pb.maxX), Y(pb.minZ)); ctx.lineTo(X(pb.maxX), Y(pen.gate.z - 4)); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(X(pb.maxX), Y(pen.gate.z + 4)); ctx.lineTo(X(pb.maxX), Y(pb.maxZ)); ctx.stroke();
+  ctx.fillStyle = '#7d5c46';
+  for (let fx = pb.minX; fx <= pb.maxX; fx += 5){ ctx.fillRect(X(fx) - 0.8, Y(pb.minZ) - 0.8, 1.6, 1.6); ctx.fillRect(X(fx) - 0.8, Y(pb.maxZ) - 0.8, 1.6, 1.6); }
+  for (let fz = pb.minZ; fz <= pb.maxZ; fz += 5){ ctx.fillRect(X(pb.minX) - 0.8, Y(fz) - 0.8, 1.6, 1.6);
+    if (Math.abs(fz - pen.gate.z) > 5) ctx.fillRect(X(pb.maxX) - 0.8, Y(fz) - 0.8, 1.6, 1.6); }
+  /* tiny fluffy sheep */
+  [[-566, 47], [-556, 43], [-561, 53], [-550, 50], [-571, 55]].forEach(sp => {
+    softBlob(sp[0], sp[1] + 1, 2.6, 1.4, '#5A6B42', 0.25);
+    ctx.fillStyle = '#FFFDF6';
+    [[0,0,1.9],[-1.3,0.5,1.3],[1.3,0.5,1.3],[0,-1,1.4]].forEach(c => { ctx.beginPath(); ctx.arc(X(sp[0]+c[0]), Y(sp[1]+c[1]), c[2], 0, Math.PI*2); ctx.fill(); });
+    ctx.fillStyle = '#4A4238'; ctx.beginPath(); ctx.arc(X(sp[0] + 2.1), Y(sp[1] + 0.4), 0.95, 0, Math.PI*2); ctx.fill();
+  });
+  txt('绵绵牧场 · 羊圈 30×32', X(pb.maxX) - 2, Y(pb.minZ) - 17, 20, '#476B2F', 'right', '700');
+  txt('弄莫湖北岸 · 瑞丽大道北侧', X(-618), Y(74), 15, '#7A6C4E', 'center', '500');
+  /* --- reserved plot: empty dashed outline + sign --- */
   const hb = hou.bounds;
-  ctx.strokeStyle = '#8A6D3B'; ctx.lineWidth = 3; ctx.setLineDash([10,7]);
-  ctx.strokeRect(X(hb.minX),Y(hb.minZ),(hb.maxX-hb.minX)*S,(hb.maxZ-hb.minZ)*S); ctx.setLineDash([]);
-  txt('预留宅地 30×32（空地）', X(hb.minX)+2, Y(hb.minZ)-30, 24, '#8A6D3B', 'left', '700');
-  /* temple terrace at the pagoda point */
+  ctx.strokeStyle = '#7d5c46'; ctx.lineWidth = 2.4; ctx.setLineDash([9, 6]);
+  ctx.strokeRect(X(hb.minX), Y(hb.minZ), hb.maxX - hb.minX, hb.maxZ - hb.minZ); ctx.setLineDash([]);
+  ctx.fillStyle = '#7d5c46';
+  [[hb.minX, hb.minZ], [hb.maxX, hb.minZ], [hb.minX, hb.maxZ], [hb.maxX, hb.maxZ]].forEach(cn => ctx.fillRect(X(cn[0]) - 1, Y(cn[1]) - 1, 2, 2));
+  woodSign(hb.minX + 6, hb.maxZ - 3, 0.9);
+  txt('预留宅地 30×32（空地）', X(hb.minX) + 2, Y(hb.minZ) - 17, 20, '#7d5c46', 'left', '700');
+  /* --- temple terrace on Jinta hill --- */
   const tb = tem.precinct.bounds;
-  ctx.fillStyle = '#EFE3BC'; ctx.fillRect(X(tb.minX),Y(tb.minZ),(tb.maxX-tb.minX)*S,(tb.maxZ-tb.minZ)*S);
-  ctx.strokeStyle = '#8A6D3B'; ctx.lineWidth = 3.2; ctx.strokeRect(X(tb.minX),Y(tb.minZ),(tb.maxX-tb.minX)*S,(tb.maxZ-tb.minZ)*S);
+  ctx.fillStyle = '#e2d6be'; rr(X(tb.minX), Y(tb.minZ), tb.maxX - tb.minX, tb.maxZ - tb.minZ, 3); ctx.fill();
+  ctx.strokeStyle = '#b8a67e'; ctx.lineWidth = 2; rr(X(tb.minX), Y(tb.minZ), tb.maxX - tb.minX, tb.maxZ - tb.minZ, 3); ctx.stroke();
   const hall = tem.inside['大殿'];
-  ctx.fillStyle = '#7A4A3A'; ctx.fillRect(X(hall.x-hall.w/2),Y(hall.z-hall.d/2),hall.w*S,hall.d*S);
-  const pg = tem.inside['金塔'];
-  ctx.fillStyle = '#C9A227'; ctx.beginPath(); ctx.arc(X(pg.x),Y(pg.z),7,0,Math.PI*2); ctx.fill();
-  txt('山寺（台地 44×34）', X(tem.precinct.center.x), Y(tb.maxZ)+26, 25, '#6D5A2E', 'center', '700');
+  ctx.fillStyle = '#f3ebd9'; ctx.fillRect(X(hall.x - hall.w/2), Y(hall.z - hall.d/2), hall.w, hall.d);
+  roofTop(hall.x, hall.z, hall.w + 3, hall.d + 3, '#5f7189', '#dccfae');
+  ctx.fillStyle = '#B8443A';
+  for (let px = -9; px <= 9; px += 4.5) ctx.fillRect(X(hall.x + px) - 0.7, Y(hall.z + hall.d/2 + 0.6), 1.4, 2.6);
+  const bell = tem.inside['钟亭'];
+  ctx.fillStyle = '#c86f50';
+  ctx.beginPath(); ctx.moveTo(X(bell.x), Y(bell.z - 5)); ctx.lineTo(X(bell.x + 5), Y(bell.z + 3.4)); ctx.lineTo(X(bell.x - 5), Y(bell.z + 3.4)); ctx.closePath(); ctx.fill();
+  ctx.fillStyle = '#7d5c46'; ctx.beginPath(); ctx.arc(X(bell.x), Y(bell.z + 0.6), 1.5, 0, Math.PI*2); ctx.fill();
+  drawPagoda(tem.inside['金塔'].x, tem.inside['金塔'].z, 13.5, 6, 3.1);
+  treeCluster(tb.minX + 5, tb.minZ + 6, 6.5, 881, null);
+  treeCluster(tb.maxX - 4, tb.maxZ - 5, 6, 882, null);
+  ctx.fillStyle = '#F2B544';
+  [[tb.minX + 3, tb.maxZ - 3], [tb.maxX - 3, tb.maxZ - 3]].forEach(l => { ctx.beginPath(); ctx.arc(X(l[0]), Y(l[1]), 1.4, 0, Math.PI*2); ctx.fill(); });
+  txt('山寺（台地 44×34）', X(tem.precinct.center.x), Y(tb.maxZ) + 20, 20, '#6D5A2E', 'center', '700');
 })();
 
-/* waterfalls: white streak, mist pool, faint rainbow */
-DATA.places.filter(p=>p.name==='莫里瀑布'||p.name==='雨林瀑布').forEach(p=>{
-  ctx.strokeStyle = 'rgba(250,253,255,0.9)'; ctx.lineWidth = 5; ctx.lineCap='round';
-  ctx.beginPath(); ctx.moveTo(X(p.x), Y(p.z)-14); ctx.quadraticCurveTo(X(p.x)+3, Y(p.z), X(p.x)-1, Y(p.z)+13); ctx.stroke();
-  ctx.fillStyle = 'rgba(255,255,255,0.5)';
-  ctx.beginPath(); ctx.ellipse(X(p.x), Y(p.z)+15, 13, 5, 0, 0, Math.PI*2); ctx.fill();
-  ctx.lineWidth = 3;
-  ctx.strokeStyle = 'rgba(255,150,150,0.35)';
-  ctx.beginPath(); ctx.arc(X(p.x), Y(p.z)+13, 17, Math.PI*1.12, Math.PI*1.6); ctx.stroke();
-  ctx.strokeStyle = 'rgba(255,214,120,0.35)';
-  ctx.beginPath(); ctx.arc(X(p.x), Y(p.z)+13, 21, Math.PI*1.12, Math.PI*1.6); ctx.stroke();
-  ctx.strokeStyle = 'rgba(140,200,255,0.35)';
-  ctx.beginPath(); ctx.arc(X(p.x), Y(p.z)+13, 25, Math.PI*1.12, Math.PI*1.6); ctx.stroke();
-});
+/* stand-alone landmarks */
+drawWaterfall(1692, -1458, 68, 5150);
+drawWaterfall(-800, -676, 36, 5250);
+(function(){ /* 莫里温泉 */
+  const x = 1850, z = -1380;
+  softBlob(x, z, 40, 22, '#CDEBC8', 0.5);
+  [[0, 0, 20, 13], [-29, 11, 14, 9.5], [25, 13, 12.5, 9]].forEach(p => {
+    ell(x + p[0], z + p[1], p[2], p[3]); ctx.fillStyle = '#d7e9ec'; ctx.fill();
+    ctx.strokeStyle = '#f3ebd9'; ctx.lineWidth = 3; ctx.stroke();
+    ell(x + p[0], z + p[1], p[2] * 0.62, p[3] * 0.62); ctx.fillStyle = '#a8cfdd'; ctx.fill();
+  });
+  ctx.strokeStyle = 'rgba(255,255,255,0.75)'; ctx.lineWidth = 2.6;
+  for (let i = 0; i < 5; i++){
+    const sx = x - 22 + i * 11;
+    ctx.beginPath(); ctx.arc(X(sx), Y(z - 20 - (i % 2) * 6), 7, Math.PI * 1.05, Math.PI * 1.75); ctx.stroke();
+    ctx.beginPath(); ctx.arc(X(sx + 3), Y(z - 31 - (i % 2) * 6), 5.2, Math.PI * 1.1, Math.PI * 1.8); ctx.stroke();
+  }
+})();
+ell(1300, 420 + 10, 48, 28); ctx.fillStyle = 'rgba(60,90,40,0.22)'; ctx.fill();
+(function(){ /* 独树成林: one giant banyan */
+  const x = 1300, z = 420, R = rng(6161);
+  ctx.strokeStyle = '#7d5c46'; ctx.lineWidth = 4.2;
+  ctx.beginPath(); ctx.moveTo(X(x - 3.5), Y(z + 14)); ctx.quadraticCurveTo(X(x - 1), Y(z + 2), X(x), Y(z - 5)); ctx.stroke();
+  ctx.beginPath(); ctx.moveTo(X(x + 3.5), Y(z + 14)); ctx.quadraticCurveTo(X(x + 1), Y(z + 2), X(x), Y(z - 5)); ctx.stroke();
+  const BC = ['#4a7f3e', '#58924a', '#58924a', '#6fa758'];
+  for (let i = 0; i < 42; i++){
+    const a = R() * Math.PI * 2, d = Math.sqrt(R());
+    const cx = x + Math.cos(a) * 40 * d, cz = z - 8 + Math.sin(a) * 20 * d, cr = 10 + R() * 10;
+    ctx.fillStyle = BC[Math.floor(R() * BC.length)];
+    ctx.beginPath(); ctx.arc(X(cx), Y(cz), cr, 0, Math.PI*2); ctx.fill();
+  }
+  ctx.fillStyle = 'rgba(196,226,164,0.55)';
+  for (let i = 0; i < 10; i++){ const cx = x - 22 + R() * 36, cz = z - 22 + R() * 13;
+    ctx.beginPath(); ctx.arc(X(cx), Y(cz), 4 + R() * 4, 0, Math.PI*2); ctx.fill(); }
+  ctx.strokeStyle = 'rgba(125,92,70,0.85)'; ctx.lineWidth = 1.1;
+  for (let i = 0; i < 12; i++){
+    const rx = x - 38 + i * 7 + (R() - .5) * 3, rz = z + 10 + Math.abs(rx - x) * 0.2;
+    ctx.beginPath(); ctx.moveTo(X(rx), Y(z - 10 + Math.abs(rx - x) * 0.24)); ctx.quadraticCurveTo(X(rx + 1.5), Y(z + 2), X(rx), Y(rz + 7)); ctx.stroke();
+  }
+  ctx.strokeStyle = 'rgba(125,92,70,0.85)'; ctx.lineWidth = 1.6; ctx.setLineDash([4, 3.2]);
+  ell(x, z + 3, 46, 27); ctx.stroke(); ctx.setLineDash([]);
+})();
+drawBridge(40);
+drawBridge(3760);
+(function(){ /* 瑞丽渡口: dock + bamboo raft */
+  const ank = DATA.referenceAnchors.find(a => a.name === '瑞丽渡口');
+  const river = DATA.rivers[0], zc = riverZAt(river, ank.x), bank = zc - river.width / 2;
+  roofTop(ank.x - 10, bank - 12, 9, 7, '#c86f50', '#7d5c46');
+  ctx.strokeStyle = '#64452f'; ctx.lineWidth = 2.2;
+  for (let i = -1; i <= 1; i++){ ctx.beginPath(); ctx.moveTo(X(ank.x + i * 2.6), Y(bank - 3)); ctx.lineTo(X(ank.x + i * 2.6), Y(bank + 9)); ctx.stroke(); }
+  ctx.fillStyle = '#dccfae'; ctx.strokeStyle = 'rgba(100,69,47,0.5)'; ctx.lineWidth = 0.8;
+  rr(X(ank.x + 7), Y(zc - 4), 13, 8, 2); ctx.fill(); ctx.stroke();
+  ctx.strokeStyle = 'rgba(100,69,47,0.45)';
+  for (let i = 1; i < 4; i++){ ctx.beginPath(); ctx.moveTo(X(ank.x + 7), Y(zc - 4 + i * 2)); ctx.lineTo(X(ank.x + 20), Y(zc - 4 + i * 2)); ctx.stroke(); }
+  ctx.strokeStyle = '#7d5c46'; ctx.lineWidth = 1.4;
+  ctx.beginPath(); ctx.moveTo(X(ank.x + 18), Y(zc - 6)); ctx.lineTo(X(ank.x + 21), Y(zc + 5)); ctx.stroke();
+  txt('瑞丽渡口', X(ank.x - 16), Y(bank - 13), 16, '#2F6DA3', 'right', '600');
+})();
 
-/* places: visible markers + labels at true positions */
-const OFF = { '瑞丽（勐卯）':[18,34], '芒令':[-96,-16], '湖畔':[-150,-30], '湖南':[-24,52], '塔下':[16,10], '姐勒金塔':[-186,2],
-  '姐告':[16,20], '姐告桥·古渡':[16,-24], '畹町':[-120,-6], '弄岛':[16,-26], '莫里温泉':[16,6], '独树成林':[16,10] };
-DATA.places.forEach(p=>{
-  if(p.name==='弄莫湖') return;
-  const major = p.tier==='主要';
-  const o = OFF[p.name] || [13,-9];
-  const fs = major?31:23, lx = X(p.x)+o[0], ly = Y(p.z)+o[1];
-  ctx.font = (major?'700':'600') + ' ' + fs + 'px "Yuanti SC","Hiragino Maru Gothic ProN","PingFang SC","Microsoft YaHei",sans-serif';
+/* break the straight clip edges of 莫里山 with foothill trees + mist */
+(function(){
+  const z = zoneByName['莫里山']; const R = rng(2468);
+  for (let i = 0; i < z.points.length; i++){
+    const a = z.points[i], b = z.points[(i + 1) % z.points.length];
+    const L = Math.hypot(b[0] - a[0], b[1] - a[1]), n = Math.max(1, Math.floor(L / 105));
+    for (let k = 0; k < n; k++){
+      const t = (k + R()) / n;
+      const x = a[0] + (b[0] - a[0]) * t + (R() - .5) * 46, zz = a[1] + (b[1] - a[1]) * t + (R() - .5) * 46;
+      treeCluster(x, zz, 11 + R() * 8, 9100 + i * 40 + k, R() < 0.1 ? '#F6C6D8' : null);
+    }
+  }
+  softBlob(1500, -1080, 240, 40, '#e3b193', 0.12);
+  softBlob(2050, -1010, 280, 44, '#e3b193', 0.10);
+  /* feather the hard southern boundary of 莫里山 */
+  [[2600, -1050], [2275, -1000], [1950, -950], [1725, -1050], [1500, -1150], [1350, -1325], [1200, -1500]].forEach((p, i) => {
+    softBlob(p[0], p[1], 120 + (i % 3) * 40, 46, '#58924a', 0.16);
+    treeCluster(p[0] + (i % 2 ? 30 : -30), p[1] + 26, 13 + (i % 3) * 3, 9500 + i * 17, null);
+  });
+})();
+
+/* warm sunlight wash + gentle vignette */
+(function(){
+  let g = ctx.createRadialGradient(X(700), Y(-250), 200, X(700), Y(-250), 3900);
+  g.addColorStop(0, 'rgba(255,244,205,0.13)'); g.addColorStop(1, 'rgba(255,244,205,0)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, B.width, B.height);
+  g = ctx.createRadialGradient(X(700), Y(-100), 1500, X(700), Y(-100), 4300);
+  g.addColorStop(0, 'rgba(110,80,30,0)'); g.addColorStop(1, 'rgba(110,80,30,0.10)');
+  ctx.fillStyle = g; ctx.fillRect(0, 0, B.width, B.height);
+})();
+
+/* zone labels */
+[['勐卯坝子', 1500, -170, 38], ['北部山地', -1250, -1560, 42], ['莫里山', 2080, -1660, 38], ['莫里雨林', 1060, -840, 31],
+ ['金塔山', 280, -96, 26], ['江南山地（对岸）', 500, 648, 38], ['西部林地', -1180, -150, 29], ['东部林地', 2120, -70, 29],
+ ['西北丘陵', -860, -806, 29]].forEach(l => txt(l[0], X(l[1]), Y(l[2]), l[3], 'rgba(66,88,48,0.52)', 'center', '600'));
+
+/* places: sign plaques at true positions */
+const OFF = { '瑞丽（勐卯）': [16, 30], '芒令': [-88, -14], '湖畔': [10, 28], '湖南': [-20, 46], '塔下': [14, 8],
+  '姐勒金塔': [-168, 2], '姐告': [14, 18], '姐告桥·古渡': [16, -22], '畹町': [-112, -4], '弄岛': [14, -24],
+  '莫里温泉': [16, 4], '独树成林': [30, 38], '莫里瀑布': [18, -6], '雨林瀑布': [16, -4] };
+DATA.places.forEach(p => {
+  if (p.name === '弄莫湖') return;
+  const major = p.tier === '主要';
+  const o = OFF[p.name] || [12, -8];
+  const fs = major ? 26 : 19, lx = X(p.x) + o[0], ly = Y(p.z) + o[1];
+  ctx.font = (major ? '700' : '600') + ' ' + fs + 'px ' + FONT;
   const tw = ctx.measureText(p.name).width;
-  /* sign post + cream plaque */
-  ctx.strokeStyle = '#A98F5F'; ctx.lineWidth = 4;
-  ctx.beginPath(); ctx.moveTo(X(p.x), Y(p.z)); ctx.lineTo(X(p.x), Y(p.z)+13); ctx.stroke();
-  ctx.fillStyle = '#FFFDF4';
-  ctx.strokeStyle = '#B09A72'; ctx.lineWidth = 2.4;
-  ctx.beginPath();
-  const rx = lx-9, ry = ly-fs*0.68, rw = tw+18, rh = fs*1.36, rr2 = 10;
-  ctx.moveTo(rx+rr2,ry); ctx.lineTo(rx+rw-rr2,ry); ctx.quadraticCurveTo(rx+rw,ry,rx+rw,ry+rr2);
-  ctx.lineTo(rx+rw,ry+rh-rr2); ctx.quadraticCurveTo(rx+rw,ry+rh,rx+rw-rr2,ry+rh);
-  ctx.lineTo(rx+rr2,ry+rh); ctx.quadraticCurveTo(rx,ry+rh,rx,ry+rh-rr2);
-  ctx.lineTo(rx,ry+rr2); ctx.quadraticCurveTo(rx,ry,rx+rr2,ry);
-  ctx.closePath(); ctx.fill(); ctx.stroke();
-  ctx.fillStyle = major ? '#C0562F' : '#8A6D3B';
-  ctx.beginPath(); ctx.arc(X(p.x),Y(p.z), major?7.5:5, 0, Math.PI*2); ctx.fill();
-  ctx.strokeStyle = '#FFFDF4'; ctx.lineWidth = 2.2; ctx.stroke();
-  txt(p.name, lx, ly, fs, '#4A3B26', 'left', major?'700':'600');
+  ctx.strokeStyle = '#8a6a4e'; ctx.lineWidth = 3.4;
+  ctx.beginPath(); ctx.moveTo(X(p.x), Y(p.z)); ctx.lineTo(X(p.x), Y(p.z) + 11); ctx.stroke();
+  ctx.fillStyle = '#FFFDF4'; ctx.strokeStyle = '#b8a67e'; ctx.lineWidth = 2;
+  rr(lx - 8, ly - fs * 0.68, tw + 16, fs * 1.36, 8); ctx.fill(); ctx.stroke();
+  ctx.fillStyle = major ? '#C0562F' : '#7d5c46';
+  ctx.beginPath(); ctx.arc(X(p.x), Y(p.z), major ? 6.4 : 4.4, 0, Math.PI*2); ctx.fill();
+  ctx.strokeStyle = '#FFFDF4'; ctx.lineWidth = 1.9; ctx.stroke();
+  txt(p.name, lx, ly, fs, '#4A3B26', 'left', major ? '700' : '600');
 });
 
-/* km scale bar: 1 km = 160 units = 176 px */
-(function(){
-  const bx = 84, by = H-118, seg = 160*S;
-  txt('比例尺', bx, by-34, 24, '#6D5A2E', 'left', '700');
-  for(let i=0;i<3;i++){ ctx.fillStyle = i%2? '#F7F2E2':'#8A6D3B'; ctx.fillRect(bx+i*seg, by, seg, 13); }
-  ctx.strokeStyle = '#8A6D3B'; ctx.lineWidth = 2; ctx.strokeRect(bx, by, seg*3, 13);
-  for(let i=0;i<=3;i++) txt(String(i), bx+i*seg, by+34, 22, '#6D5A2E', 'center', '600');
-  txt('公里（1 公里 = 160 单位）', bx+seg*3+18, by+8, 23, '#6D5A2E', 'left', '600');
-  txt('占地注记：羊圈 / 宅地 30×32 单位 ≈ 190×200 米 · 寺台 44×34 单位 ≈ 275×210 米 · 瑞丽江宽约 55 单位 ≈ 340 米', bx, by+76, 24, '#7A6C4E', 'left', '500');
-})();
-
-/* legend */
-(function(){
-  const lx = W-560, ly = H-205;
-  ctx.fillStyle = 'rgba(255,253,244,0.92)'; ctx.fillRect(lx,ly,470,150);
-  ctx.strokeStyle = '#C9BFA3'; ctx.lineWidth = 2; ctx.strokeRect(lx,ly,470,150);
-  txt('图例', lx+22, ly+30, 25, '#3D3626', 'left', '700');
-  ctx.strokeStyle='#C2A15C'; ctx.lineWidth=9; ctx.beginPath(); ctx.moveTo(lx+22,ly+66); ctx.lineTo(lx+86,ly+66); ctx.stroke();
-  txt('主干道（宽约 7 单位）', lx+100, ly+66, 22, '#4A4232', 'left', '500');
-  ctx.strokeStyle='#D3BC85'; ctx.lineWidth=5; ctx.beginPath(); ctx.moveTo(lx+22,ly+102); ctx.lineTo(lx+86,ly+102); ctx.stroke();
-  txt('支路', lx+100, ly+102, 22, '#4A4232', 'left', '500');
-  ctx.fillStyle='#8FBBE2'; ctx.fillRect(lx+22,ly+124,64,14);
-  txt('河流 / 湖泊（真实宽度）', lx+100, ly+131, 22, '#4A4232', 'left', '500');
-  txt('位置为大概地理落位，非测绘坐标 · 纯地理底图：无价格 / 地块 / 玩法字段', lx-16, ly+178, 22, '#7A6C4E', 'right', '500');
-})();
-
+/* ---------- scale bar & legend (device space) ---------- */
+if (FURN){
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+  const bx = 84, by = CH - 118, seg = 160 * S;
+  txt('比例尺', bx, by - 34, 24, '#6D5A2E', 'left', '700');
+  for (let i = 0; i < 3; i++){ ctx.fillStyle = i % 2 ? '#F7F2E2' : '#7d5c46'; ctx.fillRect(bx + i * seg, by, seg, 13); }
+  ctx.strokeStyle = '#7d5c46'; ctx.lineWidth = 2; ctx.strokeRect(bx, by, seg * 3, 13);
+  for (let i = 0; i <= 3; i++) txt(String(i), bx + i * seg, by + 34, 22, '#6D5A2E', 'center', '600');
+  txt('公里（1 公里 = 160 单位）', bx + seg * 3 + 18, by + 8, 23, '#6D5A2E', 'left', '600');
+  txt('占地注记：羊圈 / 宅地 30×32 单位 ≈ 190×200 米 · 寺台 44×34 单位 ≈ 275×210 米 · 瑞丽江宽约 55 单位 ≈ 340 米', bx, by + 76, 24, '#7A6C4E', 'left', '500');
+  const lx = CW - 560, ly = CH - 208;
+  ctx.fillStyle = 'rgba(255,253,244,0.93)'; ctx.fillRect(lx, ly, 470, 152);
+  ctx.strokeStyle = '#C9BFA3'; ctx.lineWidth = 2; ctx.strokeRect(lx, ly, 470, 152);
+  txt('图例', lx + 22, ly + 30, 25, '#3D3626', 'left', '700');
+  ctx.strokeStyle = '#c9b489'; ctx.lineWidth = 9; ctx.beginPath(); ctx.moveTo(lx + 22, ly + 64); ctx.lineTo(lx + 86, ly + 64); ctx.stroke();
+  txt('主干道（宽约 7 单位）', lx + 100, ly + 64, 22, '#4A4232', 'left', '500');
+  ctx.strokeStyle = '#D3BC85'; ctx.lineWidth = 5; ctx.beginPath(); ctx.moveTo(lx + 22, ly + 98); ctx.lineTo(lx + 86, ly + 98); ctx.stroke();
+  txt('支路', lx + 100, ly + 98, 22, '#4A4232', 'left', '500');
+  ctx.fillStyle = '#79b8dd'; ctx.fillRect(lx + 22, ly + 120, 64, 14);
+  txt('河流 / 湖泊（真实宽度）', lx + 100, ly + 127, 22, '#4A4232', 'left', '500');
+  txt('位置为大概地理落位，非测绘坐标 · 纯地理底图：无价格 / 地块 / 玩法字段', lx + 454, ly + 180, 22, '#7A6C4E', 'right', '500');
+}
 window.__ready = true;
+
 </script>
 </body>
 </html>
