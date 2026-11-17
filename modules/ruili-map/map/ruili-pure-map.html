@@ -1386,7 +1386,7 @@ DATA.terrainZones.forEach((z,zi)=>{
     return inside; }
   if(z.type==='山地'||z.type==='丘陵'){
     /* soft rolling mounds: pale base + lighter top, no hard edges */
-    for(let i=0;i<210;i++){
+    for(let i=0;i<300;i++){
       const x = minx + hash(zi*10000+i*3.7)*(maxx-minx), zz = minz + hash(zi*20000+i*7.3)*(maxz-minz);
       if(!inPoly(x,zz)) continue;
       const r = 16 + hash(zi*30000+i*5.1)*26;
@@ -1397,22 +1397,41 @@ DATA.terrainZones.forEach((z,zi)=>{
     }
   }
   if(z.type==='林地'){
-    /* puffy rounded canopy clusters, two-tone soft greens */
-    for(let i=0;i<300;i++){
-      const x = minx + hash(zi*50000+i*3.3)*(maxx-minx), zz = minz + hash(zi*60000+i*6.9)*(maxz-minz);
+    /* puffy rounded canopy clusters, grouped like little woods, three-tone soft greens */
+    for(let i=0;i<620;i++){
+      const clu = Math.floor(i/6);
+      const cx0 = minx + hash(zi*51000+clu*3.3)*(maxx-minx), cz0 = minz + hash(zi*61000+clu*6.9)*(maxz-minz);
+      const x = cx0 + (hash(zi*52000+i*3.3)-.5)*52, zz = cz0 + (hash(zi*62000+i*6.9)-.5)*34;
       if(!inPoly(x,zz)) continue;
-      const r = 9 + hash(zi*70000+i*4.3)*11;
+      const r = 9 + hash(zi*70000+i*4.3)*12;
       ctx.fillStyle = 'rgba(84,138,72,0.55)';
       ctx.beginPath(); ctx.arc(X(x),Y(zz),r,0,Math.PI*2); ctx.fill();
       ctx.fillStyle = 'rgba(140,196,110,0.75)';
       ctx.beginPath(); ctx.arc(X(x)-r*0.3,Y(zz)-r*0.3,r*0.62,0,Math.PI*2); ctx.fill();
       ctx.beginPath(); ctx.arc(X(x)+r*0.42,Y(zz)+r*0.1,r*0.45,0,Math.PI*2); ctx.fill();
+      ctx.fillStyle = 'rgba(196,232,160,0.5)';
+      ctx.beginPath(); ctx.arc(X(x)-r*0.12,Y(zz)-r*0.42,r*0.3,0,Math.PI*2); ctx.fill();
     }
   }
   if(z.type==='坝子平原'){
-    /* tiny storybook flowers sprinkled through the meadow */
+    /* flower meadows in soft single-colour DRIFTS (wash + dense dots) + a sparse sprinkle */
     const FC = ['#F2A9C4','#FFF6E8','#F7D774','#C3B2E8','#F28BA8'];
-    for(let i=0;i<1500;i++){
+    for(let dI=0;dI<30;dI++){
+      const dx = minx + hash(zi*81000+dI*2.9)*(maxx-minx), dz = minz + hash(zi*91000+dI*6.1)*(maxz-minz);
+      if(!inPoly(dx,dz)) continue;
+      const drx = 26+hash(zi*82000+dI*4.1)*60, drz = drx*0.55;
+      ctx.fillStyle = FC[dI%FC.length]; ctx.globalAlpha = 0.13;
+      ctx.beginPath(); ctx.ellipse(X(dx),Y(dz),drx*S,drz*S,0,0,Math.PI*2); ctx.fill();
+      ctx.globalAlpha = 1;
+      for(let j2=0;j2<130;j2++){
+        const a = hash(zi*83000+dI*131+j2*1.7)*Math.PI*2, rr = Math.sqrt(hash(zi*84000+dI*97+j2*2.3));
+        const fx = dx+Math.cos(a)*drx*rr, fz = dz+Math.sin(a)*drz*rr;
+        if(!inPoly(fx,fz)) continue;
+        ctx.fillStyle = FC[dI%FC.length];
+        ctx.beginPath(); ctx.arc(X(fx),Y(fz),2.4,0,Math.PI*2); ctx.fill();
+      }
+    }
+    for(let i=0;i<450;i++){
       const x = minx + hash(zi*80000+i*2.9)*(maxx-minx), zz = minz + hash(zi*90000+i*6.1)*(maxz-minz);
       if(!inPoly(x,zz)) continue;
       ctx.fillStyle = FC[i%FC.length];
@@ -1436,6 +1455,16 @@ txt('南宛河', X(625), Y(-820), 34, '#2F6DA3', 'left', '600');
 txt('莫里河', X(1445), Y(-430), 32, '#2F6DA3', 'left', '600');
 txt('团结大沟', X(-330), Y(242), 24, '#2F6DA3', 'left', '500');
 
+/* river sparkle: light dancing on the water along every river */
+DATA.rivers.forEach(r=>{
+  ctx.fillStyle = 'rgba(255,255,255,0.7)';
+  for(let i=0;i<46;i++){
+    const p = along(r.points, hash(i*3.71+r.points.length)*0.98+0.01);
+    const off = (hash(i*9.31)-.5)*r.width*0.5;
+    ctx.beginPath(); ctx.arc(X(p[0])+off*S, Y(p[1])+off*S*0.4, 1.9, 0, Math.PI*2); ctx.fill();
+  }
+});
+
 /* lake (true size) */
 DATA.waterBodies.forEach(w=>{
   ctx.beginPath(); ctx.ellipse(X(w.cx),Y(w.cz),(w.rx+11)*S,(w.rz+11)*S,0,0,Math.PI*2);
@@ -1445,16 +1474,32 @@ DATA.waterBodies.forEach(w=>{
   ctx.beginPath(); ctx.ellipse(X(w.cx),Y(w.cz),w.rx*S,w.rz*S,0,0,Math.PI*2);
   ctx.fillStyle = '#9CCBF0'; ctx.fill();
   ctx.fillStyle = 'rgba(255,255,255,0.75)';
-  for(let i=0;i<26;i++){
+  for(let i=0;i<64;i++){
     const a = hash(i*3.77)*Math.PI*2, rr = Math.sqrt(hash(i*9.13));
     ctx.beginPath(); ctx.arc(X(w.cx)+Math.cos(a)*w.rx*S*0.8*rr, Y(w.cz)+Math.sin(a)*w.rz*S*0.8*rr, 2.2, 0, Math.PI*2); ctx.fill();
   }
+  /* lotus corner in the south-west bay: green pads, every third with a pink bloom */
+  for(let li=0;li<42;li++){
+    const a = 2.2 + hash(li*4.31)*0.9, rr = 0.78 + hash(li*6.17)*0.18;
+    const lx2 = X(w.cx)+Math.cos(a)*w.rx*S*rr, ly2 = Y(w.cz)+Math.sin(a)*w.rz*S*rr;
+    ctx.fillStyle = 'rgba(94,150,80,0.85)';
+    ctx.beginPath(); ctx.arc(lx2,ly2,3.1,0,Math.PI*2); ctx.fill();
+    if(li%3===0){ ctx.fillStyle = '#E8A4C0'; ctx.beginPath(); ctx.arc(lx2,ly2,1.7,0,Math.PI*2); ctx.fill(); }
+  }
+  /* reed ticks ringing the shore */
+  ctx.strokeStyle = 'rgba(96,140,70,0.55)'; ctx.lineWidth = 1.6; ctx.lineCap='round';
+  ctx.beginPath();
+  for(let ri=0;ri<130;ri++){
+    const a = ri/130*Math.PI*2 + hash(ri*3.3)*0.03;
+    const rx3 = X(w.cx)+Math.cos(a)*(w.rx+7)*S, ry3 = Y(w.cz)+Math.sin(a)*(w.rz+7)*S;
+    ctx.moveTo(rx3,ry3); ctx.lineTo(rx3-1.5,ry3-6-hash(ri*7.1)*3);
+  }
+  ctx.stroke();
   txt('弄 莫 湖', X(w.cx-26), Y(w.cz)+4, 36, '#2F6DA3', 'center', '700', 4);
 });
 
 /* roads: trunk prominent, branch thin/pale */
-function drawRoads(level){
-  DATA.roads.filter(r=>r.level===level).forEach(r=>{
+function drawRoads(level){  DATA.roads.filter(r=>r.level===level).forEach(r=>{
     ctx.lineCap='round'; ctx.lineJoin='round';
     if(level==='trunk'){
       ctx.save(); ctx.translate(0,4); path(r.points); ctx.strokeStyle='rgba(160,128,74,0.30)'; ctx.lineWidth=15; ctx.stroke(); ctx.restore();
@@ -1527,6 +1572,21 @@ const EL = {}; DATA.elements.forEach(e=> EL[e.id]=e);
   ctx.fillStyle = '#C9A227'; ctx.beginPath(); ctx.arc(X(pg.x),Y(pg.z),7,0,Math.PI*2); ctx.fill();
   txt('山寺（台地 44×34）', X(tem.precinct.center.x), Y(tb.maxZ)+26, 25, '#6D5A2E', 'center', '700');
 })();
+
+/* waterfalls: white streak, mist pool, faint rainbow */
+DATA.places.filter(p=>p.name==='莫里瀑布'||p.name==='雨林瀑布').forEach(p=>{
+  ctx.strokeStyle = 'rgba(250,253,255,0.9)'; ctx.lineWidth = 5; ctx.lineCap='round';
+  ctx.beginPath(); ctx.moveTo(X(p.x), Y(p.z)-14); ctx.quadraticCurveTo(X(p.x)+3, Y(p.z), X(p.x)-1, Y(p.z)+13); ctx.stroke();
+  ctx.fillStyle = 'rgba(255,255,255,0.5)';
+  ctx.beginPath(); ctx.ellipse(X(p.x), Y(p.z)+15, 13, 5, 0, 0, Math.PI*2); ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.strokeStyle = 'rgba(255,150,150,0.35)';
+  ctx.beginPath(); ctx.arc(X(p.x), Y(p.z)+13, 17, Math.PI*1.12, Math.PI*1.6); ctx.stroke();
+  ctx.strokeStyle = 'rgba(255,214,120,0.35)';
+  ctx.beginPath(); ctx.arc(X(p.x), Y(p.z)+13, 21, Math.PI*1.12, Math.PI*1.6); ctx.stroke();
+  ctx.strokeStyle = 'rgba(140,200,255,0.35)';
+  ctx.beginPath(); ctx.arc(X(p.x), Y(p.z)+13, 25, Math.PI*1.12, Math.PI*1.6); ctx.stroke();
+});
 
 /* places: visible markers + labels at true positions */
 const OFF = { '瑞丽（勐卯）':[18,34], '芒令':[-96,-16], '湖畔':[-150,-30], '湖南':[-24,52], '塔下':[16,10], '姐勒金塔':[-186,2],
