@@ -69,7 +69,7 @@ function packageName(importPath) {
   return importPath.startsWith("@") ? importPath.split("/").slice(0, 2).join("/") : importPath.split("/")[0];
 }
 
-function dependencyGuard(root) {
+function dependencyGuard(root, allowYard) {
   return {
     name: "wechat-runtime-boundary",
     setup(bundler) {
@@ -82,7 +82,9 @@ function dependencyGuard(root) {
         if (args.namespace !== "file") return null;
         await noLinks(root, args.path);
         const relative = posix(path.relative(root, args.path));
-        if (!/^(?:wechat|src|node_modules)\//.test(relative) || BLOCKED_NAMES.test(relative)) throw new Error(`Module outside the client build boundary: ${relative}`);
+        const allowed = /^(?:wechat|src|node_modules)\//.test(relative)
+          || (allowYard && /^demos\/anheli-module-yard\//.test(relative));
+        if (!allowed || BLOCKED_NAMES.test(relative)) throw new Error(`Module outside the client build boundary: ${relative}`);
         if (/(?:^|\/)node_modules\/(?:react|react-dom|react-native|vue|next)(?:\/|$)/.test(relative)) throw new Error(`DOM/framework module cannot run in the game bundle: ${relative}`);
         if (!CODE_EXTENSIONS.has(path.extname(args.path).toLowerCase())) throw new Error(`Unsupported client module: ${relative}`);
         inspectText(relative, await fs.readFile(args.path));
@@ -92,13 +94,15 @@ function dependencyGuard(root) {
   };
 }
 
-export async function buildWechat({ projectRoot = REPO_ROOT, checkOnly = false, maxPackageBytes = 4 * 1024 * 1024 } = {}) {
+export async function buildWechat({ projectRoot = REPO_ROOT, checkOnly = false, maxPackageBytes = 4 * 1024 * 1024, outputName = "wechat", entryPoint = "wechat/game.js" } = {}) {
   const root = await fs.realpath(projectRoot);
   if (process.platform === "win32" && path.parse(root).root.toLowerCase() !== "d:\\") throw new Error("WeChat build outputs must remain on D:");
   if (!Number.isSafeInteger(maxPackageBytes) || maxPackageBytes < 1) throw new Error("Invalid package budget");
   const client = path.join(root, "wechat");
   const dist = path.join(root, "dist");
-  const destination = path.join(dist, "wechat");
+  if (!/^wechat(?:-[a-z0-9-]+)?$/.test(outputName)) throw new Error("Invalid WeChat output directory");
+  if (!["wechat/game.js", "wechat/yard-game.js"].includes(entryPoint)) throw new Error("Invalid WeChat entry point");
+  const destination = path.join(dist, outputName);
   const reportDirectory = path.join(root, "reports", "wechat");
   await noLinks(root, destination);
   await noLinks(root, reportDirectory);
@@ -123,10 +127,10 @@ export async function buildWechat({ projectRoot = REPO_ROOT, checkOnly = false, 
     packOptions: { ignore: [], include: [] },
   };
   const bundle = await build({
-    absWorkingDir: root, entryPoints: ["wechat/game.js"], outfile: "dist/wechat/game.js",
+    absWorkingDir: root, entryPoints: [entryPoint], outfile: "dist/wechat/game.js",
     bundle: true, platform: "neutral", format: "iife", target: SCRIPT_TARGET, write: false,
     metafile: true, sourcemap: false, minify: false, legalComments: "inline", preserveSymlinks: true,
-    logLevel: "silent", plugins: [dependencyGuard(root)],
+    logLevel: "silent", plugins: [dependencyGuard(root, entryPoint === "wechat/yard-game.js")],
   });
   for (const output of Object.values(bundle.metafile.outputs)) {
     if (output.imports.length) throw new Error("Unresolved runtime imports are not allowed in the game package");
@@ -169,7 +173,7 @@ export async function buildWechat({ projectRoot = REPO_ROOT, checkOnly = false, 
   if (totalBytes > maxPackageBytes) throw new Error(`Game package exceeds the project budget: ${totalBytes} > ${maxPackageBytes} bytes`);
   let baseline = null;
   try { baseline = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim(); } catch {}
-  const report = { version: 1, baseline, checkedAt: new Date().toISOString(), output: "dist/wechat", format: "iife", target: SCRIPT_TARGET, maxPackageBytes, totalBytes, files, modules: Object.keys(bundle.metafile.inputs).sort() };
+  const report = { version: 1, baseline, checkedAt: new Date().toISOString(), output: `dist/${outputName}`, format: "iife", target: SCRIPT_TARGET, maxPackageBytes, totalBytes, files, modules: Object.keys(bundle.metafile.inputs).sort() };
   if (checkOnly) return report;
 
   await fs.mkdir(dist, { recursive: true });

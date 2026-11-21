@@ -1,0 +1,255 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>安和里 · 林间小院</title>
+  <style>
+    :root{color-scheme:light;--cream:#fffbef;--ink:#334a40;--quiet:#647267;--sage:#3e6554;--rim:#e2dfce;--pink:#bd766c;font:16px/1.55 "PingFang SC","Microsoft YaHei UI",system-ui,sans-serif}
+    *{box-sizing:border-box}
+    [hidden]{display:none!important}
+    body{margin:0;color:var(--ink);min-height:100vh;background:radial-gradient(ellipse at 11% 0,#f6e4cd 0,transparent 55%),radial-gradient(ellipse at 87% 42%,#dae8d7 0,transparent 70%),#eeeee0}
+    h1,h2,p{margin:0}
+    button{font:inherit;color:inherit;cursor:pointer}
+    button:focus-visible,#yard:focus-visible{outline:3px solid #a57843;outline-offset:3px}
+    main{width:min(1450px,100%);padding:30px clamp(14px,3vw,46px) 34px;margin:auto}
+    .masthead{display:flex;justify-content:space-between;align-items:end;gap:16px;margin-bottom:19px}
+    .identity{display:flex;align-items:center;gap:15px}
+    .mark{flex:none;width:45px;height:45px;border:1px solid #9cb4a0;border-radius:50%;background:#d7e5d4;position:relative}
+    .mark::before,.mark::after{content:"";position:absolute;width:19px;height:11px;background:#739780;border-radius:90% 0 90% 0;top:14px;left:20px;transform:rotate(-28deg)}
+    .mark::after{width:13px;height:9px;top:21px;left:9px;transform:rotate(51deg);background:#9cad83}
+    .place{color:#5c715e;font-size:.76rem;letter-spacing:.22em}
+    h1{font:600 clamp(29px,4.1vw,48px)/1.1 "Songti SC","SimSun","Microsoft YaHei UI",serif;letter-spacing:.065em}
+    .hint{color:var(--quiet);font-size:.8rem;padding-bottom:3px}
+    .layout{display:grid;grid-template-columns:minmax(0,1fr) 278px;gap:18px;align-items:start}
+    .play,.tools{background:var(--cream);border:1px solid #fff9e9;border-radius:21px;box-shadow:0 9px 34px #344f4020}
+    .play{overflow:hidden}
+    .canvas-wrap{position:relative;background:#c6ddc1}
+    #yard{display:block;width:100%;height:clamp(445px,65vh,740px);touch-action:none;outline-offset:-5px!important}
+    #message{position:absolute;bottom:13px;left:13px;max-width:calc(100% - 26px);padding:6px 12px 6px 10px;border:1px solid #f8e3c0;border-radius:11px;background:#fff7e7f2;color:#4b604e;font-size:.83rem;pointer-events:none}
+    #message::before{content:"";display:inline-block;width:6px;height:6px;border-radius:50%;background:#c99277;margin-right:7px;vertical-align:2px}
+    #avenue-location{position:absolute;top:13px;left:13px;padding:4px 11px;border:1px solid #f8e3c0;border-radius:8px;background:#fff7e7f2;color:#41594b;font-size:.82rem;pointer-events:none}
+    .sky-clock{position:absolute;right:10px;top:10px;display:flex;gap:4px}
+    .sky-clock button{padding:3px 9px;border-radius:9px;border:1px solid #e4d9b7;background:#fff7e9f0;color:#41594b;font-size:.78rem}
+    #fish-basket,#fish-feedback,#fish-quote{margin-top:6px;font-size:.76rem;color:var(--quiet)}
+    .commands{display:flex;align-items:center;flex-wrap:wrap;gap:8px;padding:12px;background:#fff9e9}
+    .action,.quiet,.choice,.avatar{border:1px solid var(--rim);background:#fffdf3;border-radius:11px;padding:7px 13px}
+    .action{background:#e3ecdb;color:#375b48;border-color:#cbd9c6}
+    .action:first-child{background:#f5e1d4;border-color:#e9cbb7;color:#623f35}
+    .commands button:disabled{opacity:.48;cursor:default}
+    .quiet{margin-left:auto;border-color:#dddac8;color:#536756}
+    .quiet[aria-pressed=true],.choice[aria-pressed=true],.avatar[aria-pressed=true]{background:#e9efdc;border-color:#a8bfa7;color:#365445}
+    @media(hover:hover){
+      .action:hover,.quiet:hover,.choice:hover,.avatar:hover{border-color:#7fa18b}
+    }
+    .tools{padding:15px}
+    .tools h2{font-size:.90rem;margin-bottom:9px;font-weight:650}
+    .tools section+section{margin-top:15px;border-top:1px solid var(--rim);padding-top:13px}
+    .choices{display:grid;gap:7px}
+    .choice{text-align:left;display:flex;gap:9px;align-items:center;padding:4px 9px}
+    .thumb{display:block;width:76px;height:48px;object-fit:contain;flex:none;background:linear-gradient(#ecf1df,#e7e6c9);border-radius:7px}
+    .choice strong,.choice small{display:block}
+    .choice strong{font-size:.90rem}
+    .choice small{font-size:.72rem;color:var(--quiet)}
+    .heritage{margin-top:10px;color:var(--quiet);font-size:.78rem}
+    .heritage summary{min-height:32px;display:list-item;padding:5px 3px;cursor:pointer}
+    .heritage .choices{margin-top:5px}
+    .product{margin-top:13px;padding-top:13px;border-top:1px solid var(--rim)}
+    .product h3{margin:0 0 7px;font-size:.88rem}
+    .product dl{display:grid;grid-template-columns:4.4em 1fr;gap:4px 8px;margin:0;font-size:.76rem}
+    .product dt{color:var(--quiet)}
+    .product dd{margin:0;color:#415545}
+    .product .tier{display:inline-block;margin-top:8px;padding:3px 8px;border-radius:999px;background:#f3e2c8;color:#76543b;font-size:.7rem}
+    .livestock-market{margin-top:15px;border-top:1px solid var(--rim);padding-top:10px}
+    .livestock-market summary{cursor:pointer;font-size:.94rem;font-weight:650;padding:5px 0}
+    .livestock-wallet{display:flex;flex-wrap:wrap;justify-content:space-between;gap:6px;color:#4e6856;font-size:.79rem;margin:4px 0 8px}
+    .livestock-row{padding:9px 0;border-bottom:1px solid var(--rim);line-height:1.35}
+    .livestock-row small{display:block;color:var(--quiet);font-size:.71rem;margin:3px 0 7px}
+    .livestock-actions{display:flex;gap:5px;flex-wrap:wrap}
+    .livestock-actions button{margin:0;padding:4px 7px;font-size:.73rem}
+    .livestock-actions button:disabled{opacity:.53;cursor:default}
+    #livestock-result,#livestock-storage{font-size:.74rem;color:var(--quiet);margin-top:7px}
+    .farm{padding:11px 0 13px;border-bottom:1px solid var(--rim)}
+    .farm header{display:flex;flex-wrap:wrap;align-items:baseline;justify-content:space-between;gap:4px 8px}
+    .farm h2{margin:0}
+    #farm-status{font-size:.78rem;color:#41604c}
+    .farm-buttons{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+    .farm-buttons button,.farm select,.product button{margin:0;padding:5px 8px;font:inherit;font-size:.77rem}
+    .farm button:disabled,.product button:disabled{opacity:.48;cursor:default}
+    .farm label{display:grid;gap:3px;margin:8px 0;font-size:.78rem}
+    .farm select{max-width:100%;border:1px solid var(--rim);border-radius:7px;background:#fffdf3;color:var(--ink)}
+    #farm-plot-state,#farm-inventory,#farm-feedback,#house-price{margin:7px 0 0;font-size:.76rem;color:var(--quiet);overflow-wrap:anywhere}
+    #crop-price{color:var(--quiet);font-size:.72rem}
+    #house-price{display:block;margin-bottom:6px}
+    #market-status,#estate-summary,#estate-confirm,#city-receipts,#player-role,#goods-basket{font-size:.78rem;color:var(--quiet);margin:5px 0;overflow-wrap:anywhere}
+    #city-market{padding:10px 11px;border:1px solid var(--rim);border-radius:11px;background:#f0eddb}
+    #yard-context{font-size:.85rem;color:var(--sage);padding:0 12px}
+    .yard-stick{display:none;position:absolute;bottom:48px;left:14px;width:84px;height:84px;border:1px solid #fbf4d2;border-radius:50%;background:#fffaeab0;touch-action:none}
+    .yard-stick::after{content:"";position:absolute;width:32px;height:32px;top:25px;left:25px;border-radius:50%;background:#648d70;transform:translate(var(--stick-x,0px),var(--stick-y,0px));pointer-events:none}
+    @media(pointer:coarse){.yard-stick{display:block}}
+    .avatars{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
+    .avatar{display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:0;padding:4px 2px 6px;font-size:.73rem;white-space:nowrap}
+    .portrait{width:43px;height:43px;object-fit:contain;border-radius:50%}
+    @media(max-width:800px){
+      main{padding-top:14px}
+      .masthead{display:block;margin-bottom:11px}
+      .identity{gap:9px}
+      .mark{transform:scale(.75);transform-origin:left center;margin-right:-9px}
+      .hint{margin-top:3px;padding:0}
+      .layout{grid-template-columns:1fr;gap:10px}
+      #yard{height:clamp(308px,47vh,517px)}
+      .tools{padding:11px}
+      .choices{grid-template-columns:1fr 1fr}
+      .choice{padding:4px 5px;gap:5px}
+      .thumb{width:52px;height:40px}
+      .commands{padding:8px}
+      .commands button{padding:7px 9px;font-size:.84rem}
+    }
+    @media(max-width:350px){
+      .thumb{width:40px;height:34px}
+      .choice{gap:3px}
+      .choice strong{font-size:.82rem}
+    }
+    @media(orientation:landscape) and (max-height:500px) and (max-width:1000px){
+      main{padding-top:8px}
+      .masthead{display:flex;align-items:center;margin-bottom:8px}
+      h1{font-size:25px}
+      .mark{width:40px;height:40px}
+      #yard{height:clamp(185px,calc(100dvh - 125px),375px)}
+      .commands{padding:8px;gap:5px}
+      .commands button{padding:7px 8px;font-size:.84rem}
+      .commands [data-action="fishing"],.commands [data-action="reel"]{order:-1}
+    }
+  </style>
+</head>
+<body>
+<main>
+  <header class="masthead">
+    <div class="identity"><span class="mark" aria-hidden="true"></span><div><p class="place">安和里</p><h1>林间小院</h1></div></div>
+    <p class="hint">点地面走路 · 拖动画面转视角</p>
+  </header>
+  <div class="layout">
+    <article class="play" aria-label="小院试玩">
+      <div class="canvas-wrap">
+        <canvas id="yard" tabindex="0" aria-label="小院。轻点地面或用方向键行走，拖动画面转动视角，E 键互动。"></canvas>
+        <span id="avenue-location" hidden>瑞丽大道</span>
+        <div class="sky-clock" aria-label="季节和时段">
+          <button data-action="season" title="切换季节预览">春</button>
+          <button data-action="time-of-day" title="切换时段预览">白天</button>
+        </div>
+        <output id="message" aria-live="polite">点「选地」在附近的空地开一块田。</output>
+        <div id="yard-stick" class="yard-stick" aria-hidden="true"></div>
+      </div>
+      <div class="commands">
+        <button class="action" data-action="market">去集市</button>
+        <button class="action" data-action="home-route" hidden>回小院</button>
+        <button class="action" data-action="land" aria-pressed="false">选地</button>
+      </div>
+      <p id="yard-context" hidden></p>
+      <div class="commands" id="local-actions" hidden>
+        <button class="action" data-action="interact" hidden>摸摸小羊</button>
+        <button class="action" data-action="livestock" hidden>羊圈管理</button>
+        <button class="action" data-action="mount" aria-pressed="false" hidden>骑马</button>
+        <button class="action" data-action="fishing" hidden>抛竿</button>
+        <button class="action" data-action="reel" hidden disabled>收竿</button>
+        <button class="action" data-action="sow" hidden>播种</button>
+        <button class="action" data-action="irrigate" hidden>浇水</button>
+        <button class="action" data-action="fertilize" hidden>施肥</button>
+        <button class="action" data-action="harvest" hidden>收获</button>
+      </div>
+    </article>
+    <aside class="tools">
+      <strong id="farm-status"></strong>
+      <details class="heritage">
+        <summary>去处与人物</summary>
+        <div class="farm-buttons">
+          <button class="quiet" data-action="lake-route">去湖边</button>
+          <button class="quiet" data-action="pen-route">去羊圈</button>
+          <button class="quiet" data-action="eat">吃饭</button>
+          <button class="quiet" data-action="market-help" hidden>领开荒补助</button>
+        </div>
+        <div class="avatars" id="avatars"></div>
+      </details>
+      <details id="city-market">
+        <summary>瑞丽集市</summary>
+        <p id="market-status"></p>
+        <p id="player-role"></p>
+        <strong id="city-balance"></strong>
+        <p id="city-receipts"></p>
+        <button class="quiet" data-action="switch-player" hidden>切换本机试买角色</button>
+      </details>
+      <section class="farm" aria-label="田地和种子" id="field-options" hidden>
+        <header><h2>田地与种子</h2></header>
+        <label>田地
+          <select id="plot-picker" aria-label="选择自己的田地"><option value="">还没有田地</option></select>
+        </label>
+        <p id="farm-plot-state"></p>
+        <label>作物
+          <select id="crop-picker"></select>
+        </label>
+        <p id="crop-price"></p>
+        <div class="farm-buttons">
+          <button class="quiet" data-action="buy-plot" hidden disabled>买地</button>
+          <button class="quiet" data-action="buy-seed" disabled>买种子</button>
+          <button class="quiet" data-action="sell-crops">卖出收成</button>
+          <button class="quiet" data-action="sell-plot" hidden>退回空田</button>
+        </div>
+        <p id="farm-inventory"></p>
+        <p id="farm-feedback" aria-live="polite"></p>
+      </section>
+      <details class="livestock-market" id="livestock-market" hidden>
+        <summary>牲畜与产物</summary>
+        <div class="livestock-wallet"><strong id="livestock-balance"></strong><span id="livestock-capacity"></span></div>
+        <p id="livestock-storage" hidden>浏览器存储暂不可用，本次进度保留在当前页面。</p>
+        <div id="livestock-inventory"></div>
+        <p id="goods-basket"></p>
+        <button class="quiet" data-action="sell-goods" disabled>卖出养殖产物</button>
+        <p id="livestock-result" aria-live="polite"></p>
+      </details>
+      <div id="market-tools" hidden>
+      <section class="farm" aria-label="鱼获收购">
+        <header><h2>鱼获收购</h2></header>
+        <p id="fish-basket">还没有鱼获</p>
+        <p id="fish-quote"></p>
+        <div class="farm-buttons"><button class="quiet" data-action="sell-fish" disabled>卖出鱼获</button></div>
+        <p id="fish-feedback" aria-live="polite"></p>
+        <details class="heritage"><summary>鱼种与收购价</summary><p id="fish-market-rules"></p><p id="fish-catalog"></p></details>
+      </section>
+      <section>
+        <h2>住宅</h2>
+        <p id="estate-summary"></p>
+        <p id="estate-confirm" hidden></p>
+        <div class="farm-buttons">
+          <button class="quiet" data-action="house-sell" hidden>挂牌出售整院</button>
+          <button class="quiet" data-action="house-cancel-sale" hidden>取消</button>
+          <button class="quiet" data-action="buy-used-house" hidden>购买闲置宅院</button>
+        </div>
+        <div class="choices" id="houses"></div>
+        <details class="heritage">
+          <summary>其他房屋</summary>
+          <div class="choices" id="heritage-houses"></div>
+        </details>
+        <section class="product" aria-live="polite">
+          <h3 id="product-name">住宅方案</h3>
+          <dl id="product-details">
+            <dt>户型</dt><dd id="product-floor-plan"></dd>
+            <dt>形态</dt><dd id="product-silhouette"></dd>
+            <dt>生活</dt><dd id="product-experience"></dd>
+            <dt>扩建</dt><dd id="product-expansion"></dd>
+          </dl>
+          <span class="tier" id="product-tier"></span>
+          <p id="house-progress"></p>
+          <strong id="house-price"></strong>
+          <div class="farm-buttons">
+            <button class="quiet" data-action="house-upgrade" hidden>开工建造</button>
+            <button class="quiet" data-action="house-repair" hidden>维修</button>
+          </div>
+        </section>
+      </section>
+      </div>
+    </aside>
+  </div>
+</main>
+<script src="./browser.js"></script>
+</body>
+</html>
