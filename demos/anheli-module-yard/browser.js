@@ -9,6 +9,7 @@ if(canvas.getContext('webgl2',contextOptions)){
     document,canvas,storage,
     createCanvas:()=>document.createElement('canvas'),
     createOption:(text,value)=>new Option(text,value),
+    requestName:({value})=>window.prompt('给角色取个名字（1–12 个字）',value),
     pixelRatio:()=>Math.min(devicePixelRatio||1,1.4),
     survival:new URLSearchParams(location.search).get('survival')==='1',
   });

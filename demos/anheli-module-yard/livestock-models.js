@@ -246,14 +246,15 @@ export function createLivestockModel(species,variant=0){
   return {
     root,
     riderHeight:horse?1.51:undefined,
-    animate(time,moving,stroke=0){
+    animate(time,moving,stroke=0,feedingProgress=0){
       const phase=time*speed+index*.81;
       const stride=moving?Math.sin(phase):0;
       const pet=Math.sin(Math.PI*Math.min(1,Math.max(0,stroke)));
+      const feeding=Math.sin(Math.PI*feedingProgress);
       const leap=model.motion==='hop'&&moving?Math.max(0,Math.sin(phase))*.115:0;
       body.position.y=leap+Math.abs(stride)*(horse?.029:.022)+(horse?.012:.044)*pet;
       body.rotation.z=stride*(model.motion==='bird'?.045:.019);
-      head.rotation.x=Math.sin(time*2.31+index)*.048-stride*.04-pet*.135;
+      head.rotation.x=Math.sin(time*2.31+index)*.048-stride*.04-pet*.135+feeding*.55;
       head.rotation.y=Math.sin(time*1.48+index)*.065;
       if(tail)tail.rotation.z=Math.sin(time*3+index)*.15+stride*.13;
       for(let i=0;i<legs.length;i++){

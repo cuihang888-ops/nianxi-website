@@ -2,13 +2,19 @@ import * as THREE from 'three';
 import {addLakeBank} from './lake-bank.js';
 import {addAvenueMarker} from './avenue-marker.js';
 import {addStable} from './stable.js';
-import {plotSize} from './livestock.js';
 import {addSeasonalWater} from './lake-season-water.js';
-import {avenueEastStops,streetReserved,streetTerrainBlend} from './ruili-street.js';
+import {avenueHalfWidth,avenueZ,streetReserved,streetTerrainBlend} from './ruili-street.js';
 import {addRuiliStreet} from './ruili-street-model.js';
+import {pointInPlot,plotWidth} from './yard-land.js';
+import {homeSites} from './yard-home-sites.js';
+import {createYardNameplate} from './nameplates.js';
 
 const lake={x:-15.5,z:-5.9,rx:7.4,rz:4.75,level:-.28};
 const TAU=Math.PI*2;
+const waterEdge=1.033;
+const castingReach=3.2;
+const lakesideHomeSites=homeSites.filter(site=>site.id!=='yard');
+export const lakeArrival=Object.freeze({x:-12.1,z:.95});
 const seasonalLooks={
   spring:{land:['#b6ba78','#527653','#a28a69'],woods:['#96af70','#6c925d'],meadow:['#9cb26c','#749867'],petals:['#e9a5a8','#ecd49f']},
   summer:{land:['#acb779','#436a50','#938364'],woods:['#709a65','#487958'],meadow:['#8ea45e','#698d56'],petals:['#dfac85','#dac4d2']},
@@ -20,7 +26,11 @@ function outline(angle) {
   const shoreZ=lake.z+Math.sin(angle)*lake.rz*original;
   const northernEdge=THREE.MathUtils.smoothstep(-shoreZ,8.12,9.94);
   const width=.68+.42*Math.max(0,-Math.cos(angle))+.16*Math.sin(angle*4+.4);
-  return original*(1+northernEdge*width);
+  const formerRadius=original*(1+northernEdge*width);
+  const formerZ=lake.z+Math.sin(angle)*lake.rz*formerRadius;
+  // Use the land beyond the old northern walking boundary for the wider basin.
+  const expansion=THREE.MathUtils.smoothstep(-formerZ,8.4,12);
+  return formerRadius*(1+expansion*(.36+.16*Math.max(0,-Math.cos(angle))));
 }
 const fixedTrees=[
   [-8.3,-9,6.5],[5.9,-7.65,7.7],[-6.7,-13,8.3],[10.5,-8.4,6.2],[-13.4,3.7,5.7],
@@ -28,22 +38,6 @@ const fixedTrees=[
   [1.2,-13.2,8.1],[-14.8,-12.7,8],[-21.8,-11.8,7.1],[-24.8,-5,6.9],
   [-22.3,2.4,5.5],[19.4,1.8,7.9],[21.1,-8.7,8.1],
 ];
-const avenueStops=[
-  [-35,10.4],[-23.5,11.55],[-17.3,11.7],[-10,12.5],[-1.05,12.5],
-  [5.9,12.55],[12.7,11.85],[17.4,11.85],...avenueEastStops,
-];
-const avenueHalfWidth=1.57;
-
-function avenueZ(x) {
-  for(let i=1;i<avenueStops.length;i++){
-    const [right,zRight]=avenueStops[i];
-    if(x>right)continue;
-    const [left,zLeft]=avenueStops[i-1];
-    return THREE.MathUtils.lerp(zLeft,zRight,THREE.MathUtils.smoothstep(x,left,right));
-  }
-  return avenueStops.at(-1)[1];
-}
-
 const avenueGap=(x,z)=>Math.abs(z-avenueZ(x));
 export const onAvenue=(x,z)=>avenueGap(x,z)<=avenueHalfWidth;
 
@@ -58,19 +52,81 @@ function lakeRadius(x,z) {
 }
 
 const hill=(x,z,cx,cz,rx,rz)=>Math.exp(-(((x-cx)/rx)**2+((z-cz)/rz)**2));
+function homeSiteGap(x,z,site){
+  return Math.max(Math.abs(x-site.x)-site.width/2,Math.abs(z-site.z)-site.depth/2);
+}
+const nearLakesideHome=(x,z,padding)=>z<-20&&lakesideHomeSites.some(site=>homeSiteGap(x,z,site)<padding);
+const inHomeView=(x,z)=>lakesideHomeSites.some(({front})=>
+  Math.abs(x-front.x)<3.2&&z>=front.z-2.5&&z<front.z+7);
+
 export function groundHeight(x,z) {
   const edge=THREE.MathUtils.smoothstep(Math.max(Math.abs(x)/13,z/11,-z/9),.69,1.46);
   const height=edge*(2.6*hill(x,z,-22,-19,11,11)+3.4*hill(x,z,15,-21,11,10)+.65*Math.sin(x*.2)*Math.cos(z*.20));
   const radius=lakeRadius(x,z);
   const underwater=lake.level-.46*(1-THREE.MathUtils.smoothstep(radius,.50,1));
-  const land=THREE.MathUtils.lerp(underwater,height,THREE.MathUtils.smoothstep(radius,1,1.18));
+  let land=THREE.MathUtils.lerp(underwater,height,THREE.MathUtils.smoothstep(radius,1,1.18));
+  if(z<-21){
+    for(const site of lakesideHomeSites){
+      const gap=homeSiteGap(x,z,site);
+      land=THREE.MathUtils.lerp(1.12,land,THREE.MathUtils.smoothstep(gap,.12,1.42));
+    }
+  }
   const shoulder=THREE.MathUtils.smoothstep(avenueGap(x,z),avenueHalfWidth+.25,avenueHalfWidth+2);
   return THREE.MathUtils.lerp(.035,land,shoulder*(1-streetTerrainBlend(x,z)));
 }
 export const pondBlocks=(x,z)=>lakeRadius(x,z)<1.038;
+export const surveySurfaceHeight=(x,z)=>Math.max(groundHeight(x,z),lake.level+.03);
+
+const shoreline=Array.from({length:144},(_,index)=>shorePoint(index/144*TAU,waterEdge));
+const shoreExtents={
+  west:Math.min(...shoreline.map(point=>point.x)),east:Math.max(...shoreline.map(point=>point.x)),
+  north:Math.min(...shoreline.map(point=>point.z)),south:Math.max(...shoreline.map(point=>point.z)),
+};
+
+function nearestShore(x,z,maxDistance) {
+  let nearestX,nearestZ,best=maxDistance**2;
+  for(let index=0;index<shoreline.length;index++){
+    const start=shoreline[index],end=shoreline[(index+1)%shoreline.length];
+    const dx=end.x-start.x,dz=end.z-start.z;
+    const t=THREE.MathUtils.clamp(((x-start.x)*dx+(z-start.z)*dz)/(dx*dx+dz*dz),0,1);
+    const edgeX=start.x+t*dx,edgeZ=start.z+t*dz;
+    const distanceSquared=(x-edgeX)**2+(z-edgeZ)**2;
+    if(distanceSquared>best)continue;
+    best=distanceSquared;
+    nearestX=edgeX;
+    nearestZ=edgeZ;
+  }
+  return nearestX===undefined?null:{x:nearestX,z:nearestZ};
+}
+
+function shoreOffset(edge,offset) {
+  const fraction=offset/Math.hypot(edge.x-lake.x,edge.z-lake.z);
+  return {x:THREE.MathUtils.lerp(edge.x,lake.x,fraction),z:THREE.MathUtils.lerp(edge.z,lake.z,fraction)};
+}
+
+export function shoreFishingSpot(x,z) {
+  if(x<shoreExtents.west-castingReach||x>shoreExtents.east+castingReach||
+      z<shoreExtents.north-castingReach||z>shoreExtents.south+castingReach||pondBlocks(x,z))return null;
+  const edge=nearestShore(x,z,castingReach);
+  return edge?{x,z,bobber:shoreOffset(edge,1.35)}:null;
+}
+
+export function shoreApproach(x,z,blocked) {
+  if(!pondBlocks(x,z))return null;
+  const edge=nearestShore(x,z,2.6);
+  if(!edge)return null;
+  const bank=shoreOffset(edge,-.9);
+  return blocked(bank.x,bank.z)?null:bank;
+}
+
 export const lakesideTrail=[
   [-.55,3.0],[-3.6,3.0],[-6.6,2.1],[-9.2,1.5],[-12.1,.95],[-16,.4],
   [-19.4,-.1],[-21.95,-1.15],[-23.0,-2.95],
+];
+const farBankTrail=[
+  lakesideTrail.at(-1),[-24,-3.4],[-25.1,-5.3],[-25.8,-8.0],[-29.7,-10.9],[-31.7,-14.3],
+  [-31.3,-17.6],[-28,-20],[-24.1,-20.35],[-20.2,-20.5],[-15.6,-20.6],
+  [-10.4,-20.3],[-6.6,-19.9],[-3.2,-20],[-1.6,-17.5],[-3.7,-13.35],[-4.9,-10.1],
 ];
 
 function randomSource(seed) {
@@ -100,7 +156,7 @@ function batches(parent,geometry,material,items,{cast=false,receive=true}={}) {
 }
 
 function makeTerrain(random) {
-  const geometry=new THREE.PlaneGeometry(104,104,148,148).rotateX(-Math.PI/2);
+  const geometry=new THREE.PlaneGeometry(104,124,148,148).rotateX(-Math.PI/2).translate(0,0,-10);
   const points=geometry.attributes.position;
   const colors=new Float32Array(points.count*3);
   const meadowWeight=new Float32Array(points.count);
@@ -191,8 +247,9 @@ function addForest(group,random) {
   const groves=new Map();
   const groveSize=10;
   const greens=['#71985e','#7da263','#93ad6d','#698e5e','#527b54','#658e59'];
-  const oaks=[...fixedTrees,[-13.7,-16.4,7.4],[-16.1,-17.6,9.1],[-20.3,-17.8,7.1],
-    [-25.8,-16.1,7.5],[-29.3,-11.2,8.4],[-30.5,-7.6,7.8],[-9.15,-14.1,6.7]];
+  const oaks=[...fixedTrees,[-13.7,-21.4,7.4],[-16.1,-23.1,9.1],[-20.3,-22.8,7.1],
+    [-33.4,-14.2,8.4],[-30.5,-7.6,7.8],[-34.7,-26,7.5],[-31.4,-34.5,7.9],
+    [-22.6,-35.8,7.1],[-12.2,-35.2,7.4],[-4.1,-33.3,6.7],[1.85,-25.4,6.4]];
   for(let i=0;i<85;i++){
     const angle=i/85*Math.PI*2;
     if(Math.sin(angle)>.47&&Math.abs(Math.cos(angle))<.84) continue;
@@ -201,7 +258,7 @@ function addForest(group,random) {
   }
   const bark=['#987b51','#936d45','#856b50','#776b52'];
   for(const [x,z,h] of oaks){
-    if(pondBlocks(x,z)||trailGap(x,z)<1.14||avenueGap(x,z)<2.52) continue;
+    if(pondBlocks(x,z)||trailGap(x,z)<1.14||avenueGap(x,z)<2.52||nearLakesideHome(x,z,1.2)||inHomeView(x,z))continue;
     const groveKey=Math.floor(x/groveSize)+','+Math.floor(z/groveSize);
     let grove=groves.get(groveKey);
     if(!grove){
@@ -262,11 +319,13 @@ function routeGap(x,z,route) {
   return gap;
 }
 
-const trailGap=(x,z)=>Math.min(routeGap(x,z,pathPoints),routeGap(x,z,lakesideTrail));
+const originalTrailGap=(x,z)=>Math.min(routeGap(x,z,pathPoints),routeGap(x,z,lakesideTrail));
+const trailGap=(x,z)=>Math.min(originalTrailGap(x,z),routeGap(x,z,farBankTrail)-.53);
 
 export function fieldTerrainBlock(x,z) {
   if(lakeRadius(x,z)<1.11)return '这块地贴着水岸。';
   if(avenueGap(x,z)<1.9||trailGap(x,z)<.85)return '这块地占用公共道路。';
+  if(nearLakesideHome(x,z,.42))return '这块地属于湖畔宅地。';
   if(streetReserved(x,z,.1))return '这块地属于街区或公共集市。';
   if(fixedTrees.some(([treeX,treeZ])=>Math.hypot(x-treeX,z-treeZ)<.73))return '这块地上有树。';
   return '';
@@ -335,13 +394,12 @@ function addMeadow(group,random) {
   }));
   const transform=new THREE.Matrix4();
   const zeroScale=new THREE.Vector3(0,0,0);
-  const halfPlot=plotSize/2;
   let previousPlots=[];
   function setMeadowPlots(plots) {
     if(plots===previousPlots)return false;
-    const sameSites=plots.length===previousPlots.length&&plots.every(({x,z},index)=>{
+    const sameSites=plots.length===previousPlots.length&&plots.every((plot,index)=>{
       const previous=previousPlots[index];
-      return x===previous.x&&z===previous.z;
+      return plot.x===previous.x&&plot.z===previous.z&&plotWidth(plot)===plotWidth(previous);
     });
     previousPlots=plots;
     if(sameSites)return false;
@@ -350,8 +408,8 @@ function addMeadow(group,random) {
       let changed=false;
       for(let i=0;i<mesh.count;i++){
         const offset=i*16;
-        const x=transforms[offset+12],z=transforms[offset+14];
-        const inPlot=plots.some(plot=>Math.abs(plot.x-x)<halfPlot&&Math.abs(plot.z-z)<halfPlot);
+        const point={x:transforms[offset+12],z:transforms[offset+14]};
+        const inPlot=plots.some(plot=>pointInPlot(point,plot));
         if(inPlot===Boolean(hidden[i]))continue;
         hidden[i]=Number(inPlot);
         transform.fromArray(transforms,offset);
@@ -385,20 +443,106 @@ function addStoneWalk(group,random) {
     for(let index=0;index<=samples;index++){
       const point=curve.getPointAt(index/samples),tangent=curve.getTangentAt(index/samples);
       const angle=Math.atan2(-tangent.z,tangent.x)-Math.PI/2;
-      soil.push([point.x,groundHeight(point.x,point.z)+.013,point.z,byLake?.66:.82,.13,.36,
-        angle,byLake?'#a99c76':'#ad9c71']);
-      const stoneWidth=byLake?.74:1;
+      soil.push([point.x,groundHeight(point.x,point.z)+.013,point.z,byLake?.76:.82,.13,.36,
+        angle,byLake?'#ab9d78':'#ad9c71']);
+      const stoneWidth=byLake?.86:1;
       for(const side of [-1,0,1]){
         const offset=side*(.47+random()*.13)*stoneWidth;
         const x=point.x+tangent.z*offset+(random()-.5)*.18;
         const z=point.z-tangent.x*offset+(random()-.5)*.17;
-        slabs.push([x,groundHeight(x,z)+.018,z,(.18+random()*.21)*stoneWidth,.24+random()*.18,
-          .17+random()*.17,random()*TAU,shades[index%shades.length],.04,.06]);
+        const slab=[x,groundHeight(x,z)+.018,z,(.18+random()*.21)*stoneWidth,.24+random()*.18,
+          .17+random()*.17,random()*TAU,shades[index%shades.length],.04,.06];
+        if(!pondBlocks(x,z))slabs.push(slab);
       }
     }
   }
   batches(group,new THREE.CylinderGeometry(1,1,.25,12),standard(),soil);
   batches(group,new THREE.CylinderGeometry(.87,1,.20,7,1),standard(),slabs);
+}
+
+function addLakesideRoad(group,random){
+  const road=new THREE.CatmullRomCurve3(farBankTrail.map(([x,z])=>new THREE.Vector3(x,0,z)));
+  const samples=Math.ceil(road.getLength()*2.5);
+  const positions=[],colors=[],indices=[],stones=[];
+  const tint=new THREE.Color();
+  const centerTint=new THREE.Color('#bcaa7e'),vergeTint=new THREE.Color('#9b9067');
+  const widths=[-1,-.72,0,.72,1];
+  for(let index=0;index<=samples;index++){
+    const point=road.getPointAt(index/samples),tangent=road.getTangentAt(index/samples);
+    const newBank=THREE.MathUtils.smoothstep(Math.max(-point.x-24.5,-point.z-8),0,2);
+    const width=THREE.MathUtils.lerp(.54,1.27,newBank);
+    for(const [column,lane] of widths.entries()){
+      const offset=lane*width;
+      const x=point.x+tangent.z*offset,z=point.z-tangent.x*offset;
+      positions.push(x,groundHeight(x,z)+.041,z);
+      tint.copy(centerTint).lerp(vergeTint,Math.abs(lane)**4*.45+random()*.12);
+      colors.push(tint.r,tint.g,tint.b);
+      if(index&&column){
+        const cell=(index-1)*widths.length+column-1;
+        indices.push(cell,cell+widths.length,cell+1,cell+1,cell+widths.length,cell+widths.length+1);
+      }
+    }
+    for(const side of [-1,1]){
+      if(random()<.3)continue;
+      const offset=side*(width-.15+random()*.19);
+      const x=point.x+tangent.z*offset,z=point.z-tangent.x*offset;
+      if(pondBlocks(x,z))continue;
+      const size=.08+random()*.10;
+      stones.push([x,groundHeight(x,z)+.051,z,size*1.32,.05,size,random()*TAU,'#c7b894']);
+    }
+  }
+  const geometry=new THREE.BufferGeometry();
+  geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
+  geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));
+  geometry.setIndex(indices);
+  geometry.computeVertexNormals();
+  const surface=new THREE.Mesh(geometry,standard({vertexColors:true,side:THREE.DoubleSide}));
+  surface.receiveShadow=true;
+  group.add(surface);
+  batches(group,new THREE.DodecahedronGeometry(1,0),standard({flatShading:true}),stones);
+}
+
+function addLakesideHomes(group,createCanvas){
+  const stoneGeometry=new THREE.BoxGeometry();
+  const stoneMaterial=standard({color:'#9d957a'});
+  const grassMaterial=standard({color:'#b6ba78'});
+  const plots=lakesideHomeSites.map(site=>{
+    const marker=new THREE.Group();
+    const {x,z,width,depth}=site;
+    for(const dx of [-1,1])for(const dz of [-1,1]){
+      const cornerX=x+dx*width/2,cornerZ=z+dz*depth/2;
+      const y=groundHeight(cornerX,cornerZ);
+      const peg=new THREE.Mesh(stoneGeometry,stoneMaterial);
+      peg.position.set(cornerX,y+.24,cornerZ);
+      peg.scale.set(.24,.47,.24);
+      marker.add(peg);
+      for(const [ox,oz,sx,sz] of [[-.43*dx,0,.83,.10],[0,-.43*dz,.10,.83]]){
+        const curb=new THREE.Mesh(stoneGeometry,grassMaterial);
+        curb.position.set(cornerX+ox,y+.035,cornerZ+oz);
+        curb.scale.set(sx,.10,sz);
+        marker.add(curb);
+      }
+    }
+    const label=createYardNameplate(createCanvas,{wood:true});
+    const plaqueZ=z+depth/2-.25;
+    label.sprite.position.set(x,groundHeight(x,plaqueZ)+1.15,plaqueZ);
+    label.resize(.99);
+    label.setText(site.name+' · '+site.price+' 安币');
+    marker.add(label.sprite);
+    group.add(marker);
+    return {id:site.id,marker,label};
+  });
+  return {
+    setClaimedHomeSites(claimed){
+      for(const {id,marker} of plots)marker.visible=!claimed.has(id);
+    },
+    dispose(){
+      for(const {label} of plots)label.dispose();
+      stoneGeometry.dispose();
+      stoneMaterial.dispose();
+      grassMaterial.dispose();
+    },
+  };
 }
 
 function addAvenue(group,random) {
@@ -477,11 +621,13 @@ export function createWoodland(garden,{createCanvas=()=>document.createElement('
   const terrain=makeTerrain(random);
   group.add(terrain.mesh);
   const tintWoods=addForest(group,random);
-  const waterSurface=addSeasonalWater(group,{level:lake.level,shorePoint,lakeRadius,random:randomSource(4513),batches,standard});
+  const waterSurface=addSeasonalWater(group,{level:lake.level,shorePoint,lakeRadius,waterEdge,segments:shoreline.length,random:randomSource(4513),batches,standard});
   const meadow=addMeadow(group,random);
+  const lakesideHomes=addLakesideHomes(group,createCanvas);
   addAvenue(group,randomSource(5881));
   addRuiliStreet({group,groundHeight,avenueZ,random:randomSource(38265),standard,batches,createCanvas});
   addStoneWalk(group,random);
+  addLakesideRoad(group,randomSource(4574));
   addLakeBank({group,random:randomSource(4515),standard,batches,groundHeight,shorePoint,pathGap:trailGap,waterLevel:lake.level});
   addWaterlineStones(group,randomSource(4526));
   addAvenueMarker(group,groundHeight,createCanvas);
@@ -560,5 +706,6 @@ export function createWoodland(garden,{createCanvas=()=>document.createElement('
     return true;
   }
   setSeason('spring');
-  return {group,water,animateLake:waterSurface.animate,setMeadowPlots:meadow.setMeadowPlots,setSeason};
+  return {group,water,animateLake:waterSurface.animate,setMeadowPlots:meadow.setMeadowPlots,
+    setSeason,setClaimedHomeSites:lakesideHomes.setClaimedHomeSites,disposeLakesideHomes:lakesideHomes.dispose};
 }

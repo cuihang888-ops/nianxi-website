@@ -353,7 +353,7 @@ test("client contracts round trip through the real SQLite store with durable gra
   const root = fileURLToPath(new URL("../reports/world-client-tests/", import.meta.url));
   await mkdir(root, { recursive: true });
   const physicalRoot = await realpath(root);
-  assert.equal(path.parse(physicalRoot).root.toUpperCase(), "D:\\");
+  if (process.platform === "win32") assert.equal(path.parse(physicalRoot).root.toUpperCase(), "D:\\");
   const directory = await mkdtemp(path.join(physicalRoot, "case-"));
   const filename = path.join(directory, "world.sqlite");
   const stores = [];

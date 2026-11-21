@@ -8,14 +8,14 @@ const waterColors={
   winter:{deep:'#547c89',shallow:'#b5c5b7',reflection:'#5b7376',glint:'#edf2e1',leaf:'#7e9581',blossom:'#bfc8ba'},
 };
 
-function lakeSurface(level,shorePoint) {
-  const segments=144,rings=24;
+function lakeSurface(level,shorePoint,waterEdge,segments) {
+  const rings=24;
   const center=shorePoint(0,0);
   const positions=[center.x,level,center.z];
   const uv=[0,0];
   const indices=[];
   for(let ring=1;ring<=rings;ring++){
-    const radius=ring/rings*1.033;
+    const radius=ring/rings*waterEdge;
     for(let segment=0;segment<segments;segment++){
       const angle=segment/segments*circle;
       const {x,z}=shorePoint(angle,radius);
@@ -136,9 +136,9 @@ function addSunRipples(group,{level,shorePoint,lakeRadius,random}) {
 }
 
 export function addSeasonalWater(group,options) {
-  const {level,shorePoint}=options;
+  const {level,shorePoint,waterEdge,segments}=options;
   const {material,uniforms}=waterMaterial();
-  const surface=new THREE.Mesh(lakeSurface(level,shorePoint),material);
+  const surface=new THREE.Mesh(lakeSurface(level,shorePoint,waterEdge,segments),material);
   surface.receiveShadow=true;
   group.add(surface);
   const {padsMaterial,petalsMaterial}=addLilies(group,options);

@@ -3,9 +3,10 @@ import {createHouseModel} from './house-model.js';
 import {createVillager,createLamb} from './figures.js';
 import {createLivestockModel} from './livestock-models.js';
 import {createFields} from './field-models.js';
-import {createWoodland,groundHeight} from './woodland.js';
+import {createWoodland,groundHeight,surveySurfaceHeight} from './woodland.js';
 import {marketCenter} from './ruili-street.js';
 import {createVacantSign} from './ruili-street-model.js';
+import {createYardNameplate} from './nameplates.js';
 
 const entryYaw=.40;
 const entryPitch=.60;
@@ -16,6 +17,7 @@ const point=new THREE.Vector3();
 const target=new THREE.Vector3();
 const floor=new THREE.Plane(new THREE.Vector3(0,1,0));
 const colorSpace=THREE.SRGBColorSpace;
+const fishingActive=cast=>cast?.phase==='waiting'||cast?.phase==='bite';
 
 const skyStops=[
   [0,'#283c59','#8da6df','#a3b6ef',1.12,.58],
@@ -50,7 +52,7 @@ function lighting(scene) {
 }
 
 function createFishingVisual(scene) {
-  const rod=new THREE.Mesh(new THREE.CylinderGeometry(.014,.026,1,7),
+  const rod=new THREE.Mesh(new THREE.CylinderGeometry(.022,.035,1,7),
     new THREE.MeshStandardMaterial({color:'#ad7951',roughness:.88}));
   const float=new THREE.Group();
   float.add(new THREE.Mesh(new THREE.SphereGeometry(.1,10,8),
@@ -73,7 +75,7 @@ function createFishingVisual(scene) {
   const handle=new THREE.Vector3(),rodTip=new THREE.Vector3(),axis=new THREE.Vector3();
   const up=new THREE.Vector3(0,1,0);
   return (player,cast,time)=>{
-    group.visible=cast.phase==='waiting'||cast.phase==='bite';
+    group.visible=fishingActive(cast);
     if(!group.visible)return;
     const {bobber}=cast.spot;
     const heading=player.heading;
@@ -142,10 +144,21 @@ export function createYardView(canvas,{garden,houseSite,animalIds,createCanvas=(
   scene.fog=new THREE.Fog('#cbd9ad',42,83);
   const lights=lighting(scene);
   const renderFishing=createFishingVisual(scene);
+  const destinationRing=new THREE.Mesh(new THREE.RingGeometry(.77,1,32).rotateX(-Math.PI/2),
+    new THREE.MeshBasicMaterial({color:'#fff4c1',transparent:true,depthWrite:false,toneMapped:false}));
+  destinationRing.visible=false;
+  destinationRing.renderOrder=5;
+  scene.add(destinationRing);
+  let destinationMarkedAt=0;
+
+  function markDestination({x,z}) {
+    destinationRing.position.set(x,groundHeight(x,z)+.11,z);
+    destinationMarkedAt=Date.now();
+  }
 
   const woodland=createWoodland(garden,{createCanvas,survival});
   scene.add(woodland.group);
-  const fields=createFields(scene,groundHeight);
+  const fields=createFields(scene,groundHeight,surveySurfaceHeight);
   let visibleSeason;
   function updateSky(day) {
     if(day.season!==visibleSeason){
@@ -163,7 +176,7 @@ export function createYardView(canvas,{garden,houseSite,animalIds,createCanvas=(
     lights.sunlight.intensity=THREE.MathUtils.lerp(before.key,after.key,blend);
   }
   const camera=new THREE.OrthographicCamera(-1,1,1,-1,.1,115);
-  let easternShadows=false;
+  let shadowRegion='yard';
   let yaw=entryYaw,pitch=entryPitch,width=1,height=1,zoom=false,survey=false;
   const houses=new Map();
   const villagers=new Map();
@@ -177,15 +190,34 @@ export function createYardView(canvas,{garden,houseSite,animalIds,createCanvas=(
     return {id,...model,heart,shadow};
   });
   const playerShadow=makeContactShadow(1.14,createCanvas);
-  scene.add(playerShadow);
+  const playerNameplate=createYardNameplate(createCanvas,{depthTest:false});
+  const homeNameplate=createYardNameplate(createCanvas,{wood:true,depthTest:false});
+  const otherNameplate=createYardNameplate(createCanvas,{wood:true,depthTest:false});
+  const cameraUp=new THREE.Vector3();
+  const cameraBack=new THREE.Vector3();
+  const houseSignAnchor=new THREE.Vector3();
+  const otherSignAnchor=new THREE.Vector3();
+  const headScreen=new THREE.Vector3();
+  const houseSignScreen=new THREE.Vector3();
+  scene.add(playerShadow,playerNameplate.sprite,homeNameplate.sprite,otherNameplate.sprite);
   let house=null,houseBounds=null,activeVillager=null,visualHeading=.35,lastWetIndex=-1,lastWetAt=null;
-  let vacancySign;
-  function setEstateVacant(vacant) {
-    if(vacant&&!vacancySign){
-      vacancySign=createVacantSign(houseSite,groundHeight,createCanvas);
-      scene.add(vacancySign);
+  let otherHouse=null,vacancySign,vacancySite=null;
+  function setNames(playerName,homeSignName,otherName) {
+    playerNameplate.setText(playerName);
+    homeNameplate.setText(house?homeSignName:'');
+    otherNameplate.setText(otherHouse?otherName:'');
+  }
+  function setEstateVacant(site) {
+    if(site&&(!vacancySite||site.x!==vacancySite.x||site.z!==vacancySite.z)){
+      if(!vacancySign){
+        vacancySign=createVacantSign(site,groundHeight,createCanvas);
+        scene.add(vacancySign);
+      }
+      const x=site.x+1.72,z=site.z+5.56;
+      vacancySign.position.set(x,groundHeight(x,z),z);
+      vacancySite={x:site.x,z:site.z};
     }
-    if(vacancySign)vacancySign.visible=vacant;
+    if(vacancySign)vacancySign.visible=Boolean(site);
   }
   const construction=new THREE.Group();
   const plank=new THREE.BoxGeometry(1,1,1);
@@ -194,12 +226,9 @@ export function createYardView(canvas,{garden,houseSite,animalIds,createCanvas=(
   const soil=new THREE.MeshStandardMaterial({color:'#a18b67',roughness:1,polygonOffset:true,polygonOffsetFactor:-1});
   scene.add(construction);
 
-  function setConstruction(project) {
+  function setConstruction(projects) {
     construction.clear();
     renderer.shadowMap.needsUpdate=true;
-    if(!project)return;
-    const {site,width,depth}=project;
-    construction.position.set(site.x,groundHeight(site.x,site.z),site.z);
     function piece(material,x,y,z,span,height,length){
       const mesh=new THREE.Mesh(plank,material);
       mesh.position.set(x,y,z);
@@ -208,15 +237,18 @@ export function createYardView(canvas,{garden,houseSite,animalIds,createCanvas=(
       mesh.receiveShadow=true;
       construction.add(mesh);
     }
-    const x=width*.48,z=depth*.48;
-    piece(soil,0,.036,0,x*2,.07,z*2);
-    for(const side of [-1,1]){
-      piece(stone,0,.10,z*side,x*2,.15,.19);
-      piece(stone,x*side,.10,0,.19,.15,z*2);
-      for(const end of [-1,1])piece(wood,x*side,.31,z*end,.16,.60,.16);
-    }
-    for(let layer=0;layer<3;layer++){
-      piece(wood,-x*.57,.15+layer*.13,z*.55,Math.min(width*.37,1.65),.115,.28);
+    for(const {site,width,depth} of projects){
+      const y=groundHeight(site.x,site.z);
+      const x=width*.48,z=depth*.48;
+      piece(soil,site.x,y+.036,site.z,x*2,.07,z*2);
+      for(const side of [-1,1]){
+        piece(stone,site.x,y+.10,site.z+z*side,x*2,.15,.19);
+        piece(stone,site.x+x*side,y+.10,site.z,.19,.15,z*2);
+        for(const end of [-1,1])piece(wood,site.x+x*side,y+.31,site.z+z*end,.16,.60,.16);
+      }
+      for(let layer=0;layer<3;layer++){
+        piece(wood,site.x-x*.57,y+.15+layer*.13,site.z+z*.55,Math.min(width*.37,1.65),.115,.28);
+      }
     }
   }
 
@@ -236,13 +268,26 @@ export function createYardView(canvas,{garden,houseSite,animalIds,createCanvas=(
       renderer.shadowMap.needsUpdate=true;
       return [];
     }
-    house=houseModel(id);
-    house.position.set(site.x,groundHeight(site.x,site.z),site.z);
-    scene.add(house);
-    house.updateMatrixWorld(true);
-    houseBounds=new THREE.Box3().setFromObject(house);
+    house=houseModel(id).clone();
+    houseBounds=placeHouse(house,site,houseSignAnchor);
     renderer.shadowMap.needsUpdate=true;
     return house.userData.collision;
+  }
+  function setOtherHouse(id,site){
+    if(otherHouse)scene.remove(otherHouse);
+    otherHouse=id?houseModel(id).clone():null;
+    if(otherHouse)placeHouse(otherHouse,site,otherSignAnchor);
+    renderer.shadowMap.needsUpdate=true;
+    return otherHouse?.userData.collision??[];
+  }
+  function placeHouse(model,site,sign){
+    model.position.set(site.x,groundHeight(site.x,site.z),site.z);
+    scene.add(model);
+    model.updateMatrixWorld(true);
+    const box=new THREE.Box3().setFromObject(model);
+    const x=Math.min(box.max.x-.25,site.x+1.55),z=box.max.z+.58;
+    sign.set(x,groundHeight(x,z)+2.08,z);
+    return box;
   }
 
   function updateCamera(player,cast) {
@@ -261,6 +306,12 @@ export function createYardView(canvas,{garden,houseSite,animalIds,createCanvas=(
     else if(byLake>.3) {
       target.x+=Math.min(0,player.x+17)*.58;
     }
+    const farBank=Math.max(THREE.MathUtils.smoothstep(-player.x,23,30),
+      THREE.MathUtils.smoothstep(-player.z,7,13));
+    const byNorthernRoad=THREE.MathUtils.smoothstep(-player.z,15,20)*(1-THREE.MathUtils.smoothstep(player.x,1,7));
+    target.x=THREE.MathUtils.lerp(target.x,player.x,farBank);
+    target.z=THREE.MathUtils.lerp(target.z,player.z-.9*byNorthernRoad,farBank);
+    target.y+=byNorthernRoad*.34;
     const byAvenue=THREE.MathUtils.smoothstep(player.z,6.8,11.8);
     const byStable=THREE.MathUtils.smoothstep(player.x,8.8,14.5);
     const byStreet=THREE.MathUtils.smoothstep(player.x,17,28);
@@ -274,31 +325,38 @@ export function createYardView(canvas,{garden,houseSite,animalIds,createCanvas=(
     target.z=THREE.MathUtils.lerp(target.z,marketCenter.z-.8,squareFocus*.52);
     target.y+=byStreet*.45;
     if(!zoom)vertical=Math.max(vertical,18.2*byStreet);
-    if((!easternShadows&&player.x>27)||(easternShadows&&player.x<21)){
-      easternShadows=!easternShadows;
-      const offset=easternShadows?marketCenter.x:0;
-      lights.sunlight.position.x=-13+offset;
-      lights.sunlight.target.position.x=offset;
+    const nearStreet=player.x>(shadowRegion==='street'?21:27);
+    const nearNorthBank=player.z<(shadowRegion==='north'?-14:-19);
+    const nextShadowRegion=nearStreet?'street':nearNorthBank?'north':'yard';
+    if(shadowRegion!==nextShadowRegion){
+      shadowRegion=nextShadowRegion;
+      const offsetX=nearStreet?marketCenter.x:nearNorthBank?-16:0;
+      const offsetZ=nearNorthBank&&!nearStreet?-18:0;
+      lights.sunlight.position.set(-13+offsetX,22,10+offsetZ);
+      lights.sunlight.target.position.set(offsetX,0,-2+offsetZ);
       renderer.shadowMap.needsUpdate=true;
     }
+    const framingCast=fishingActive(cast)&&cast.spot?.bobber;
     if(survey){
       vertical=Math.max(vertical,14.8,22/aspect);
       target.set(player.x,1.9,player.z);
-    }else if(cast?.spot){
-      vertical*=1.10;
-      target.x=THREE.MathUtils.lerp(target.x,player.x,.27);
-      target.z=THREE.MathUtils.lerp(target.z,player.z,.18);
+    }else if(framingCast){
+      vertical=Math.max(7.9,9.4/aspect);
+      target.set((player.x+framingCast.x)/2,.65,(player.z+framingCast.z)/2);
     }
-    const streetPitch=Math.min(1.18,pitch+byStreet*.22);
+    const streetPitch=framingCast?1.17:survey?Math.max(.95,pitch):Math.min(1.18,pitch+byStreet*.22+farBank*.19);
+    // Look from the open water during a cast so the bank's foreground crowns stay behind the angler.
+    const cameraYaw=framingCast?Math.atan2(framingCast.x-player.x,framingCast.z-player.z)-.37+
+      THREE.MathUtils.clamp(yaw-entryYaw,-.4,.4):yaw;
     camera.position.set(
-      target.x+Math.sin(yaw)*Math.cos(streetPitch)*worldDistance,
+      target.x+Math.sin(cameraYaw)*Math.cos(streetPitch)*worldDistance,
       target.y+Math.sin(streetPitch)*worldDistance,
-      target.z+Math.cos(yaw)*Math.cos(streetPitch)*worldDistance
+      target.z+Math.cos(cameraYaw)*Math.cos(streetPitch)*worldDistance
     );
     camera.lookAt(target);
     camera.updateMatrixWorld();
     let centerX=0,centerY=0;
-    if(houseBounds&&!survey&&!zoom&&byLake===0&&byAvenue===0&&byStable===0&&houseBounds.max.x-houseBounds.min.x>7.6){
+    if(houseBounds&&!survey&&!zoom&&byLake===0&&byAvenue===0&&byStable===0&&farBank===0&&houseBounds.max.x-houseBounds.min.x>7.6){
       const cameraBounds=new THREE.Box3();
       const corners=new THREE.Vector3();
       for(const x of [houseBounds.min.x,houseBounds.max.x]){
@@ -360,7 +418,7 @@ export function createYardView(canvas,{garden,houseSite,animalIds,createCanvas=(
     return picked;
   }
 
-  function updateStock(records,player,time) {
+  function updateStock(records,player,time,now) {
     const ids=new Set(records.map(record=>record.id));
     for(const [id,model] of stock){
       if(ids.has(id))continue;
@@ -382,7 +440,9 @@ export function createYardView(canvas,{garden,houseSite,animalIds,createCanvas=(
       model.root.position.set(x,ground+.016,z);
       model.shadow.position.set(x,ground+.013,z);
       model.root.rotation.y=mounted?visualHeading:record.heading??0;
-      model.animate(time,mounted?player.walking:record.moving);
+      const fedElapsed=record.fedAt>0?now-record.fedAt:Infinity;
+      const feeding=!mounted&&fedElapsed>=0&&fedElapsed<1100;
+      model.animate(time,mounted?player.walking:record.moving&&!feeding,0,feeding?fedElapsed/1100:0);
     }
   }
 
@@ -398,11 +458,40 @@ export function createYardView(canvas,{garden,houseSite,animalIds,createCanvas=(
     return null;
   }
 
-  function frame(player,flock,records,time,wateredIndex,wateredAt,dt,plots,now,day,cast) {
+  function placeNameplates(){
+    const worldPerPixel=(camera.top-camera.bottom)/Math.max(1,height);
+    otherNameplate.resize(worldPerPixel*30);
+    otherNameplate.sprite.position.copy(otherSignAnchor);
+    const headHeight=26,signHeight=30;
+    playerNameplate.resize(worldPerPixel*headHeight);
+    playerNameplate.sprite.position.copy(activeVillager.root.position);
+    playerNameplate.sprite.position.y+=1.68;
+    cameraUp.setFromMatrixColumn(camera.matrixWorld,1);
+    playerNameplate.sprite.position.addScaledVector(cameraUp,worldPerPixel*16);
+    if(!homeNameplate.sprite.visible)return;
+    homeNameplate.resize(worldPerPixel*signHeight);
+    homeNameplate.sprite.position.copy(houseSignAnchor);
+    // Keep the billboard lettering in front of the overhanging eaves.
+    cameraBack.setFromMatrixColumn(camera.matrixWorld,2);
+    homeNameplate.sprite.position.addScaledVector(cameraBack,1.45);
+    headScreen.copy(playerNameplate.sprite.position).project(camera);
+    houseSignScreen.copy(houseSignAnchor).project(camera);
+    const horizontalGap=Math.abs(headScreen.x-houseSignScreen.x)*width/2;
+    const desiredGap=(headHeight+signHeight)/2+3;
+    const verticalGap=(houseSignScreen.y-headScreen.y)*height/2;
+    const minimumHorizontalGap=(playerNameplate.aspect*headHeight+homeNameplate.aspect*signHeight)/2+4;
+    if(horizontalGap<minimumHorizontalGap&&Math.abs(verticalGap)<desiredGap){
+      const shift=desiredGap-verticalGap;
+      homeNameplate.sprite.position.addScaledVector(cameraUp,worldPerPixel*shift);
+    }
+  }
+
+  function frame(player,flock,records,time,wateredIndex,wateredAt,dt,plots,now,day,cast,paddocks) {
     updateCamera(player,cast);
     updateSky(day);
     woodland.animateLake(time,THREE.MathUtils.smoothstep(lights.sunlight.intensity,.55,2.57));
     if(woodland.setMeadowPlots(plots))renderer.shadowMap.needsUpdate=true;
+    if(paddocks&&fields.updatePaddocks(paddocks))renderer.shadowMap.needsUpdate=true;
     fields.update(plots,now);
     if (activeVillager?.root !== villager(player.avatar).root){
       if (activeVillager) scene.remove(activeVillager.root);
@@ -411,12 +500,19 @@ export function createYardView(canvas,{garden,houseSite,animalIds,createCanvas=(
     }
     const angleDelta=THREE.MathUtils.euclideanModulo(player.heading-visualHeading+Math.PI,Math.PI*2)-Math.PI;
     visualHeading+=angleDelta*Math.min(1,dt*16);
-    updateStock(records,player,time);
+    updateStock(records,player,time,now);
     const saddle=stock.get(player.mountedId)?.riderHeight;
     activeVillager.root.position.set(player.x,groundHeight(player.x,player.z)+(saddle?saddle-.49:.018),player.z);
     activeVillager.root.rotation.y=visualHeading;
-    activeVillager.animate(time,player.walking,Boolean(saddle),cast.phase==='waiting'||cast.phase==='bite');
+    activeVillager.animate(time,player.walking,Boolean(saddle),fishingActive(cast));
+    placeNameplates();
     renderFishing(player,cast,time);
+    const destinationAge=(now-destinationMarkedAt)/620;
+    destinationRing.visible=destinationAge>=0&&destinationAge<1;
+    if(destinationRing.visible){
+      destinationRing.scale.setScalar(.23+.58*destinationAge);
+      destinationRing.material.opacity=.85*(1-destinationAge);
+    }
     playerShadow.visible=!saddle;
     playerShadow.position.set(player.x,groundHeight(player.x,player.z)+.011,player.z);
     flock.forEach((sheep,index)=>{
@@ -496,8 +592,9 @@ export function createYardView(canvas,{garden,houseSite,animalIds,createCanvas=(
   }
 
   return {
-    resize,frame,project,pickGround,hitSheep,hitHorse,setHouse,setConstruction,setEstateVacant,houseCard,portrait,fields,
-    dispose(){renderer.dispose();},
+    resize,frame,project,pickGround,hitSheep,hitHorse,setHouse,setOtherHouse,setConstruction,setEstateVacant,setNames,houseCard,portrait,fields,markDestination,
+    dispose(){playerNameplate.dispose();homeNameplate.dispose();otherNameplate.dispose();woodland.disposeLakesideHomes();renderer.dispose();},
+    setClaimedHomeSites:woodland.setClaimedHomeSites,
     setSurvey(value){survey=value;},
     getHouseBounds(){return houseBounds&&{min:houseBounds.min.toArray(),max:houseBounds.max.toArray()};},
     setZoom(value){zoom=value;},

@@ -1,0 +1,12 @@
+来源：https://github.com/unknown-horizons/unknown-horizons
+版本：c344bf093df75b1d7a08b2b1306ab2f0664ef54a
+作者：Unknown Horizons 美术团队（完整名单见 AUTHORS.md）
+美术许可：CC BY-SA 3.0，全文见 CC-BY-SA。
+集成：4 种房屋与白桦树 PNG 原样内嵌到 HTML；浏览器显示时缩放及夜间调暗。
+本次未复制游戏引擎或 Python 代码。
+素材路径：
+content/gfx/buildings/settlers/residential/as_house0/idle/135/0.png
+content/gfx/buildings/settlers/residential/as_house1/idle/135/0.png
+content/gfx/buildings/settlers/residential/as_house2/idle/135/0.png
+content/gfx/buildings/citizens/residential/as_stonehouse0/idle/135/000.png
+content/gfx/terrain/trees/as_birch0/idle_full/135/0.png

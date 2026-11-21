@@ -1,6 +1,10 @@
 const actionLabels={
   season:'春', 'time-of-day':'白天', interact:'摸摸小羊', water:'给菜地浇水',
-  market:'去集市', 'home-route':'回林间小院', livestock:'围栏买卖', mount:'骑马', land:'选地',
+  market:'去集市', 'home-route':'回林间小院', livestock:'围栏买卖', mount:'骑马', land:'买地',
+  'build-house':'建房', 'shop-homes':'买房', 'housing-close':'关闭',
+  'home-sites':'宅基地', 'buy-home-site':'买下宅地', 'sell-home-site':'卖出空宅地', 'visit-home-site':'去看地',
+  'housing-market':'去集市办理建房', 'rename-player':'改名字',
+  'land-kind':'农田', 'land-smaller':'缩小', 'land-larger':'放大', 'pen-land':'选地建围栏',
   fishing:'下竿', 'lake-route':'去湖边', 'pen-route':'去围栏',
   reel:'收竿', 'buy-plot':'买地', zoom:'近看', eat:'吃饭', 'market-help':'领开荒补助',
   sow:'播种', irrigate:'浇水', fertilize:'施肥', harvest:'收获', 'buy-seed':'购买种子',
@@ -53,7 +57,7 @@ export function createYardControls(){
     querySelector(selector){return actions.get(selector.slice(13,-1));},
     querySelectorAll(selector){return selector==='[data-action]'?[...actions.values()]:choices(selector.slice(6,-1));},
   };
-  element('message').textContent='沿瑞丽大道去集市挑选宅院，或在空地选田。';
+  element('message').textContent='想安家，可以直接点「买地」「建房」或「买房」。';
   return {document,actions,element,choices,createOption:(textContent,value)=>({textContent,value})};
 }
 
@@ -64,17 +68,23 @@ const muted='#5d7060';
 const marketTabs=[['farm','田地'],['market','养殖'],['fish','鱼获'],['house','宅院']];
 const ownerTabs=[...marketTabs,['city','城主']];
 const travelActions=['market','home-route','land'];
+const housingActions=['land','build-house','shop-homes','home-sites'];
+const surveyActions=['land-kind','land-smaller','land-larger','buy-plot','sell-plot'];
+const surveyLabels=['land-legend','land-quote'];
+const surveyColors=['#315b34','#385c89','#844d4e'];
 const localActions=['fishing','reel','sow','irrigate','fertilize','harvest','interact','livestock','mount'];
-const panelTitles={farm:'田地与农产',market:'牲畜与饲料',fish:'出售鱼获',house:'宅院',city:'城主账本',pen:'围栏',settings:'菜单'};
+const panelTitles={farm:'田地与农产',market:'牲畜与饲料',fish:'出售鱼获',house:'建房与升级',estate:'买房',site:'宅基地',city:'城主账本',pen:'围栏',settings:'菜单'};
 const inventoryLabels=['livestock-capacity','goods-basket','livestock-result','livestock-storage'];
 const panelContent={
-  farm:{actions:['buy-plot','sell-plot','buy-seed','sell-crops'],labels:['farm-plot-state','crop-price','farm-inventory','farm-feedback'],pickers:['plot-picker','crop-picker']},
+  farm:{actions:['buy-seed','sell-crops'],labels:['farm-plot-state','crop-price','farm-inventory','farm-feedback'],pickers:['plot-picker','crop-picker']},
   market:{actions:['sell-goods'],labels:inventoryLabels},
-  pen:{labels:inventoryLabels},
+  pen:{actions:['pen-land'],labels:inventoryLabels},
   fish:{actions:['sell-fish'],labels:['fish-basket','fish-quote','fish-feedback','fish-catalog']},
-  house:{actions:['switch-player','house-sell','house-cancel-sale','buy-used-house','house-upgrade','house-repair'],
-    labels:['market-status','estate-summary','estate-confirm','product-name','house-progress','house-price',
-      'product-floor-plan','product-silhouette','product-experience','product-expansion'],choice:'house'},
+  house:{actions:['housing-market','switch-player','house-sell','house-cancel-sale','buy-used-house','house-upgrade','house-repair'],
+    labels:['market-status','housing-guide','housing-result','estate-summary','estate-confirm','home-site-status','product-name','house-progress','house-price',
+      'product-floor-plan','product-silhouette','product-experience','product-expansion'],choice:'house',pickers:['home-site-picker']},
+  estate:{actions:['housing-market','buy-used-house'],labels:['housing-guide','estate-summary','housing-result']},
+  site:{actions:['buy-home-site','sell-home-site','visit-home-site'],labels:['housing-guide','home-site-status','home-site-price','housing-result'],pickers:['home-site-picker']},
   city:{actions:['switch-player'],labels:['player-role','city-balance','city-receipts']},
   settings:{actions:['lake-route','pen-route','season','time-of-day','eat','market-help'],choice:'avatar'},
 };
@@ -103,7 +113,7 @@ export function createYardCanvasUI(controls,canvas){
   const ctx=canvas.getContext('2d');
   const {actions,element,choices}=controls;
   let viewport,active='',scroll=0,maxScroll=0,clipTop=0,clipBottom=0;
-  let hits=[],last='',drag=null,dirty=true,marketOpen=false,marketPlotReady=false,penOpen=false;
+  let hits=[],last='',drag=null,dirty=true,marketOpen=false,penOpen=false,surveyOpen=false,housingMode='';
   let lastMessage='',noticeUntil=0;
   let stick={x:0,y:0,radius:42},stickTouch=null,stickX=0,stickY=0;
   function resize(value,pixelRatio=1){
@@ -144,12 +154,12 @@ export function createYardCanvasUI(controls,canvas){
     ctx.fillStyle=color;
     ctx.fillText(value,x,y);
   }
-  function button(id,node,x,y,w,h=35,onTap,pressed=false,clipped=false){
+  function button(id,node,x,y,w,h=35,onTap,pressed=false,clipped=false,caption){
     if(!node||node.hidden)return;
     const disabled=node.disabled;
     plate(x,y,w,h,pressed||node.getAttribute?.('aria-pressed')==='true'?'#dce9ce':disabled?'#efeee2':pale);
     ctx.font='13px sans-serif';
-    const content=wrap(ctx,label(node),w-12,2);
+    const content=wrap(ctx,caption??label(node),w-12,2);
     content.forEach((line,index)=>text(line,x+6,y+h/2+(index-(content.length-1)/2)*14,13,disabled?muted:ink));
     if(clipped){
       const bottom=Math.min(clipBottom,y+h);
@@ -171,6 +181,7 @@ export function createYardCanvasUI(controls,canvas){
   }
   function switchMenu(value){
     const next=active===value?'':value;
+    if(housingMode&&active===housingMode&&next!==housingMode)actions.get('housing-close').fire();
     if(active==='pen'&&next!=='pen'){
       element('livestock-market').open=false;
       penOpen=false;
@@ -195,23 +206,50 @@ export function createYardCanvasUI(controls,canvas){
     ctx.strokeStyle='#fff9ecdd';
     ctx.stroke();
   }
+  function drawSurvey(x,bottom,width){
+    const selectedActions=surveyActions.filter(id=>!actions.get(id).hidden);
+    const padding=8,gap=4,buttonHeight=44;
+    const inside=width-padding*2;
+    ctx.font='13px sans-serif';
+    const quote=wrap(ctx,label(element('land-quote')),inside,3);
+    const legend=label(element('land-legend')).split(' · ');
+    const height=padding*2+17+quote.length*16+buttonHeight+gap;
+    const y=bottom-height;
+    plate(x,y,width,height);
+    hits.push({id:'land-survey',x,y,w:width,h:height,activate:()=>{}});
+    let legendX=x+padding;
+    for(const [index,entry] of legend.entries()){
+      text(entry,legendX,y+padding+6,11,surveyColors[index]??muted);
+      legendX+=ctx.measureText(entry).width+8;
+    }
+    quote.forEach((line,index)=>text(line,x+padding,y+padding+24+index*16));
+    const buttonWidth=(inside-(selectedActions.length-1)*gap)/selectedActions.length;
+    for(const [index,id] of selectedActions.entries()){
+      const node=actions.get(id);
+      const caption=id==='buy-plot'?'确认买入':id==='sell-plot'?'卖出':node.textContent.replace('用途 · ','');
+      button(id,node,x+padding+index*(buttonWidth+gap),bottom-padding-buttonHeight,buttonWidth,buttonHeight,null,false,false,caption);
+    }
+  }
   function draw(){
     if(!viewport)return false;
     const {width,height,safeTop,safeBottom,safeLeft,safeRight}=viewport;
     const context=element('yard-context');
     const place=context.dataset.kind||context.value;
-    const atMarket=element('city-market').open;
-    const plotReady=atMarket&&!actions.get('buy-plot').hidden;
-    const atPen=!actions.get('livestock').hidden&&!atMarket&&element('livestock-market').open;
+    const surveying=element('land-survey').open;
+    if(surveying!==surveyOpen){
+      surveyOpen=surveying;
+      if(surveyOpen){active='';scroll=0;}
+      dirty=true;
+    }
+    const atMarket=!surveyOpen&&element('city-market').open;
+    const requestedHousing=element('housing-panel').dataset.mode||'';
+    const atPen=!surveyOpen&&!actions.get('livestock').hidden&&!atMarket&&element('livestock-market').open;
     if(atMarket!==marketOpen){
       marketOpen=atMarket;
-      active=atMarket?(plotReady?'farm':'house'):'';
+      active=atMarket?'house':'';
       scroll=0;
       dirty=true;
-    }else if(plotReady&&!marketPlotReady&&active!=='farm'){
-      switchMenu('farm');
     }
-    marketPlotReady=plotReady;
     if(atPen!==penOpen){
       penOpen=atPen;
       if(atPen||active==='pen'){
@@ -219,6 +257,13 @@ export function createYardCanvasUI(controls,canvas){
         scroll=0;
         dirty=true;
       }
+    }
+    if(housingMode!==requestedHousing){
+      if(!requestedHousing&&active===housingMode&&!marketOpen)active='';
+      if(requestedHousing)active=requestedHousing;
+      housingMode=requestedHousing;
+      scroll=0;
+      dirty=true;
     }
     const isOwner=!element('city-balance').hidden;
     if(active==='city'&&!isOwner)switchMenu('house');
@@ -229,7 +274,7 @@ export function createYardCanvasUI(controls,canvas){
       noticeUntil=now+4800;
     }
     const notice=now<noticeUntil?message:'';
-    const local=marketOpen||active?[]:localActions.filter(id=>!actions.get(id).hidden);
+    const local=marketOpen||surveyOpen||active?[]:localActions.filter(id=>!actions.get(id).hidden);
     const chooseCrop=local.includes('sow');
     const content=panelContent[active];
     const actionState=id=>{
@@ -245,9 +290,9 @@ export function createYardCanvasUI(controls,canvas){
       return [node.value,node.children.map(label)];
     };
     const mark=JSON.stringify([
-      marketOpen,isOwner,active,scroll,active?'':notice,active?'':context.textContent,
-      [...travelActions,...local,...(content?.actions??[])].map(actionState),
-      ['avenue-location','farm-status',...(content?.labels??[])].map(labelState),
+      marketOpen,surveyOpen,isOwner,active,housingMode,scroll,active||surveyOpen?'':notice,active||surveyOpen?'':context.textContent,
+      [...travelActions,...housingActions,'rename-player',...local,...(surveyOpen?surveyActions:content?.actions??[])].map(actionState),
+      ['avenue-location','farm-status',...(surveyOpen?surveyLabels:content?.labels??[])].map(labelState),
       (chooseCrop?['crop-picker']:content?.pickers??[]).map(pickerState),
       content?.choice?choices(content.choice).map(node=>[label(node),node.getAttribute('aria-pressed')]):null,
       active==='market'||active==='pen'
@@ -264,29 +309,46 @@ export function createYardCanvasUI(controls,canvas){
     const top=safeTop+7;
     const bottom=height-safeBottom-7;
     const right=left+usable;
-    const hudWidth=Math.min(usable-70,210);
+    const hudWidth=Math.min(usable-(surveyOpen?0:126),210);
     plate(left,top,hudWidth,46);
-    text(marketOpen?'安和里 · 瑞丽集市':'安和里 · 林间小院',left+8,top+11,15);
+    text(surveyOpen?'安和里 · 选地':marketOpen?'安和里 · 瑞丽集市':'安和里 · 林间小院',left+8,top+11,15);
     text(label(element('farm-status')),left+8,top+32,12);
-    button('tab-settings',control('菜单'),right-58,top,58,42,()=>switchMenu('settings'),active==='settings');
+    if(!surveyOpen){
+      action('rename-player',right-118,top,64,42);
+      button('tab-settings',control('菜单'),right-48,top,48,42,()=>switchMenu('settings'),active==='settings');
+      const quickWidth=(Math.min(usable,307)-15)/4;
+      housingActions.forEach((id,index)=>button(id,actions.get(id),left+index*(quickWidth+5),top+52,quickWidth,42,null,
+        id==='build-house'&&active==='house'||id==='shop-homes'&&active==='estate'||id==='home-sites'&&active==='site'));
+    }
     const location=element('avenue-location');
     if(!location.hidden&&location.textContent){
       ctx.font='13px sans-serif';
-      plate(left,top+52,ctx.measureText(location.textContent).width+14,25);
-      text(location.textContent,left+7,top+64,13);
+      const y=top+(surveyOpen?52:100);
+      plate(left,y,ctx.measureText(location.textContent).width+14,25);
+      text(location.textContent,left+7,y+12,13);
     }
 
     drawJoystick();
     const stripX=Math.max(stick.x+stick.radius+9,right-380);
     const stripWidth=right-stripX;
-    const travel=travelActions.filter(id=>!actions.get(id).hidden);
+    const travel=travelActions.filter(id=>!actions.get(id).hidden&&(id!=='land'||surveyOpen));
     const travelWidth=(stripWidth-(travel.length-1)*5)/travel.length;
     travel.forEach((id,index)=>action(id,stripX+index*(travelWidth+5),bottom-42,travelWidth,42));
     let panelBottom=bottom-50;
+    if(surveyOpen){
+      drawSurvey(stripX,panelBottom,stripWidth);
+      return true;
+    }
     if(marketOpen){
       const tabs=isOwner?ownerTabs:marketTabs;
       const tabWidth=(stripWidth-(tabs.length-1)*4)/tabs.length;
-      tabs.forEach(([id,name],index)=>button('tab-'+id,control(name),stripX+index*(tabWidth+4),panelBottom-40,tabWidth,40,()=>switchMenu(id),active===id));
+      tabs.forEach(([id,name],index)=>button('tab-'+id,control(name),stripX+index*(tabWidth+4),panelBottom-40,tabWidth,40,()=>{
+        if(id==='house'&&housingMode&&active==='house'){
+          actions.get('housing-close').fire();
+          scroll=0;
+          dirty=true;
+        }else switchMenu(id);
+      },active===id));
       panelBottom-=48;
     }else if(!active){
       if(place&&context.textContent){
@@ -328,7 +390,8 @@ export function createYardCanvasUI(controls,canvas){
     if(portrait)panelBottom=Math.min(panelBottom,stick.y-stick.radius-7);
     const panelWidth=Math.min(portrait?usable:stripWidth,433);
     const panelX=right-panelWidth;
-    const panelY=Math.max(top+(portrait?81:51),panelBottom-Math.min(height*.58,382));
+    const overlapsQuickActions=panelX<left+Math.min(usable,307);
+    const panelY=Math.max(top+(overlapsQuickActions?102:51),panelBottom-Math.min(height*.58,382));
     const panelHeight=panelBottom-panelY;
     if(panelHeight<75)return true;
     plate(panelX,panelY,panelWidth,panelHeight);
@@ -370,10 +433,9 @@ export function createYardCanvasUI(controls,canvas){
         y+=39;
       }
     };
-    if(marketOpen&&active==='house')line('market-status',14);
+    if(marketOpen&&active==='house'&&!housingMode)line('market-status',14);
     if(active==='farm'){
       line('farm-plot-state');
-      actionRow(['buy-plot','sell-plot']);
       picker('plot-picker',panelLeft,y,(inside-4)/2);
       picker('crop-picker',panelLeft+(inside+4)/2,y,(inside-4)/2);
       y+=39;
@@ -383,6 +445,7 @@ export function createYardCanvasUI(controls,canvas){
       actionRow(['sell-crops']);
       line('farm-feedback');
     }else if(active==='market'||active==='pen'){
+      if(active==='pen')actionRow(['pen-land']);
       line('livestock-capacity');
       line('goods-basket');
       if(active==='market')actionRow(['sell-goods']);
@@ -408,18 +471,35 @@ export function createYardCanvasUI(controls,canvas){
       line('fish-feedback');
       line('fish-catalog');
     }else if(active==='house'){
-      if(marketOpen){
+      if(marketOpen&&!housingMode){
         actionRow(['switch-player']);
         line('estate-summary');
         line('estate-confirm');
         actionRow(['house-sell','house-cancel-sale','buy-used-house']);
       }
+      if(housingMode)line('housing-guide',13);
+      picker('home-site-picker',panelLeft,y,inside);
+      y+=40;
       line('product-name',14);
       line('house-progress',13);
       line('house-price',13);
-      if(marketOpen)actionRow(['house-upgrade','house-repair']);
+      actionRow(['housing-market','house-upgrade','house-repair']);
+      line('housing-result');
       choicesGrid(choices('house'),'house');
       for(const id of ['product-floor-plan','product-silhouette','product-experience','product-expansion'])line(id);
+    }else if(active==='estate'){
+      line('estate-summary',14);
+      line('housing-guide');
+      actionRow(['housing-market','buy-used-house']);
+      line('housing-result');
+    }else if(active==='site'){
+      picker('home-site-picker',panelLeft,y,inside);
+      y+=40;
+      line('home-site-status',14);
+      line('home-site-price',13);
+      actionRow(['buy-home-site','sell-home-site','visit-home-site']);
+      line('housing-result');
+      line('housing-guide');
     }else if(active==='city'){
       line('player-role',13);
       line('city-balance',14);
@@ -502,7 +582,7 @@ export function createYardCanvasUI(controls,canvas){
     movement:()=>({x:stickX,y:stickY}),
     cancel(){drag=null;releaseJoystick();},
     snapshot:()=>({
-      menu:active,scroll,
+      menu:active,scroll,survey:surveyOpen,
       context:element('yard-context').dataset.kind||element('yard-context').value,
       joystick:{...stick,dx:stickX,dy:stickY,active:stickTouch!==null},
       buttons:hits.map(({id,x,y,w,h,disabled=false})=>({id,x,y,w,h,disabled})),

@@ -49,7 +49,7 @@ function makeOverlay(canvas,ui){
 
 export function createGame(context){
   let viewport=context.viewport;
-  let app,ui,overlay,unsubscribe;
+  let app,ui,overlay,unsubscribe,cancelNameInput;
   let elapsed=0,worldTouch=null,overlayTouch=null;
   const wxApi=context.wx||(typeof wx!=='undefined'?wx:null);
   context.setStage?.('ui-canvas');
@@ -70,6 +70,43 @@ export function createGame(context){
     overlayTouch=null;
     ui.cancel();
     app?.cancelInput();
+  }
+  function requestName({value,maxLength}){
+    if(!wxApi?.showKeyboard||!wxApi.onKeyboardConfirm||!wxApi.onKeyboardComplete){
+      return Promise.reject(new Error('WeChat keyboard unavailable'));
+    }
+    cancelNameInput?.();
+    return new Promise((resolve,reject)=>{
+      let pending=true;
+      function detach(){
+        if(!pending)return false;
+        pending=false;
+        wxApi.offKeyboardConfirm?.(confirm);
+        wxApi.offKeyboardComplete?.(complete);
+        cancelNameInput=undefined;
+        return true;
+      }
+      function confirm(event){
+        if(detach())resolve(typeof event?.value==='string'?event.value:null);
+      }
+      function complete(){
+        if(detach())resolve(null);
+      }
+      function fail(error){
+        if(detach())reject(error);
+      }
+      cancelNameInput=()=>{
+        complete();
+        wxApi.hideKeyboard?.({});
+      };
+      try{
+        wxApi.onKeyboardConfirm(confirm);
+        wxApi.onKeyboardComplete(complete);
+        wxApi.showKeyboard({defaultValue:value,maxLength,multiple:false,confirmHold:false,confirmType:'done',fail});
+      }catch(error){
+        fail(error);
+      }
+    });
   }
   function input(event){
     if(event.type==='cancel'){cancel();return;}
@@ -98,7 +135,7 @@ export function createGame(context){
   try{
     context.setStage?.('renderer');
     app=createYardApp({
-      ...controls,canvas,createCanvas,overlay,
+      ...controls,canvas,createCanvas,overlay,requestName,
       storage:context.platform.storage,
       pixelRatio:()=>renderRatio(viewport),
       survival:true,renderCards:false,
@@ -110,7 +147,7 @@ export function createGame(context){
     update(dt){elapsed+=dt;},
     render(){app.step(elapsed*1000+16);},
     pause:cancel,resume:cancel,
-    dispose(){cancel();unsubscribe?.();overlay.dispose();app.dispose?.();if(wxApi?.__yard===game)delete wxApi.__yard;},
+    dispose(){cancelNameInput?.();cancel();unsubscribe?.();overlay.dispose();app.dispose?.();if(wxApi?.__yard===game)delete wxApi.__yard;},
     snapshot(){return {...app.snapshot(),ui:ui.snapshot()};},
     project:app.project,
   };

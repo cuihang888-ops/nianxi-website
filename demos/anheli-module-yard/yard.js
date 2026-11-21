@@ -1,7 +1,7 @@
 import Flora from '../../src/open-world/vendor/content-flora.cjs';
 import {streetBlocks,streetEast} from './ruili-street.js';
 
-export const bounds = {minX:-24.5,maxX:streetEast,minZ:-8,maxZ:24};
+export const bounds = {minX:-34.5,maxX:streetEast,minZ:-34,maxZ:24};
 export const houseSite = {x:-1.8,z:-3.4};
 const gardenBeds = [
   {x:-7.4,z:5.3,w:3.2,d:1.6,id:'herbs',label:'茶苗',plant:'tea'},

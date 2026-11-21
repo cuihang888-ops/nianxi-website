@@ -81,6 +81,12 @@
     #farm-plot-state,#farm-inventory,#farm-feedback,#house-price{margin:7px 0 0;font-size:.76rem;color:var(--quiet);overflow-wrap:anywhere}
     #crop-price{color:var(--quiet);font-size:.72rem}
     #house-price{display:block;margin-bottom:6px}
+    #housing-panel[data-mode="estate"] :is(.building-options,.site-picker),
+    #housing-panel[data-mode="site"] :is(.building-options,.estate-options),
+    #housing-panel:not([data-mode="site"]) .site-options,
+    #housing-panel[data-mode="house"] .estate-options{display:none}
+    #housing-panel:not([data-mode="estate"]) [data-action="housing-close"]{margin-left:0}
+    #housing-guide,#housing-result{font-size:.78rem;color:var(--quiet);margin:5px 0}
     #market-status,#estate-summary,#estate-confirm,#city-receipts,#player-role,#goods-basket{font-size:.78rem;color:var(--quiet);margin:5px 0;overflow-wrap:anywhere}
     #city-market{padding:10px 11px;border:1px solid var(--rim);border-radius:11px;background:#f0eddb}
     #yard-context{font-size:.85rem;color:var(--sage);padding:0 12px}
@@ -137,15 +143,30 @@
           <button data-action="season" title="切换季节预览">春</button>
           <button data-action="time-of-day" title="切换时段预览">白天</button>
         </div>
-        <output id="message" aria-live="polite">点「选地」在附近的空地开一块田。</output>
+        <output id="message" aria-live="polite">点「买地」选空地，或点「建房」看房型。</output>
         <div id="yard-stick" class="yard-stick" aria-hidden="true"></div>
       </div>
       <div class="commands">
+        <button class="action" data-action="land" aria-pressed="false">买地</button>
+        <button class="action" data-action="build-house">建房</button>
+        <button class="action" data-action="shop-homes">买房</button>
+        <button class="action" data-action="home-sites">宅基地</button>
+        <button class="quiet" data-action="rename-player">改名字</button>
         <button class="action" data-action="market">去集市</button>
         <button class="action" data-action="home-route" hidden>回小院</button>
-        <button class="action" data-action="land" aria-pressed="false">选地</button>
       </div>
       <p id="yard-context" hidden></p>
+      <section id="land-survey" class="commands" aria-label="选地与报价" hidden>
+        <div>
+          <p id="land-legend"></p>
+          <p id="land-quote" aria-live="polite"></p>
+        </div>
+        <button class="action" data-action="land-kind">用途 · 田地</button>
+        <button class="quiet" data-action="land-smaller">缩小</button>
+        <button class="quiet" data-action="land-larger">放大</button>
+        <button class="action" data-action="buy-plot" hidden disabled>买地</button>
+        <button class="quiet" data-action="sell-plot" hidden disabled>卖出</button>
+      </section>
       <div class="commands" id="local-actions" hidden>
         <button class="action" data-action="interact" hidden>摸摸小羊</button>
         <button class="action" data-action="livestock" hidden>羊圈管理</button>
@@ -189,10 +210,8 @@
         </label>
         <p id="crop-price"></p>
         <div class="farm-buttons">
-          <button class="quiet" data-action="buy-plot" hidden disabled>买地</button>
           <button class="quiet" data-action="buy-seed" disabled>买种子</button>
           <button class="quiet" data-action="sell-crops">卖出收成</button>
-          <button class="quiet" data-action="sell-plot" hidden>退回空田</button>
         </div>
         <p id="farm-inventory"></p>
         <p id="farm-feedback" aria-live="polite"></p>
@@ -201,6 +220,7 @@
         <summary>牲畜与产物</summary>
         <div class="livestock-wallet"><strong id="livestock-balance"></strong><span id="livestock-capacity"></span></div>
         <p id="livestock-storage" hidden>浏览器存储暂不可用，本次进度保留在当前页面。</p>
+        <button class="quiet" data-action="pen-land" hidden>选地建围栏</button>
         <div id="livestock-inventory"></div>
         <p id="goods-basket"></p>
         <button class="quiet" data-action="sell-goods" disabled>卖出养殖产物</button>
@@ -215,21 +235,40 @@
         <p id="fish-feedback" aria-live="polite"></p>
         <details class="heritage"><summary>鱼种与收购价</summary><p id="fish-market-rules"></p><p id="fish-catalog"></p></details>
       </section>
-      <section>
-        <h2>住宅</h2>
-        <p id="estate-summary"></p>
-        <p id="estate-confirm" hidden></p>
+      </div>
+      <section id="housing-panel" hidden>
+        <h2 id="housing-title">住宅</h2>
+        <p id="housing-guide"></p>
         <div class="farm-buttons">
+          <button class="action" data-action="housing-market" hidden>去集市办理建房</button>
+          <button class="quiet" data-action="housing-close" hidden>关闭</button>
+        </div>
+        <p id="housing-result" aria-live="polite"></p>
+        <label class="site-picker">宅基地
+          <select id="home-site-picker" aria-label="选宅基地"></select>
+        </label>
+        <div class="site-options">
+          <p id="home-site-status"></p>
+          <p id="home-site-price"></p>
+          <div class="farm-buttons">
+            <button class="action" data-action="buy-home-site">买下宅地</button>
+            <button class="quiet" data-action="sell-home-site">卖出空宅地</button>
+            <button class="quiet" data-action="visit-home-site">去看地</button>
+          </div>
+        </div>
+        <p class="estate-options" id="estate-summary"></p>
+        <p class="estate-options" id="estate-confirm" hidden></p>
+        <div class="farm-buttons estate-options">
           <button class="quiet" data-action="house-sell" hidden>挂牌出售整院</button>
           <button class="quiet" data-action="house-cancel-sale" hidden>取消</button>
           <button class="quiet" data-action="buy-used-house" hidden>购买闲置宅院</button>
         </div>
-        <div class="choices" id="houses"></div>
-        <details class="heritage">
+        <div class="choices building-options" id="houses"></div>
+        <details class="heritage building-options">
           <summary>其他房屋</summary>
           <div class="choices" id="heritage-houses"></div>
         </details>
-        <section class="product" aria-live="polite">
+        <section class="product building-options" aria-live="polite">
           <h3 id="product-name">住宅方案</h3>
           <dl id="product-details">
             <dt>户型</dt><dd id="product-floor-plan"></dd>
@@ -246,7 +285,6 @@
           </div>
         </section>
       </section>
-      </div>
     </aside>
   </div>
 </main>

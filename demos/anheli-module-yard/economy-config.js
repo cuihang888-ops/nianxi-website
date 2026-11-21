@@ -27,3 +27,18 @@ export const crops=Object.freeze({
 export const fishMarket=Object.freeze({fullPriceCount:5,surplusRate:.35});
 export const fishBasketCapacity=12;
 export const cropFertilizer=Object.freeze({energy:2,growthTimeMultiplier:.75});
+
+export const landMarket=Object.freeze({
+  sizes:Object.freeze([2,3,4,5]),
+  legacySize:3,
+  legacyPrice:160,
+  legacyResale:120,
+  basePerArea:12,
+  avenuePremium:.55,
+  avenueReach:18,
+  marketPremium:.80,
+  marketReach:24,
+  fencePerMeter:4,
+  resaleRate:.75,
+  paddockCapacities:Object.freeze({2:1,3:2,4:4,5:6}),
+});

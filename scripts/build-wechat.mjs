@@ -9,7 +9,7 @@ import { fileURLToPath } from "node:url";
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 // The preview uploader parses code before the newer device runtime executes it.
 const SCRIPT_TARGET = "es2017";
-const ASSET_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".ktx2", ".basis", ".glb", ".gltf", ".bin", ".mp3", ".ogg", ".wav", ".json", ".ttf", ".woff", ".woff2", ".atlas"]);
+const ASSET_EXTENSIONS = new Set([".png", ".jpg", ".jpeg", ".webp", ".gif", ".ktx2", ".basis", ".glb", ".gltf", ".bin", ".mp3", ".ogg", ".wav", ".json", ".ttf", ".woff", ".woff2", ".atlas", ".txt"]);
 const CODE_EXTENSIONS = new Set([".js", ".mjs", ".cjs", ".ts", ".json"]);
 const VENDOR_LICENSE_NAME = /^[A-Za-z0-9][A-Za-z0-9._-]*\.LICENSE$/;
 const NODE_MODULES = new Set(builtinModules.flatMap(name => [name, `node:${name}`]));
@@ -101,7 +101,7 @@ export async function buildWechat({ projectRoot = REPO_ROOT, checkOnly = false, 
   const client = path.join(root, "wechat");
   const dist = path.join(root, "dist");
   if (!/^wechat(?:-[a-z0-9-]+)?$/.test(outputName)) throw new Error("Invalid WeChat output directory");
-  if (!["wechat/game.js", "wechat/yard-game.js"].includes(entryPoint)) throw new Error("Invalid WeChat entry point");
+  if (!["wechat/game.js", "wechat/street-game.js", "wechat/village-game.js", "wechat/cozy-game.js", "wechat/yard-game.js"].includes(entryPoint)) throw new Error("Invalid WeChat entry point");
   const destination = path.join(dist, outputName);
   const reportDirectory = path.join(root, "reports", "wechat");
   await noLinks(root, destination);

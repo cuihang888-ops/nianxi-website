@@ -4,9 +4,9 @@ const markerPosition = {x:-2.75,z:10.1};
 const boardWidth = 2.20;
 const boardHeight = .57;
 const boardDepth = .12;
-const plankHeight = 1.76;
+const plankHeight = 2.42;
 
-function lettering(createCanvas) {
+function lettering(createCanvas,title) {
   const paper = createCanvas();
   paper.width = 768;
   paper.height = 196;
@@ -46,10 +46,9 @@ function lettering(createCanvas) {
   ctx.strokeStyle='#4e3227';
   ctx.lineJoin='round';
   ctx.lineWidth=5.5;
-  const title='瑞丽大道';
   const letters=Array.from(title);
   for(let i=0;i<letters.length;i++){
-    const x=paper.width*.5+(i-1.5)*134;
+    const x=paper.width*.5+(i-(letters.length-1)/2)*Math.min(134,615/letters.length);
     ctx.strokeText(letters[i],x,101);
     ctx.fillStyle='#fae8bc';
     ctx.fillText(letters[i],x,98);
@@ -68,7 +67,9 @@ export function addAvenueMarker(group,groundHeight,createCanvas) {
   marker.position.set(x,groundHeight(x,z),z);
   group.add(marker);
 
-  const frontMaterial=new THREE.MeshStandardMaterial({color:0xffffff,roughness:.9,map:lettering(createCanvas),emissive:'#4d3628',emissiveIntensity:.17});
+  const signFace=title=>new THREE.MeshStandardMaterial({color:0xffffff,roughness:.9,
+    map:lettering(createCanvas,title),emissive:'#4d3628',emissiveIntensity:.22});
+  const frontMaterial=signFace('瑞丽大道');
   const timber=new THREE.MeshStandardMaterial({color:'#866346',roughness:.96});
   const endGrain=new THREE.MeshStandardMaterial({color:'#a89066',roughness:.96});
   const stone=new THREE.MeshStandardMaterial({color:'#a9a18c',roughness:.98});
@@ -89,6 +90,10 @@ export function addAvenueMarker(group,groundHeight,createCanvas) {
   const board = mesh(box,[timber,timber,endGrain,timber,frontMaterial,frontMaterial],
     boardWidth,boardHeight,boardDepth,0,plankHeight,0);
   board.rotation.z=-.019;
+  for(const [index,[front,back]] of [['← 湖边','湖边 →'],['羊圈 ↑','羊圈 ↓'],['集市 →','← 集市']].entries()){
+    mesh(box,[timber,timber,endGrain,timber,signFace(front),signFace(back)],
+      boardWidth*.82,.34,boardDepth,0,plankHeight-.49-index*.37,.025);
+  }
 
   for(const sign of [-1,1]){
     const offset=sign*.80;

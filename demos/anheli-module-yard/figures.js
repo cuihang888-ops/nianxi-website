@@ -297,14 +297,15 @@ export function createLamb(index) {
 
   return {
     root,
-    animate(time,walking,reaction=0) {
+    animate(time,walking,reaction=0,feedingProgress=0) {
       const phase=time*9.2+key;
       const gait=walking?Math.sin(phase):0;
       const hop=Math.sin(Math.PI*Math.min(1,Math.max(0,reaction)))*.135;
+      const grazing=Math.sin(Math.PI*feedingProgress);
       body.position.y=hop+Math.abs(gait)*.034;
       body.rotation.z=gait*.030;
       head.rotation.y=Math.sin(time*1.71+key)*.084;
-      head.rotation.x=Math.sin(time*2.2+key)*.064-hop*.68;
+      head.rotation.x=Math.sin(time*2.2+key)*.064-hop*.68+grazing*.63;
       for(let i=0;i<legs.length;i++) {
         const direction=i===0||i===3?gait:-gait;
         legs[i].rotation.x=direction*.49;

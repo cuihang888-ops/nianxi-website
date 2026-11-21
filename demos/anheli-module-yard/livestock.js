@@ -1,14 +1,17 @@
 import {fishCatalog} from './fishing.js';
-import {cropFertilizer,crops,fishBasketCapacity,fishMarket,livestockTypes} from './economy-config.js';
+import {cropFertilizer,crops,fishBasketCapacity,fishMarket,landMarket,livestockTypes} from './economy-config.js';
 import {gameDayMilliseconds} from './yard-clock.js';
 import {listYardEstate,purchaseYardEstate,residentIds} from './yard-estate-market.js';
+import {paddockCapacity,plotPurpose,plotResaleValue,plotSizes,plotWidth,plotsOverlap,quoteYardLand} from './yard-land.js';
+import {houseChoices} from './houses.js';
+import {homeSiteById,houseFitsSite} from './yard-home-sites.js';
 export {crops,livestockTypes};
 
 export const loanHorse = Object.freeze({id:'loan-horse', species:'horse', x:14.55, z:8.9});
 export const livestockLimit=9;
-export const plotSize=3;
-export const plotPrice=160;
-export const plotResale=120;
+export const plotSize=landMarket.legacySize;
+export const plotPrice=landMarket.legacyPrice;
+export const plotResale=landMarket.legacyResale;
 export const homePrices=Object.freeze({
   lumber_cabin:0, simple_shed:0, dai_stilt:650, brick_dai:900, myanmar_villa:1250,
   merchant:1500, official:2400, landlord:2800, grand_estate:4500,
@@ -29,6 +32,7 @@ const knownCrop=id=>Object.hasOwn(crops,id);
 const knownFish=id=>Object.hasOwn(fishCatalog,id);
 const fishMarketOrder=Object.keys(fishCatalog).sort((first,second)=>fishCatalog[second].value-fishCatalog[first].value);
 const knownHome=id=>Object.hasOwn(homePrices,id);
+const homeChoicesById=new Map(houseChoices.map(house=>[house.id,house]));
 const counter=number=>Number.isSafeInteger(number)&&number>=0;
 const stapleCrops=['rice','corn'];
 const cheapestSeedPrice=Math.min(...Object.values(crops).map(crop=>crop.price));
@@ -37,8 +41,17 @@ const paddockSlots=[
   [15.93,4.75],[15.93,6.35],[17.05,4.86],[17.05,6.22],
 ];
 
-export function livestockPosition(animal,time) {
-  const [x,z]=paddockSlots[animal.slot];
+export function livestockPosition(animal,time,plots=[]) {
+  const paddock=animal.paddockId===undefined?null:plots.find(plot=>plot.id===animal.paddockId);
+  const capacity=paddockCapacity(paddock);
+  let [x,z]=paddockSlots[animal.slot];
+  if(capacity){
+    const size=plotWidth(paddock);
+    const columns=capacity===6?3:Math.min(2,capacity);
+    const rows=Math.ceil(capacity/columns);
+    x=paddock.x+size*((animal.slot%columns+1)/(columns+1)-.5);
+    z=paddock.z+size*((Math.floor(animal.slot/columns)+1)/(rows+1)-.5);
+  }
   const phase=time*.46+animal.slot*2.39;
   return {x:x+Math.sin(phase)*.22,z:z+Math.cos(phase)*.25,heading:Math.atan2(.22*Math.cos(phase),-.25*Math.sin(phase))};
 }
@@ -57,8 +70,28 @@ export function cropStage(plot,now=Date.now()) {
   return now-plot.wateredAt>=crops[plot.crop].seconds*1000*growthTimeMultiplier?'ready':'growing';
 }
 
-function plotsOverlap(first,second) {
-  return Math.abs(first.x-second.x)<plotSize&&Math.abs(first.z-second.z)<plotSize;
+export function cropYieldForPlot(plot,crop=crops[plot?.crop]) {
+  if(!crop)return 0;
+  const areaRatio=(plotWidth(plot)/plotSize)**2;
+  const minimumYield=Math.floor(crop.price/crop.value)+1;
+  return Math.max(minimumYield,Math.round(crop.yield*areaRatio));
+}
+
+const animalSlotKey=animal=>`${animal.paddockId??'public'}:${animal.slot}`;
+
+function validPlotTerms(plot,cityMarket){
+  if(plot.size===undefined&&plot.purpose===undefined&&plot.price===undefined&&plot.resale===undefined)return true;
+  return cityMarket&&plotSizes.includes(plot.size)&&(plot.purpose==='field'||plot.purpose==='paddock')&&
+    counter(plot.price)&&plot.price>0&&counter(plot.resale)&&plot.resale<plot.price;
+}
+
+const defaultPlayerName='安和里村民';
+const invisibleNameCharacters=/[\u0000-\u001f\u007f-\u009f\u200b-\u200f\u2028-\u202e\u2060-\u206f]/;
+
+function normalizePlayerName(value){
+  if(typeof value!=='string')return '';
+  const name=value.trim();
+  return name&&[...name].length<=12&&!invisibleNameCharacters.test(name)?name:'';
 }
 
 export function createLivestock(storage,{survival=false,cityMarket=false,clock=Date.now}={}) {
@@ -77,34 +110,42 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
     seeds:inventory(cropIds), feed:inventory(stockedSpecies), goods:inventory(stockedSpecies),
     fishSales:null,
     homeId:openYard?'lumber_cabin':null, ownedHomes:defaultHomes, energy:100,
-    homesteadOwned:openYard, homeRecords:Object.fromEntries(defaultHomes.map(id=>[id,{maintainedAt:openedAt}])),
-    construction:null, usedHomes:{},
+    homesteadOwned:openYard, homeSiteId:'yard', homeSitePrice:openYard?homesteadPrice:0,
+    homeRecords:Object.fromEntries(defaultHomes.map(id=>[id,{maintainedAt:openedAt}])),
+    construction:null, usedHomes:{}, playerName:defaultPlayerName,
     };
   }
   let temporary=!storage;
-  function restoreProfile(saved,initial){
+  function restoreProfile(saved,initial,{strict=false}={}){
       const ids=new Set(),slots=new Set();
+      const plotIds=new Set();
+      const validPlots=counter(saved?.nextPlotId)&&saved.nextPlotId>0&&Array.isArray(saved.plots)&&
+        saved.plots.every(plot=>{
+          if(!plot||!counter(plot.id)||plot.id===0||plot.id>=saved.nextPlotId||plotIds.has(plot.id)||
+            !Number.isFinite(plot.x)||!Number.isFinite(plot.z)||!validPlotTerms(plot,cityMarket))return false;
+          const validPlant=plot.crop===null
+            ? plot.plantedAt===null&&plot.wateredAt===null
+            : plotPurpose(plot)==='field'&&knownCrop(plot.crop)&&counter(plot.plantedAt)&&
+              (plot.wateredAt===null||counter(plot.wateredAt)&&plot.wateredAt>=plot.plantedAt);
+          plotIds.add(plot.id);
+          return validPlant;
+        });
+      if(strict&&!validPlots)return null;
+      const plots=validPlots?saved.plots.map(plot=>({...plot,
+        fertilized:plot.crop!==null&&plot.wateredAt!==null&&plot.fertilized===true,
+      })):initial.plots;
+      const paddocks=new Map(plots.filter(plot=>plotPurpose(plot)==='paddock').map(plot=>[plot.id,plot]));
       if(counter(saved?.coins)&&counter(saved.nextId)&&saved.nextId>0&&Array.isArray(saved.animals)&&
-        saved.animals.length<=livestockLimit&&saved.animals.every(animal=>{
+        saved.animals.every(animal=>{
           if(!animal||!counter(animal.id)||animal.id>=saved.nextId||ids.has(animal.id)||
-            !Number.isInteger(animal.slot)||animal.slot<0||animal.slot>=paddockSlots.length||
-            slots.has(animal.slot)||!known(animal.species)||!counter(animal.fedAt))return false;
+            !known(animal.species)||!counter(animal.fedAt))return false;
+          const key=animalSlotKey(animal);
+          const capacity=animal.paddockId===undefined?livestockLimit:paddockCapacity(paddocks.get(animal.paddockId));
+          if(!Number.isInteger(animal.slot)||animal.slot<0||animal.slot>=capacity||slots.has(key))return false;
           ids.add(animal.id);
-          slots.add(animal.slot);
+          slots.add(key);
           return true;
         })){
-        const plotIds=new Set();
-        const validPlots=counter(saved.nextPlotId)&&saved.nextPlotId>0&&Array.isArray(saved.plots)&&
-          saved.plots.every(plot=>{
-            if(!plot||!counter(plot.id)||plot.id===0||plot.id>=saved.nextPlotId||plotIds.has(plot.id)||
-              !Number.isFinite(plot.x)||!Number.isFinite(plot.z))return false;
-            const validPlant=plot.crop===null
-              ? plot.plantedAt===null&&plot.wateredAt===null
-              : knownCrop(plot.crop)&&counter(plot.plantedAt)&&
-                (plot.wateredAt===null||counter(plot.wateredAt)&&plot.wateredAt>=plot.plantedAt);
-            plotIds.add(plot.id);
-            return validPlant;
-          });
         const ownedHomes=new Set(initial.ownedHomes);
         if(Array.isArray(saved.ownedHomes))saved.ownedHomes.filter(knownHome).forEach(id=>ownedHomes.add(id));
         const homeRecords=Object.fromEntries([...ownedHomes].map(id=>{
@@ -118,24 +159,29 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
         const usedHomes=Object.fromEntries(Object.entries(saved.usedHomes??{}).filter(([id,record])=>
           knownHome(id)&&prices[id]>0&&counter(record?.maintainedAt)).map(([id,record])=>
           [id,{maintainedAt:record.maintainedAt}]));
+        const homesteadOwned=initial.homesteadOwned||saved.homesteadOwned===true||ownedHomes.size>0||Boolean(validProject);
+        const homeSite=homeSiteById(saved.homeSiteId??'yard');
+        if(strict&&homesteadOwned&&!homeSite)return null;
+        const homeSiteId=homesteadOwned?homeSite?.id??'yard':'yard';
+        const homeSitePrice=homesteadOwned
+          ?counter(saved.homeSitePrice)&&saved.homeSitePrice>0?saved.homeSitePrice:homeSite?.price??homesteadPrice
+          :0;
         return {
           ...initial, coins:saved.coins, nextId:saved.nextId, animals:saved.animals,
           nextPlotId:validPlots?saved.nextPlotId:initial.nextPlotId,
-          plots:validPlots?saved.plots.map(plot=>({...plot,
-            fertilized:plot.crop!==null&&plot.wateredAt!==null&&plot.fertilized===true,
-          })):initial.plots,
+          plots,
           crops:inventory(cropIds,saved.crops), fish:inventory(Object.keys(fishCatalog),saved.fish),
           seeds:inventory(cropIds,saved.seeds), feed:inventory(stockedSpecies,saved.feed), goods:inventory(stockedSpecies,saved.goods),
           fishSales:counter(saved.fishSales?.day)&&counter(saved.fishSales?.fullPriceSold)
             ?{day:saved.fishSales.day,fullPriceSold:Math.min(fishMarket.fullPriceCount,saved.fishSales.fullPriceSold)}:null,
           homeId:ownedHomes.has(saved.homeId)?saved.homeId:initial.homeId,
           ownedHomes:[...ownedHomes], energy:counter(saved.energy)?Math.min(100,saved.energy):100,
-          homesteadOwned:initial.homesteadOwned||saved.homesteadOwned===true||ownedHomes.size>0||Boolean(validProject),
-          homeRecords,usedHomes,
+          homesteadOwned,homeSiteId,homeSitePrice,
+          homeRecords,usedHomes,playerName:normalizePlayerName(saved.playerName)||defaultPlayerName,
           construction:validProject?{id:project.id,startedAt:project.startedAt,readyAt:project.readyAt}:null,
         };
       }
-      return initial;
+      return strict?null:initial;
   }
   const first=initialProfile(!survival);
   const second=initialProfile(false);
@@ -145,30 +191,33 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
     if(!residentIds.includes(saved?.residentId)||!Array.isArray(saved.receipts)||
       !counter(saved.nextListingId)||!saved.nextListingId||!counter(saved.nextId)||!saved.nextId||
       !counter(saved.nextPlotId)||!saved.nextPlotId||!saved.residents)return null;
-    const residents=Object.fromEntries(residentIds.map(id=>[id,restoreProfile(saved.residents[id],second)]));
-    const occupied=residentIds.filter(id=>residents[id].homesteadOwned);
-    if(occupied.length>1||(occupied.length&&saved.listing))return null;
+    const residents=Object.fromEntries(residentIds.map(id=>[id,restoreProfile(saved.residents[id],second,{strict:true})]));
+    if(residentIds.some(id=>!residents[id]))return null;
     let listing=saved.listing;
     if(listing&&(!residentIds.includes(listing.sellerId)||!knownHome(listing.homeId)||!counter(listing.price)||
       !listing.price||!counter(listing.listedAt)||!Array.isArray(listing.ownedHomes)||
       !Array.isArray(listing.animals)||!Array.isArray(listing.plots)||!listing.homeRecords||
       listing.id!=='estate-'+(saved.nextListingId-1)))return null;
     if(listing){
-      const assets=restoreProfile({...listing,coins:0,nextId:saved.nextId,nextPlotId:saved.nextPlotId},second);
-      if(assets.homeId!==listing.homeId||assets.animals.length!==listing.animals.length||
+      const assets=restoreProfile({...listing,coins:0,nextId:saved.nextId,nextPlotId:saved.nextPlotId},second,{strict:true});
+      if(!assets||assets.homeId!==listing.homeId||assets.animals.length!==listing.animals.length||
         assets.plots.length!==listing.plots.length)return null;
-      const {homeId,homeRecords,ownedHomes,plots,animals}=assets;
+      const {homeId,homeSiteId,homeSitePrice,homeRecords,ownedHomes,plots,animals}=assets;
       const {id,sellerId,price,listedAt}=listing;
-      listing={id,sellerId,price,listedAt,homeId,homeRecords,ownedHomes,plots,animals};
+      listing={id,sellerId,price,listedAt,homeId,homeSiteId,homeSitePrice,homeRecords,ownedHomes,plots,animals};
     }
+    const siteClaims=Object.values(residents).filter(profile=>profile.homesteadOwned).map(profile=>profile.homeSiteId);
+    if(listing)siteClaims.push(listing.homeSiteId);
+    if(new Set(siteClaims).size!==siteClaims.length)return null;
     const assetSets=[...Object.values(residents),...(listing?[listing]:[])];
     const animals=assetSets.flatMap(profile=>profile.animals);
     const plots=assetSets.flatMap(profile=>profile.plots);
     if(animals.some(animal=>animal.id>=saved.nextId)||
       new Set(animals.map(animal=>animal.id)).size!==animals.length||
-      new Set(animals.map(animal=>animal.slot)).size!==animals.length||
+      new Set(animals.map(animalSlotKey)).size!==animals.length||
       plots.some(plot=>plot.id>=saved.nextPlotId)||
-      new Set(plots.map(plot=>plot.id)).size!==plots.length)return null;
+      new Set(plots.map(plot=>plot.id)).size!==plots.length||
+      plots.some((plot,index)=>plots.slice(index+1).some(other=>plotsOverlap(plot,other))))return null;
     const receipts=saved.receipts;
     if(receipts.some((receipt,index)=>!residentIds.includes(receipt?.buyerId)||
       !residentIds.includes(receipt.sellerId)||receipt.sellerId===receipt.buyerId||
@@ -233,6 +282,18 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
     return message;
   }
 
+  function renamePlayer(value) {
+    const playerName=normalizePlayerName(value);
+    if(!playerName)return '请输入 1 到 12 个可见字符作为名字。';
+    if(playerName===state.playerName)return '当前名字是'+playerName+'。';
+    return commit({...state,playerName},'名字已改为'+playerName+'。');
+  }
+
+  function homeSignName(){
+    const owner=state.homeId?state:inactiveProfile();
+    return owner?.homeId?owner.playerName+'家':'';
+  }
+
   function completedProfile(profile,now) {
     const project=profile.construction;
     if(!project||!counter(now)||now<project.readyAt)return null;
@@ -289,35 +350,57 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
   function otherPlots(){
     return otherAssets('plots');
   }
-  function animalSlotsAvailable(){
-    return livestockLimit-state.animals.length-otherAnimals().length;
+  function paddockSlotsAvailable(paddockId){
+    if(paddockId===null)return publicSlotsAvailable();
+    const plot=state.plots.find(plot=>plot.id===paddockId);
+    return Math.max(0,paddockCapacity(plot)-state.animals.filter(animal=>animal.paddockId===paddockId).length);
   }
-  function buy(species) {
+  function publicSlotsAvailable(){
+    return livestockLimit-[...state.animals,...otherAnimals()].filter(animal=>animal.paddockId===undefined).length;
+  }
+  function animalSlotsAvailable(){
+    const capacity=state.plots.reduce((total,plot)=>total+paddockCapacity(plot),0);
+    return publicSlotsAvailable()+capacity-state.animals.filter(animal=>animal.paddockId!==undefined).length;
+  }
+  function buy(species,paddockId) {
     if(!known(species))return '';
     const type=livestockTypes[species];
-    if(animalSlotsAvailable()<=0)return '围栏里的位置都已占用。';
+    const paddock=paddockId===undefined
+      ? state.plots.find(plot=>paddockCapacity(plot)>0&&paddockSlotsAvailable(plot.id)>0)
+      : state.plots.find(plot=>plot.id===paddockId&&paddockCapacity(plot)>0);
+    if(paddockId!==undefined&&paddockId!==null&&!paddock)return '先选一处自有围栏。';
+    if(paddock?paddockSlotsAvailable(paddock.id)<=0:publicSlotsAvailable()<=0)return '围栏里的位置都已占用。';
     if(state.coins<type.price)return '安币还不够。';
-    const slots=new Set([...state.animals,...otherAnimals()].map(animal=>animal.slot));
-    const slot=paddockSlots.findIndex((_,index)=>!slots.has(index));
+    const slots=new Set([...state.animals,...otherAnimals()].filter(animal=>animal.paddockId===paddock?.id).map(animal=>animal.slot));
+    let slot=0;
+    while(slots.has(slot))slot++;
     const id=city?.nextId??state.nextId;
+    if(!counter(id+1))return '暂时不能购买牲畜。';
+    const animal={id,slot,species,fedAt:0,...(paddock?{paddockId:paddock.id}:{})};
     return commit({...state,coins:state.coins-type.price,nextId:id+1,
-      animals:[...state.animals,{id,slot,species,fedAt:0}]},type.name+'已来到右侧围栏。');
+      animals:[...state.animals,animal]},type.name+(paddock?'已送到你的围栏。':'已来到右侧围栏。'));
   }
 
-  function sell(species,mountedId) {
+  function animalsOfSpecies(species,paddockId){
+    return state.animals.filter(animal=>animal.species===species&&
+      (paddockId===undefined||(animal.paddockId??null)===paddockId));
+  }
+
+  function sell(species,mountedId,paddockId) {
     if(!known(species))return '';
     const type=livestockTypes[species];
-    const animal=state.animals.find(record=>record.species===species&&record.id!==mountedId);
-    if(!animal)return state.animals.some(record=>record.species===species)
+    const mine=animalsOfSpecies(species,paddockId);
+    const animal=mine.find(record=>record.id!==mountedId);
+    if(!animal)return mine.length
       ? '先下马，再卖出正在骑的马。' : '围场里还没有这种动物。';
     return commit({...state,coins:state.coins+type.resale,animals:state.animals.filter(record=>record!==animal)},
       '卖出'+type.name+'，收到 '+type.resale+' 安币。');
   }
 
-  function care(species,now=Date.now()) {
+  function care(species,now=Date.now(),paddockId) {
     if(!known(species))return '';
     const type=livestockTypes[species];
-    const mine=state.animals.filter(animal=>animal.species===species);
+    const mine=animalsOfSpecies(species,paddockId);
     if(!mine.length)return '先领养一只动物。';
     if(!type.product)return '马已经吃过草，可以带它去散步。';
     const ready=mine.filter(animal=>animal.fedAt&&now-animal.fedAt>=type.seconds*1000);
@@ -367,17 +450,35 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
     return commit({...state,coins:state.coins+value,goods:inventory(stockedSpecies)},'卖出畜产，收到 '+value+' 安币。');
   }
 
+  function landQuote(point,validate) {
+    const {x,z,size=plotSize,purpose='field'}=point??{};
+    const parcel={x,z,size,purpose};
+    if(!Number.isFinite(x)||!Number.isFinite(z))return {...parcel,reason:'先在地面上选一块空地。'};
+    if(!plotSizes.includes(size)||(purpose!=='field'&&purpose!=='paddock')||(!city&&(size!==plotSize||purpose!=='field')))
+      return {...parcel,reason:'请选择有效的地块尺寸和用途。'};
+    // Existing yard callers used an unqualified 3×3 parcel with a fixed price.
+    const terms=city&&(point.size!==undefined||point.purpose!==undefined)
+      ? quoteYardLand(parcel)
+      : {price:plotPrice,resale:plotResale,capacity:0};
+    const quote={...parcel,...terms,reason:''};
+    if(otherPlots().some(owned=>plotsOverlap(quote,owned)))return {...quote,reason:'这块地与其他居民或集市托管的地块重叠，已有归属。'};
+    if(state.plots.some(owned=>plotsOverlap(quote,owned)))return {...quote,reason:'这块地和已有地块重叠了。'};
+    const validation=validate?.(quote);
+    if(typeof validation==='string'&&validation)return {...quote,reason:validation};
+    if(validation===false)return {...quote,reason:'这块地现在不能出售。'};
+    return quote;
+  }
+
   function buyPlot(point,validate) {
-    if(!Number.isFinite(point?.x)||!Number.isFinite(point?.z))return '先在地面上选一块空地。';
+    const {x,z,size,purpose,price,resale,reason}=landQuote(point,validate);
+    if(reason)return reason;
+    if(state.coins<price)return '购买这块地需要 '+price+' 安币。';
     const id=city?.nextPlotId??state.nextPlotId;
-    const plot={id,x:point.x,z:point.z,crop:null,plantedAt:null,wateredAt:null,fertilized:false};
-    if([...state.plots,...otherPlots()].some(owned=>plotsOverlap(plot,owned)))return '这块地和已有田地重叠了。';
-    const validation=validate?.(plot);
-    if(typeof validation==='string'&&validation)return validation;
-    if(validation===false)return '这块地现在不能出售。';
-    if(state.coins<plotPrice)return '买地需要 '+plotPrice+' 安币。';
-    return commit({...state,coins:state.coins-plotPrice,nextPlotId:id+1,plots:[...state.plots,plot]},
-      '买下第 '+plot.id+' 块田，花费 '+plotPrice+' 安币。');
+    if(!counter(id+1))return '暂时不能登记新地块。';
+    const plot={id,x,z,crop:null,plantedAt:null,wateredAt:null,fertilized:false};
+    if(city&&(point.size!==undefined||point.purpose!==undefined))Object.assign(plot,{size,purpose,price,resale});
+    return commit({...state,coins:state.coins-price,nextPlotId:id+1,plots:[...state.plots,plot]},
+      (purpose==='paddock'?'已建好围栏':'已买下田地')+'，花费 '+price+' 安币。');
   }
 
   function updatePlot(plot,changes,updates,message) {
@@ -387,14 +488,19 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
 
   function sellPlot(plotId) {
     const plot=state.plots.find(record=>record.id===plotId);
-    if(!plot||plot.crop!==null)return '只能退回空田。';
-    return commit({...state,coins:state.coins+plotResale,plots:state.plots.filter(record=>record.id!==plotId)},
-      '已退回第 '+plot.id+' 块空田，收到 '+plotResale+' 安币。');
+    if(!plot)return '先选择一块自有地。';
+    if(plot.crop!==null)return '只能退回空田。';
+    const paddock=plotPurpose(plot)==='paddock';
+    if(paddock&&state.animals.some(animal=>animal.paddockId===plot.id))return '围栏里还有动物，清空后才能卖出。';
+    const resale=plotResaleValue(plot);
+    if(!counter(state.coins+resale))return '暂时不能结算地块。';
+    return commit({...state,coins:state.coins+resale,plots:state.plots.filter(record=>record.id!==plotId)},
+      '已卖出'+(paddock?'围栏':'空田')+'，收到 '+resale+' 安币。');
   }
 
   function plant(plotId,cropId,now=Date.now()) {
     const plot=state.plots.find(record=>record.id===plotId);
-    if(!plot)return '先选自己的一块田。';
+    if(!plot||plotPurpose(plot)!=='field')return '先选自己的一块田。';
     if(plot.crop!==null)return '这块田已经种了作物。';
     if(!knownCrop(cropId))return '先选一种作物。';
     const crop=crops[cropId];
@@ -439,9 +545,10 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
     if(stage==='dry')return '作物需要先浇水。';
     if(stage==='growing')return '作物正在生长，再等一会儿。';
     const crop=crops[plot.crop];
-    const inventory={...state.crops,[plot.crop]:state.crops[plot.crop]+crop.yield};
+    const quantity=cropYieldForPlot(plot,crop);
+    const inventory={...state.crops,[plot.crop]:state.crops[plot.crop]+quantity};
     return updatePlot(plot,{crop:null,plantedAt:null,wateredAt:null,fertilized:false},{crops:inventory},
-      '收获 '+crop.yield+' 份'+crop.product+'，已经放进背篓。');
+      '收获 '+quantity+' 份'+crop.product+'，已经放进背篓。');
   }
 
   function sellCrops(cropId) {
@@ -514,17 +621,55 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
     return Math.max(minimumCondition,100-wear);
   }
 
-  function houseQuote(id,now=clock()) {
+  function homeSiteQuote(siteId=state.homeSiteId) {
+    const site=homeSiteById(siteId);
+    if(!site)return {price:0,resale:0,owned:false,available:false,reason:'请选择一块可用的宅地。'};
+    const owned=state.homesteadOwned&&state.homeSiteId===site.id;
+    const price=owned?state.homeSitePrice:site.price;
+    const resale=Math.floor(price*landMarket.resaleRate);
+    let reason='';
+    if(!owned){
+      const other=inactiveProfile();
+      if(city?.listing?.homeSiteId===site.id)reason='这处整院正在集市待售。';
+      else if(other?.homesteadOwned&&other.homeSiteId===site.id)reason='这处宅地已有其他归属。';
+      else if(state.homesteadOwned)reason='你已经拥有一块宅地。';
+    }
+    return {price,resale,owned,available:!owned&&!reason,reason};
+  }
+
+  function buyHomestead(siteId) {
+    const quote=homeSiteQuote(siteId);
+    if(quote.owned)return '这里已经是你的宅地。';
+    if(!quote.available)return quote.reason;
+    if(state.coins<quote.price)return '购买这块宅地需要 '+quote.price+' 安币。';
+    const site=homeSiteById(siteId??state.homeSiteId);
+    return commit({...state,coins:state.coins-quote.price,homesteadOwned:true,homeSiteId:site.id,
+      homeSitePrice:quote.price},'已付 '+quote.price+' 安币买下'+site.name+'。现在可以建房了。');
+  }
+
+  function sellHomestead() {
+    if(!state.homesteadOwned)return '你还没有可回收的宅地。';
+    if(state.homeId||state.construction)return '已有施工或住宅的宅地可随完工整院交易。';
+    const {resale}=homeSiteQuote();
+    if(!counter(state.coins+resale))return '暂时无法回收宅地，请重试。';
+    return commit({...state,coins:state.coins+resale,homesteadOwned:false,homeSiteId:'yard',
+      homeSitePrice:0},'系统已回收宅地，收到 '+resale+' 安币。');
+  }
+
+  function houseQuote(id,now=clock(),siteId=state.homeSiteId) {
     if(!knownHome(id))return null;
     const price=prices[id];
     const record=state.homeRecords[id];
-    const landPrice=state.homesteadOwned?0:homesteadPrice;
+    const site=homeSiteQuote(siteId);
+    const address=homeSiteById(siteId);
+    const sizeBlocked=address&&!houseFitsSite(homeChoicesById.get(id),address)?'这块宅地放不下这个房型。':'';
+    const landPrice=site.owned?0:site.price;
     const condition=homeCondition(record,now);
     const repairCost=record&&price?Math.ceil(price*(100-condition)*homeRepairRate):0;
     if(city){
       const canList=state.homeId===id&&!state.construction&&!city.listing;
-      const upgradeBlocked=city.listing||inactiveProfile().homesteadOwned?'这处宅地已有其他归属。':
-        state.homeId&&survivalHomePrices[id]<=survivalHomePrices[state.homeId]?'住宅只能升级为价格更高的房型。':'';
+      const upgradeBlocked=site.reason||sizeBlocked||
+        (state.homeId&&survivalHomePrices[id]<=survivalHomePrices[state.homeId]?'住宅只能升级为价格更高的房型。':'');
       const structureCredit=state.homeId?Math.floor(prices[state.homeId]*homeCondition(state.homeRecords[state.homeId],now)*homeResaleRate/100):0;
       const buildPrice=Math.max(0,price-structureCredit);
       return {price:buildPrice,structureCredit,landPrice,total:buildPrice+landPrice,seconds:homeBuildSeconds[id],
@@ -536,11 +681,11 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
     const usedCondition=listing?homeCondition(listing,now):null;
     const usedPrice=listing&&!record?Math.ceil(price*usedCondition*usedHomeAskingRate/100):0;
     return {price,landPrice,total:price+landPrice,seconds:price?homeBuildSeconds[id]:0,
-      owned:Boolean(record),condition,saleValue,repairCost,usedCondition,usedPrice,
+      owned:Boolean(record),condition,saleValue,repairCost,usedCondition,usedPrice,upgradeBlocked:site.reason||sizeBlocked,
       usedTotal:usedPrice?usedPrice+landPrice:0};
   }
 
-  function buyHome(id,now=clock()) {
+  function buyHome(id,now=clock(),siteId=state.homeSiteId) {
     if(!knownHome(id))return '先选一种住宅。';
     if(!counter(now)||!counter(now+homeBuildSeconds[id]*1000))return '暂时无法开始建造。';
     settle(now);
@@ -549,11 +694,13 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
       return '正在建造住宅，还需要约 '+remain+' 秒。';
     }
     if(id===state.homeId)return '现在住的就是这间房。';
-    const {total,seconds,upgradeBlocked}=houseQuote(id,now);
+    const {total,seconds,upgradeBlocked}=houseQuote(id,now,siteId);
     if(upgradeBlocked)return upgradeBlocked;
     if(!city&&state.ownedHomes.includes(id))return commit({...state,homeId:id},'已换到选中的住宅。');
     if(state.coins<total)return '建造这间住宅共需 '+total+' 安币。';
-    return commit({...state,coins:state.coins-total,homesteadOwned:true,
+    const site=homeSiteById(siteId);
+    return commit({...state,coins:state.coins-total,homesteadOwned:true,homeSiteId:site.id,
+      homeSitePrice:state.homesteadOwned?state.homeSitePrice:site.price,
       construction:{id,startedAt:now,readyAt:now+seconds*1000}},
       '已付 '+total+' 安币开工，预计 '+seconds+' 秒后完工。');
   }
@@ -578,13 +725,15 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
     if(!counter(now))return '暂时无法购买住宅。';
     settle(now);
     if(state.construction)return '房屋完工后可以购买现房。';
-    const total=houseQuote(id,now)?.usedTotal;
+    const {usedTotal:total,upgradeBlocked}=houseQuote(id,now)??{};
     if(!total)return '集市目前没有可买的这类住宅。';
+    if(upgradeBlocked)return upgradeBlocked;
     if(state.coins<total)return '购买现房共需 '+total+' 安币。';
     const usedHomes={...state.usedHomes};
     const record=usedHomes[id];
     delete usedHomes[id];
     return commit({...state,coins:state.coins-total,homeId:id,homesteadOwned:true,
+      homeSitePrice:state.homesteadOwned?state.homeSitePrice:homeSiteQuote().price,
       ownedHomes:[...state.ownedHomes,id],homeRecords:{...state.homeRecords,[id]:record},usedHomes},
       '买下集市现房，支付 '+total+' 安币。');
   }
@@ -607,8 +756,8 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
   }
   function estateListing(now=clock()){
     if(!city?.listing)return null;
-    const {id,sellerId,price,listedAt,homeId,homeRecords,plots,animals}=city.listing;
-    return copyEstate({id,sellerId,price,listedAt,homeId,status:'vacant',construction:null,
+    const {id,sellerId,price,listedAt,homeId,homeSiteId,homeSitePrice,homeRecords,plots,animals}=city.listing;
+    return copyEstate({id,sellerId,price,listedAt,homeId,homeSiteId,homeSitePrice,status:'vacant',construction:null,
       condition:homeCondition(homeRecords[homeId],now),plots,animals});
   }
   function otherEstate(){
@@ -616,7 +765,8 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
     const profile=inactiveProfile();
     if(!profile.homesteadOwned)return estateListing();
     const ownerId=city.residentId==='resident'?'buyer':'resident';
-    return copyEstate({id:'estate-site',ownerId,status:'occupied',homeId:profile.homeId,
+    return copyEstate({id:'estate-site',ownerId,ownerName:profile.playerName,status:'occupied',homeId:profile.homeId,
+      homeSiteId:profile.homeSiteId,homeSitePrice:profile.homeSitePrice,
       condition:homeCondition(profile.homeRecords[profile.homeId],clock()),
       construction:profile.construction&&{...profile.construction},plots:profile.plots,animals:profile.animals});
   }
@@ -624,7 +774,7 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
     if(!city||!state.homeId||state.construction||city.listing)return null;
     const condition=homeCondition(state.homeRecords[state.homeId],now);
     const structure=Math.ceil(prices[state.homeId]*condition*usedHomeAskingRate/100);
-    const land=homesteadPrice+state.plots.length*plotResale;
+    const land=state.homeSitePrice+state.plots.reduce((total,plot)=>total+plotResaleValue(plot),0);
     const plants=state.plots.reduce((total,plot)=>total+(plot.crop?crops[plot.crop].price:0),0);
     const animals=state.animals.reduce((total,animal)=>total+livestockTypes[animal.species].resale,0);
     const price=structure+land+plants+animals;
@@ -636,9 +786,9 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
     if(!city||!counter(now))return '暂时无法挂牌。';
     settle(now);
     const quote=listingQuote(now);
-    if(!quote)return '只有已完工的自有整院可以挂牌。';
+    if(!quote)return city.listing?'集市目前已有一处待售整院。':'只有已完工的自有整院可以挂牌。';
     return commitCity(listYardEstate(city,quote.price,now),
-      '整院已挂牌，售价 '+quote.price+' 安币。宅地、作物和自有牲畜由集市托管。');
+      '整院已挂牌，售价 '+quote.price+' 安币。宅地、田地、围栏、作物和自有牲畜由集市托管。');
   }
   function canBuyEstate(){
     const listing=city?.listing;
@@ -648,10 +798,11 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
   function buyEstate(id,now=clock()){
     if(!counter(now)||!city?.listing||city.listing.id!==id)return '这处整院已下架。';
     if(city.listing.sellerId===city.residentId)return '挂牌人不能购买这处整院。';
+    if(state.homesteadOwned)return '你已经拥有一块宅地。';
     if(!canBuyEstate())return '购买这处整院需要 '+city.listing.price+' 安币。';
     const next=purchaseYardEstate(city,id,now);
     if(!next)return '暂时无法购买这处整院。';
-    return commitCity(next,'已买下整院，宅地、作物和牲畜已交接。');
+    return commitCity(next,'已买下整院，宅地、田地、围栏、作物和牲畜已交接。');
   }
   function switchResident(id){
     if(!city||!residentIds.includes(id))return '请选择一个本地试玩身份。';
@@ -674,7 +825,7 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
       state.plots.some(plot=>plot.crop!==null)||Object.values(state.crops).some(Boolean)||
       Object.values(state.fish).some(Boolean)||Object.values(state.goods).some(Boolean))return 0;
     const seedCost=Object.values(state.seeds).some(Boolean)?0:cheapestSeedPrice;
-    const reserve=seedCost+(state.plots.length?0:plotPrice);
+    const reserve=seedCost+(state.plots.some(plot=>plotPurpose(plot)==='field')?0:plotPrice);
     return Math.max(0,reserve-state.coins);
   }
 
@@ -699,9 +850,12 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
   }
 
   return {
-    buy,sell,care,buyPlot,sellPlot,plant,waterPlot,fertilizePlot,harvest,sellCrops,catchFish,fishQuote,sellFish,eat,buySeed,buyFeed,sellGoods,
-    buyHome,buyUsedHome,sellHome,repairHome,houseQuote,marketHelp,snapshot,settle,
-    listEstate,listingQuote,buyEstate,switchResident,
+    buy,sell,care,paddockSlotsAvailable,landQuote,buyPlot,sellPlot,plant,waterPlot,fertilizePlot,harvest,sellCrops,
+    catchFish,fishQuote,sellFish,eat,buySeed,buyFeed,sellGoods,
+    buyHome,buyUsedHome,sellHome,repairHome,houseQuote,homeSiteQuote,buyHomestead,sellHomestead,marketHelp,snapshot,settle,
+    listEstate,listingQuote,buyEstate,switchResident,renamePlayer,
+    get playerName(){return state.playerName;},
+    get homeSignName(){return homeSignName();},
     get coins(){return state.coins;},
     get animals(){return state.animals;},
     get plots(){return state.plots;},
@@ -715,6 +869,8 @@ export function createLivestock(storage,{survival=false,cityMarket=false,clock=D
     get otherAnimals(){return otherAnimals();},
     get animalSlotsAvailable(){return animalSlotsAvailable();},
     get homeId(){return state.homeId;},
+    get homesteadOwned(){return state.homesteadOwned;},
+    get homeSiteId(){return state.homeSiteId;},
     get ownedHomes(){return state.ownedHomes;},
     get construction(){return state.construction&&{...state.construction};},
     get energy(){return state.energy;},

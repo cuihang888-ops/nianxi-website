@@ -3,8 +3,25 @@ import {houseChoices} from './houses.js';
 export const streetEast = 56;
 export const streetWest = 18.15;
 export const avenueEastStops = [[26,11.6],[39,12.1],[47,12.3],[60,13.1]];
+const avenueStops = [
+  [-35,10.4],[-23.5,11.55],[-17.3,11.7],[-10,12.5],[-1.05,12.5],
+  [5.9,12.55],[12.7,11.85],[17.4,11.85],...avenueEastStops,
+];
+export const avenueHalfWidth = 1.57;
 export const marketCenter = Object.freeze({x:34,z:8.25});
 export const marketSquare = Object.freeze({west:27.5,east:40.5,north:3.6,south:10.55});
+
+export function avenueZ(x) {
+  for(let index=1;index<avenueStops.length;index++){
+    const [right,zRight]=avenueStops[index];
+    if(x>right)continue;
+    const [left,zLeft]=avenueStops[index-1];
+    const t=Math.min(1,Math.max(0,(x-left)/(right-left)));
+    const blend=t*t*(3-2*t);
+    return (1-blend)*zLeft+blend*zRight;
+  }
+  return avenueStops.at(-1)[1];
+}
 
 const frontage = [
   ['merchant',22.6,6.6,0], ['grand_estate',47.6,4.75,0],

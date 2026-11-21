@@ -1,27 +1,31 @@
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
-import {cropStage,plotSize} from './livestock.js';
+import {cropStage} from './livestock.js';
+import {createLandSurvey,createPaddocks} from './land-models.js';
+import {plotPurpose,plotWidth} from './yard-land.js';
 
-const half=plotSize/2;
 const seedbedHeight=.15;
-const rowCenters=[-.9,0,.9];
 const sphere=new THREE.SphereGeometry(1,7,4);
 const stalk=new THREE.CylinderGeometry(.65,1,2,6);
 const foliageMaterial=new THREE.MeshStandardMaterial({vertexColors:true,roughness:.89});
 const drySoil=new THREE.MeshStandardMaterial({color:'#ac7c59',vertexColors:true,roughness:.96});
 const dampSoil=new THREE.MeshStandardMaterial({color:'#785d4c',vertexColors:true,roughness:.94});
 const paddySoil=new THREE.MeshStandardMaterial({color:'#697d74',vertexColors:true,roughness:.76});
+const fertilizedSoil=new THREE.MeshStandardMaterial({color:'#4d3b30',vertexColors:true,roughness:.96});
+const fertilizedPaddy=new THREE.MeshStandardMaterial({color:'#475f50',vertexColors:true,roughness:.76});
 const soilTint=new THREE.Color();
 const colorTint=new THREE.Color();
 const cache=new Map();
 
-function makeBed(x,z,groundHeight) {
-  const bed=new THREE.PlaneGeometry(plotSize,plotSize,18,18).rotateX(-Math.PI/2);
+function makeBed(x,z,size,groundHeight) {
+  const sections=6*size;
+  const half=size/2;
+  const bed=new THREE.PlaneGeometry(size,size,sections,sections).rotateX(-Math.PI/2);
   const points=bed.attributes.position;
   const colors=new Float32Array(points.count*3);
   for(let i=0;i<points.count;i++){
     const localX=points.getX(i),localZ=points.getZ(i);
-    const edge=THREE.MathUtils.smoothstep(Math.max(Math.abs(localX),Math.abs(localZ)),1.18,half);
+    const edge=THREE.MathUtils.smoothstep(Math.max(Math.abs(localX),Math.abs(localZ)),half-.32,half);
     const furrow=(.5+.5*Math.cos(localX*Math.PI*2/.9))**2;
     const ripple=Math.sin(localX*19+localZ*23)*Math.sin(localX*11-localZ*13)*.041;
     const height=THREE.MathUtils.lerp(.032,.127+furrow*.058,1-edge);
@@ -156,19 +160,23 @@ function modelFor(crop,stage) {
 }
 
 function makePlants(plot,stage,groundHeight) {
-  const columns=plot.crop==='rice'?5:3;
-  const patch=new THREE.InstancedMesh(modelFor(plot.crop,stage),foliageMaterial,rowCenters.length*columns);
+  const size=plotWidth(plot);
+  const rows=Math.round(size/.95);
+  const rice=plot.crop==='rice';
+  const columns=Math.round(size/(rice?.59:.96));
+  const patch=new THREE.InstancedMesh(modelFor(plot.crop,stage),foliageMaterial,rows*columns);
   const plant=new THREE.Object3D();
   let index=0;
-  for(const localX of rowCenters){
+  for(let row=0;row<rows;row++){
+    const localX=(row-(rows-1)/2)*(size-.3)/rows;
     for(let j=0;j<columns;j++){
       const x=plot.x+localX+Math.sin(j*2.9+localX)*.049;
-      const z=plot.z+(j-(columns-1)/2)*(columns===5?.49:.8)+Math.cos(localX*7+j)*.052;
-      const size=.9+.13*Math.sin(x*3.71+z*2.9);
+      const z=plot.z+(j-(columns-1)/2)*(size-(rice?.55:.60))/columns+Math.cos(localX*7+j)*.052;
+      const plantSize=.9+.13*Math.sin(x*3.71+z*2.9);
       const growth=stage==='growing'?.63:1;
       plant.position.set(x,groundHeight(x,z)+seedbedHeight+.033,z);
       plant.rotation.y=plot.crop==='tea'?Math.sin(x+z)*.22:x*2.77+z*1.18;
-      plant.scale.setScalar(size*growth);
+      plant.scale.setScalar(plantSize*growth);
       const lightness=.88+.17*Math.sin(x*1.89-z*1.49);
       plant.updateMatrix();
       patch.setMatrixAt(index,plant.matrix);
@@ -179,52 +187,17 @@ function makePlants(plot,stage,groundHeight) {
   return patch;
 }
 
-function makeSelection(group,groundHeight) {
-  const previewFill=new THREE.MeshBasicMaterial({transparent:true,opacity:.22,depthWrite:false});
-  const previewStroke=new THREE.MeshBasicMaterial({transparent:true,opacity:.92,depthWrite:false});
-  const fill=new THREE.Mesh(new THREE.PlaneGeometry(plotSize,plotSize,12,12).rotateX(-Math.PI/2),previewFill);
-  fill.renderOrder=2;
-  const marks=new THREE.PlaneGeometry(plotSize,.075,12,1).rotateX(-Math.PI/2);
-  const sides=[
-    marks.clone().translate(0,0,-half),marks.clone().translate(0,0,half),
-    marks.clone().rotateY(Math.PI/2).translate(-half,0,0),
-    marks.clone().rotateY(Math.PI/2).translate(half,0,0),
-  ];
-  const line=new THREE.Mesh(mergeGeometries(sides),previewStroke);
-  line.renderOrder=3;
-  marks.dispose();
-  for(const side of sides)side.dispose();
-  const outline=new THREE.Group();
-  outline.add(fill,line);
-  outline.visible=false;
-  group.add(outline);
-  function select({x,z},valid) {
-    if(!outline.visible||outline.position.x!==x||outline.position.z!==z){
-      outline.position.set(x,0,z);
-      for(const mesh of [fill,line]){
-        const geometry=mesh.geometry;
-        const points=geometry.attributes.position;
-        for(let i=0;i<points.count;i++){
-          points.setY(i,groundHeight(x+points.getX(i),z+points.getZ(i))+.209);
-        }
-        points.needsUpdate=true;
-        geometry.computeBoundingSphere();
-      }
-    }
-    previewFill.color.set(valid?'#bfe28c':'#ea9b79');
-    previewStroke.color.set(valid?'#e0efb0':'#ffc0a3');
-    outline.visible=true;
-  }
-  return {select,clearSelection:()=>{outline.visible=false;}};
-}
-
-export function createFields(group,groundHeight) {
+export function createFields(group,groundHeight,surveyHeight=groundHeight) {
   const plotsById=new Map();
-  const selection=makeSelection(group,groundHeight);
+  const selection=createLandSurvey(group,surveyHeight);
+  const updatePaddocks=createPaddocks(group,groundHeight);
+  let previousPlots=null;
+  let fieldPlots=[];
 
   function update(plots,now) {
-    if(plotsById.size>plots.length){
-      const currentIds=new Set(plots.map(plot=>plot.id));
+    if(previousPlots!==plots){
+      fieldPlots=plots.filter(plot=>plotPurpose(plot)==='field');
+      const currentIds=new Set(fieldPlots.map(plot=>plot.id));
       for(const [id,entry] of plotsById){
         if(currentIds.has(id))continue;
         group.remove(entry.bed,entry.plants);
@@ -232,18 +205,31 @@ export function createFields(group,groundHeight) {
         entry.plants?.dispose();
         plotsById.delete(id);
       }
+      previousPlots=plots;
     }
-    for(const plot of plots){
+    for(const plot of fieldPlots){
       let entry=plotsById.get(plot.id);
+      const size=plotWidth(plot);
+      if(entry&&(entry.x!==plot.x||entry.z!==plot.z||entry.size!==size)){
+        group.remove(entry.bed,entry.plants);
+        entry.bed.geometry.dispose();
+        entry.plants?.dispose();
+        entry=null;
+      }
       if(!entry){
-        const bed=new THREE.Mesh(makeBed(plot.x,plot.z,groundHeight),drySoil);
+        const bed=new THREE.Mesh(makeBed(plot.x,plot.z,size,groundHeight),drySoil);
         bed.position.set(plot.x,0,plot.z);
         bed.receiveShadow=true;
         group.add(bed);
-        entry={bed,plants:null,crop:null,stage:null};
+        entry={bed,plants:null,crop:null,stage:null,x:plot.x,z:plot.z,size};
         plotsById.set(plot.id,entry);
       }
       const stage=cropStage(plot,now);
+      const wet=stage==='growing'||stage==='ready';
+      const rice=plot.crop==='rice';
+      if(!wet)entry.bed.material=drySoil;
+      else if(plot.fertilized)entry.bed.material=rice?fertilizedPaddy:fertilizedSoil;
+      else entry.bed.material=rice?paddySoil:dampSoil;
       if(entry.crop===plot.crop&&entry.stage===stage)continue;
       if(entry.plants){
         group.remove(entry.plants);
@@ -251,12 +237,10 @@ export function createFields(group,groundHeight) {
       }
       entry.crop=plot.crop;
       entry.stage=stage;
-      const wet=stage==='growing'||stage==='ready';
-      entry.bed.material=wet?(plot.crop==='rice'?paddySoil:dampSoil):drySoil;
       entry.plants=stage==='empty'?null:makePlants(plot,stage,groundHeight);
       if(entry.plants)group.add(entry.plants);
     }
   }
 
-  return {update,...selection};
+  return {update,updatePaddocks,...selection};
 }
