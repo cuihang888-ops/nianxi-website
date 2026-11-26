@@ -1,0 +1,540 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>茶水间 · 协作中心</title>
+<style>
+  :root{
+    --bg:#edf2ec; --card:#ffffff; --ink:#17352a; --muted:#6d7f76;
+    --green:#17503c; --green2:#1f6f4a; --line:#dde5dc; --soft:#e6efe4;
+    --warm:#fff7e6; --warm-line:#ecd9a0; --warm-ink:#8a6d1a; --danger:#b23b2e;
+  }
+  *{box-sizing:border-box; -webkit-tap-highlight-color:transparent;}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"PingFang SC","Microsoft YaHei",sans-serif;}
+  .wrap{max-width:520px;margin:0 auto;padding:18px 16px 96px;}
+  header.top{text-align:center;padding:8px 0 14px;border-bottom:1px solid var(--line);position:relative;}
+  header.top h1{margin:0;font-size:27px;letter-spacing:4px;color:var(--green);}
+  header.top p{margin:7px 0 0;font-size:12.5px;color:var(--muted);}
+  .back{position:absolute;left:0;top:12px;font-size:13px;color:var(--green2);text-decoration:none;}
+  .quote{background:var(--warm);border:1px solid var(--warm-line);border-radius:14px;padding:13px 14px;margin-top:14px;}
+  .quote .tag{font-size:12px;color:var(--warm-ink);font-weight:700;}
+  .quote .text{font-size:16px;font-weight:700;line-height:1.6;margin-top:6px;}
+  .quote .from{font-size:12px;color:#7a7568;margin-top:6px;}
+  .btn{border:none;border-radius:999px;padding:7px 15px;font-size:13px;cursor:pointer;background:var(--green2);color:#fff;}
+  .btn.ghost{background:transparent;border:1px solid var(--green2);color:var(--green2);}
+  .btn.warm{background:var(--warm-ink);}
+  .btn.small{padding:5px 11px;font-size:12px;}
+  .search{margin-top:14px;background:var(--card);border:1px solid var(--line);border-radius:999px;
+    padding:11px 15px;display:flex;gap:8px;align-items:center;}
+  .search input{border:none;outline:none;flex:1;font-size:14px;background:transparent;color:var(--ink);min-width:0;}
+  .notice{font-size:12.5px;color:var(--muted);margin-top:9px;}
+  .notice b{color:var(--green2);}
+  section{margin-top:20px;}
+  section h2{font-size:16.5px;margin:0 0 4px;display:flex;justify-content:space-between;align-items:center;}
+  section h2 .more{font-size:12.5px;color:var(--green2);font-weight:400;cursor:pointer;}
+  section .sub{font-size:12px;color:var(--muted);margin:0 0 10px;}
+  .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:9px;}
+  .card h3{margin:0 0 5px;font-size:14.5px;line-height:1.55;}
+  .card p{margin:0;font-size:13px;line-height:1.65;color:#3c4a43;}
+  .meta{font-size:12px;color:var(--muted);margin-top:7px;display:flex;gap:12px;flex-wrap:wrap;align-items:center;}
+  .meta .act{color:var(--green2);cursor:pointer;}
+  .meta .act.on{color:var(--warm-ink);font-weight:700;}
+  .pill{display:inline-block;font-size:11px;padding:2px 8px;border-radius:999px;background:var(--soft);color:var(--green);margin-right:6px;}
+  .pill.warm{background:var(--warm);color:var(--warm-ink);border:1px solid var(--warm-line);}
+  .pill.red{background:#fbeae8;color:var(--danger);}
+  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;text-align:center;font-size:12px;margin-top:12px;}
+  .grid .cell{cursor:pointer;}
+  .grid .ic{height:48px;border-radius:14px;background:var(--soft);display:flex;align-items:center;justify-content:center;
+    font-size:17px;font-weight:700;color:var(--green);}
+  .grid .ic.warm{background:var(--warm);color:var(--warm-ink);border:1px solid var(--warm-line);}
+  .grid .lb{margin-top:5px;}
+  .grid3{grid-template-columns:repeat(3,1fr);}
+  form.pub{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:12px 14px;margin-bottom:10px;}
+  form.pub input[type=text], form.pub textarea, form.pub select{
+    width:100%;border:1px solid var(--line);border-radius:10px;padding:9px 11px;font-size:13.5px;
+    margin-bottom:8px;background:#fbfcfb;color:var(--ink);font-family:inherit;}
+  form.pub textarea{resize:vertical;min-height:56px;}
+  .row{display:flex;gap:8px;} .row>*{flex:1;}
+  .hidden{display:none !important;}
+  nav.bottom{position:fixed;left:0;right:0;bottom:0;background:#fff;border-top:1px solid var(--line);z-index:20;}
+  nav.bottom .in{max-width:520px;margin:0 auto;display:grid;grid-template-columns:repeat(5,1fr);text-align:center;
+    font-size:12px;color:var(--muted);padding:9px 4px calc(11px + env(safe-area-inset-bottom));}
+  nav.bottom .in div{cursor:pointer;padding:2px 0;}
+  nav.bottom .in div.on{color:var(--green);font-weight:700;}
+  .toast{position:fixed;left:50%;bottom:96px;transform:translateX(-50%);background:var(--green);color:#fff;
+    font-size:13px;padding:9px 18px;border-radius:999px;opacity:0;pointer-events:none;transition:opacity .25s;z-index:50;white-space:nowrap;}
+  .toast.show{opacity:1;}
+  .empty{font-size:13px;color:var(--muted);padding:14px;text-align:center;background:var(--card);
+    border:1px dashed var(--line);border-radius:14px;}
+  .status{font-weight:700;} .status.done{color:var(--green2);} .status.wait{color:var(--warm-ink);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="back" href="../index.html">‹ 协作中心</a>
+    <h1>茶水间</h1>
+    <p>学话术 · 看案例 · 说心里话 · 互相打气 · 有事互助</p>
+  </header>
+
+  <!-- 首页视图 -->
+  <main id="view-home">
+    <div class="quote" id="dailyQuote"></div>
+
+    <div class="search">
+      <span style="color:var(--muted)">搜</span>
+      <input id="homeSearch" type="text" placeholder="搜话术：砍价 / 证书 / 色名 / 英文 / 越南语…">
+      <button class="btn small" id="homeSearchBtn">搜</button>
+    </div>
+    <div class="notice">公告：<b>12月活动话术有更新，旧说法别用了</b> · 在话术库「活动」分类里看</div>
+
+    <div class="grid" id="coreGrid">
+      <div class="cell" data-go="scripts"><div class="ic">话</div><div class="lb">话术库</div></div>
+      <div class="cell" data-go="cases"><div class="ic">案</div><div class="lb">优秀案例</div></div>
+      <div class="cell" data-go="board"><div class="ic warm">言</div><div class="lb">匿名留言板</div></div>
+      <div class="cell" data-go="wall"><div class="ic">志</div><div class="lb">励志墙</div></div>
+    </div>
+    <div class="grid grid3">
+      <div class="cell" data-go="help"><div class="ic">助</div><div class="lb">求助台</div></div>
+      <div class="cell" data-go="suggest"><div class="ic">箱</div><div class="lb">匿名建议箱</div></div>
+      <div class="cell" data-go="market"><div class="ic">集</div><div class="lb">生活集市</div></div>
+    </div>
+
+    <section>
+      <h2>优秀案例 · 最新 <span class="more" data-go="cases">全部 ›</span></h2>
+      <div id="homeCases"></div>
+    </section>
+
+    <section>
+      <h2>匿名留言板 · 最新 <span class="more" data-go="board">去留言 ›</span></h2>
+      <div id="homeBoard"></div>
+    </section>
+
+    <section>
+      <h2>互助角 · 最新 <span class="more" data-go="help">求助台 ›</span></h2>
+      <div id="homeHelp"></div>
+    </section>
+  </main>
+
+  <!-- 话术库视图 -->
+  <main id="view-scripts" class="hidden">
+    <section>
+      <h2>话术库</h2>
+      <p class="sub">搜到就能直接复制去用。分类：砍价 / 证书售后 / 色名意境 / 活动 / 英文 / 越南语。觉得好用点“收藏”，好用的会排前面。</p>
+      <div class="search" style="margin-top:0">
+        <span style="color:var(--muted)">搜</span>
+        <input id="scriptSearch" type="text" placeholder="输入关键词，如：砍价、证书、晴底、hello">
+      </div>
+      <div id="scriptCats" style="margin:10px 0 4px"></div>
+      <div id="scriptList"></div>
+      <form class="pub" id="scriptForm">
+        <input type="text" id="scriptTitle" placeholder="标题，如：客户说再便宜点怎么接" required>
+        <textarea id="scriptBody" placeholder="话术正文（可以写中文，附英文/越南语更好）" required></textarea>
+        <div class="row">
+          <select id="scriptCat">
+            <option>砍价</option><option>证书售后</option><option>色名意境</option>
+            <option>活动</option><option>英文</option><option>越南语</option><option>其他</option>
+          </select>
+          <input type="text" id="scriptAuthor" placeholder="署名（可留空=匿名）">
+        </div>
+        <button class="btn" type="submit">贡献一条话术</button>
+      </form>
+    </section>
+  </main>
+
+  <!-- 优秀案例视图 -->
+  <main id="view-cases" class="hidden">
+    <section>
+      <h2>优秀案例分享</h2>
+      <p class="sub">谁有一段好应对、一个好办法，写下来大家学。写清“当时什么情况、你怎么说/怎么做、结果怎样”就够了。</p>
+      <form class="pub" id="caseForm">
+        <input type="text" id="caseTitle" placeholder="标题，如：客户嫌贵先别降价，先问她戴的场合" required>
+        <textarea id="caseBody" placeholder="情况 + 做法 + 结果" required></textarea>
+        <input type="text" id="caseAuthor" placeholder="署名（可留空=匿名同事）">
+        <button class="btn" type="submit">分享案例</button>
+      </form>
+      <div id="caseList"></div>
+    </section>
+  </main>
+
+  <!-- 匿名留言板视图 -->
+  <main id="view-board" class="hidden">
+    <section>
+      <h2>匿名留言板</h2>
+      <p class="sub">不显示姓名和岗位，系统随机给一个匿名昵称。小规矩：不发客户隐私（姓名电话要打码）、不点名骂人，其他随便聊。</p>
+      <form class="pub" id="boardForm">
+        <textarea id="boardBody" placeholder="说一句心里话，或者给同事打打气…" required></textarea>
+        <button class="btn" type="submit">匿名发布</button>
+      </form>
+      <div id="boardList"></div>
+    </section>
+  </main>
+
+  <!-- 励志墙视图 -->
+  <main id="view-wall" class="hidden">
+    <section>
+      <h2>励志墙</h2>
+      <p class="sub">每天被“加油”最多的一句，会置顶到首页。也可以写一句自己的话，给今晚的同事打气。</p>
+      <form class="pub" id="wallForm">
+        <textarea id="wallBody" placeholder="写一句励志的话…" required></textarea>
+        <button class="btn warm" type="submit">贴上励志墙</button>
+      </form>
+      <div id="wallList"></div>
+    </section>
+  </main>
+
+  <!-- 求助台视图 -->
+  <main id="view-help" class="hidden">
+    <section>
+      <h2>求助台</h2>
+      <p class="sub">实名匿名都行，新人别怕问。问题被回答后，发帖人可以标“解决了”，以后别人搜得到。</p>
+      <form class="pub" id="helpForm">
+        <input type="text" id="helpTitle" placeholder="问题，如：FB后台这个按钮是干嘛的？" required>
+        <textarea id="helpBody" placeholder="补充说明（可留空）"></textarea>
+        <button class="btn" type="submit">发布求助</button>
+      </form>
+      <div id="helpList"></div>
+    </section>
+  </main>
+
+  <!-- 建议箱视图 -->
+  <main id="view-suggest" class="hidden">
+    <section>
+      <h2>匿名建议箱</h2>
+      <p class="sub">完全匿名。提交后生成一个编号，凭编号在本页查进度：已收到 → 处理中 → 有回复。不石沉大海，是这个箱子的规矩。</p>
+      <form class="pub" id="suggestForm">
+        <textarea id="suggestBody" placeholder="你的建议…" required></textarea>
+        <button class="btn" type="submit">匿名提交</button>
+      </form>
+      <div id="mySuggest"></div>
+      <h2 style="margin-top:18px">已公开回复的建议</h2>
+      <p class="sub">管理回复会公开在这里（建议内容经提交人同意才公开，默认只公开回复要点）。</p>
+      <div id="suggestPublic"></div>
+    </section>
+  </main>
+
+  <!-- 生活集市视图 -->
+  <main id="view-market" class="hidden">
+    <section>
+      <h2>生活集市</h2>
+      <p class="sub">拼车、夜宵拼单、二手闲置、租房转租。留个内部能找到你的称呼就行，别留私人电话。</p>
+      <form class="pub" id="marketForm">
+        <div class="row">
+          <select id="marketType"><option>拼车</option><option>夜宵拼单</option><option>二手闲置</option><option>租房</option><option>其他</option></select>
+          <input type="text" id="marketContact" placeholder="怎么找你，如：晚场助理阿梅">
+        </div>
+        <input type="text" id="marketTitle" placeholder="标题，如：晚场下播拼车去夜宵，还有2个位" required>
+        <button class="btn" type="submit">发布</button>
+      </form>
+      <div id="marketList"></div>
+    </section>
+  </main>
+</div>
+
+<nav class="bottom"><div class="in">
+  <div data-go="home" class="on">首页</div>
+  <div data-go="scripts">话术库</div>
+  <div data-go="cases">案例</div>
+  <div data-go="board">留言板</div>
+  <div data-go="wall">励志墙</div>
+</div></nav>
+<div class="toast" id="toast"></div>
+<script>
+/* 茶水间 · 纯前端版本：数据存浏览器 localStorage（key: tearoom-v1）
+   上线到协作中心时，Codex 可按 README 里的 API 预留把 load/save 换成后端接口，
+   页面结构和字段不用改。禁止在本模块存个人收入/业绩数据。 */
+(function(){
+"use strict";
+var KEY = "tearoom-v1";
+var ANON = ["晚场的一颗小翠","匿名的助理","路过的翻译","夜班小太阳","一颗冰种","匿名的客服","刚下播的主播","茶水间常客","匿名的卖手","一颗晴底"];
+function anonName(){ return ANON[Math.floor(Math.random()*ANON.length)]; }
+function now(){ var d=new Date(); return (d.getMonth()+1)+"-"+d.getDate()+" "+String(d.getHours()).padStart(2,"0")+":"+String(d.getMinutes()).padStart(2,"0"); }
+function esc(t){ return String(t==null?"":t).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
+
+var SEED = {
+  scripts: [
+    {id:"s1", cat:"砍价", title:"客户说“再便宜点”怎么接", body:"先别急着降价，先问场合：“姐姐，这只是自己平时戴，还是有重要场合要出席呀？场合不一样，选的种水和圈口讲究不一样，我帮您对着场合挑，不花冤枉钱。”问完场合，价格的话题自然就转到值不值上。", author:"玉佳人主播", fav:25, time:"11-25 21:03"},
+    {id:"s2", cat:"证书售后", title:"客户问“有没有证书、能不能退”", body:"“每一只出手镯都配正规鉴定证书，证书编号可以在官网查。收到不喜欢，签收后按我们的售后规则走，我先把规则发您看清楚，您再决定，不催您。”先讲清规则，再谈买不买，客户反而更放心。", author:"匿名的客服", fav:19, time:"11-25 15:40"},
+    {id:"s3", cat:"色名意境", title:"“晴底”这样讲，客户一下就懂", body:"“晴底就像雨刚停、天刚亮那会儿的湖水，干净、透亮，又带一点淡淡的青。戴在手上不抢眼，但是越看越耐看，配什么衣服都不挑。”记住：先说看得见的颜色，再说画面和感觉，最后问她喜不喜欢这种淡雅的——不要替客户下结论。", author:"缅甸寻翠翻译", fav:31, time:"11-24 20:18"},
+    {id:"s4", cat:"英文", title:"英文场开场 + 留人", body:"Hello family, welcome in. Today we have new jadeite bangles, all natural, each one comes with a certificate. Tell me your wrist size in the comments, I will find the right one for you.（先报福利和证书，再问圈口，把评论先带起来。）", author:"英文场主播", fav:14, time:"11-24 09:12"},
+    {id:"s5", cat:"越南语", title:"越南语常用三句", body:"Chào mừng mọi người đến với buổi live!（欢迎来到直播间）Vòng ngọc này là ngọc tự nhiên, có giấy kiểm định.（这只镯子是天然翡翠，带鉴定证书）Mọi người bình luận size tay, em tìm vòng phù hợp cho mình nhé.（大家评论手围，我帮你找合适的圈口）", author:"越南语翻译小阮", fav:22, time:"11-23 14:55"},
+    {id:"s6", cat:"活动", title:"12月活动：累计消费大奖怎么讲（新版）", body:"“12月在我们家累计消费，到12月25号有累计消费大奖。具体门槛和奖品以活动页为准，我发您看。不用为了凑单乱买，按您自己喜欢的、预算内的来，累计是顺带的事。”红线：不承诺具体奖品金额，不催凑单。", author:"企划", fav:17, time:"11-26 10:00"}
+  ],
+  cases: [
+    {id:"c1", title:"客户嫌贵先别降价，先问她戴的场合", body:"情况：客户盯着一只冰种镯子，一直说贵。做法：我没降价，问她是日常戴还是女儿婚礼戴。她说是婚礼，要配旗袍。我就换了一只颜色更稳重的给她看，讲了婚礼拍照时哪种颜色更上镜。结果：她最后买了更合适的那只，还说谢谢我没只顾着卖贵的。", author:"玉佳人主播", fav:18, time:"11-26 01:20"},
+    {id:"c2", title:"流量低的时候，用“教挑镯子”留住人", body:"情况：晚场进人很少，讲货没人回。做法：改成教大家看圈口、量手围，拿自己手做示范，让评论区都发手围数字。结果：评论热起来后，后半小时慢慢开始出单。学到：没人买的时候先给价值，别干等。", author:"匿名的卖手", fav:26, time:"11-25 02:47"}
+  ],
+  board: [
+    {id:"b1", who:"晚场的一颗小翠", body:"昨晚流量很低，但最后一小时稳住了，大家真的很棒。", cheers:12, time:"11-26 02:15"},
+    {id:"b2", who:"匿名的助理", body:"新人别怕问，去求助台发帖，我上次问证书就有人秒回。", cheers:8, time:"11-25 23:41"},
+    {id:"b3", who:"路过的翻译", body:"给今晚所有晚场同事打气，下播一起吃夜宵！", cheers:15, time:"11-25 19:02"}
+  ],
+  wall: [
+    {id:"w1", body:"流量低的时候别慌，把每一只镯子讲透，客户能听出你有没有用心。", who:"匿名同事", cheers:32, time:"11-26 08:00"},
+    {id:"w2", body:"胜利者往往是耐力最好的那个。晚场再难，也播到最后一分钟。", who:"匿名同事", cheers:27, time:"11-25 20:00"},
+    {id:"w3", body:"今天没开单不代表你不行，先把这一场认真播完。", who:"夜班小太阳", cheers:11, time:"11-25 01:30"}
+  ],
+  help: [
+    {id:"h1", title:"FB后台这个按钮是干嘛的？", body:"开播界面右下角那个图标，点了怕出事，一直不敢碰。", who:"新人主播", solved:true, time:"11-25 13:20",
+     answers:[{who:"老助理", body:"那是切换镜头的，别在直播中乱点，彩排时可以试。", time:"11-25 13:26"},{who:"匿名的卖手", body:"补充：点错了再点回来就行，不会关播，放心。", time:"11-25 13:31"}]},
+    {id:"h2", title:"客户一直问同一只镯子的圈口，我去哪查最快？", body:"直播时翻表格太慢了，有没有更快的办法？", who:"匿名的助理", solved:false, time:"11-26 15:08", answers:[]}
+  ],
+  suggest: [
+    {code:"JY-1027", body:"（示例）希望晚场下播后拼车信息能有个固定地方发。", status:"已回复", reply:"已在茶水间开「生活集市」，拼车发那里。", mine:false, time:"11-24 18:00"}
+  ],
+  market: [
+    {id:"m1", type:"拼车", title:"晚场下播拼车去夜宵，还有2个位", contact:"晚场助理阿梅", time:"11-26 18:20"},
+    {id:"m2", type:"二手闲置", title:"小风扇出，直播间同款，九成新", contact:"中场客服阿珍", time:"11-26 12:05"},
+    {id:"m3", type:"租房", title:"宿舍附近一间房转租，离公司步行10分钟", contact:"找卖手老陈转告", time:"11-25 16:44"}
+  ],
+  favScripts:{}, favCases:{}, cheered:{}
+};
+
+var db;
+try{ db = JSON.parse(localStorage.getItem(KEY)) || SEED; }catch(e){ db = SEED; }
+if(!db.scripts) db = SEED;
+function save(){ try{ localStorage.setItem(KEY, JSON.stringify(db)); }catch(e){} }
+function toast(t){ var el=document.getElementById("toast"); el.textContent=t; el.classList.add("show"); setTimeout(function(){el.classList.remove("show");},1800); }
+function uid(p){ return p + Date.now().toString(36) + Math.floor(Math.random()*999); }
+
+/* ---------- 导航 ---------- */
+var VIEWS = ["home","scripts","cases","board","wall","help","suggest","market"];
+function go(v){
+  VIEWS.forEach(function(x){
+    document.getElementById("view-"+x).classList.toggle("hidden", x!==v);
+  });
+  document.querySelectorAll("nav.bottom .in div").forEach(function(d){
+    d.classList.toggle("on", d.getAttribute("data-go")===v);
+  });
+  window.scrollTo(0,0);
+  renderAll();
+}
+document.querySelectorAll("[data-go]").forEach(function(el){
+  el.addEventListener("click", function(){ go(el.getAttribute("data-go")); });
+});
+
+/* ---------- 渲染 ---------- */
+function dailyQuoteHTML(){
+  var top = db.wall.slice().sort(function(a,b){return b.cheers-a.cheers;})[0];
+  if(!top) return "";
+  var on = db.cheered[top.id];
+  return '<div class="tag">今日励志墙 · 被加油最多的一句</div>'
+    + '<div class="text">“'+esc(top.body)+'”</div>'
+    + '<div class="from">—— '+esc(top.who)+' · '+top.cheers+' 人觉得被打到气了</div>'
+    + '<div style="margin-top:9px"><button class="btn warm small" data-cheer="'+top.id+'">'+(on?"已加油，明天见":"给我也加加油")+'</button></div>';
+}
+function caseCard(c){
+  var on = db.favCases[c.id];
+  return '<div class="card"><h3>'+esc(c.title)+'</h3><p>'+esc(c.body)+'</p>'
+    + '<div class="meta"><span>'+esc(c.author||"匿名同事")+' · '+esc(c.time)+'</span>'
+    + '<span class="act'+(on?" on":"")+'" data-favcase="'+c.id+'">'+(on?"已收藏":"收藏")+' '+c.fav+'</span></div></div>';
+}
+function boardCard(b){
+  var on = db.cheered[b.id];
+  return '<div class="card"><p><b>'+esc(b.who)+'：</b>'+esc(b.body)+'</p>'
+    + '<div class="meta"><span>'+esc(b.time)+'</span>'
+    + '<span class="act'+(on?" on":"")+'" data-cheer="'+b.id+'">'+(on?"已加油":"加油")+' '+b.cheers+'</span></div></div>';
+}
+function renderHome(){
+  document.getElementById("dailyQuote").innerHTML = dailyQuoteHTML();
+  document.getElementById("homeCases").innerHTML = db.cases.slice(0,2).map(caseCard).join("") || '<div class="empty">还没有案例，来分享第一个</div>';
+  document.getElementById("homeBoard").innerHTML = db.board.slice(0,3).map(boardCard).join("");
+  var h = db.help[0];
+  document.getElementById("homeHelp").innerHTML = h ?
+    '<div class="card"><p><span class="pill">求助</span><b>'+esc(h.title)+'</b></p><div class="meta"><span>'+esc(h.time)+'</span><span class="status '+(h.solved?"done":"wait")+'">'+(h.solved?"已解决":"等回答")+'</span><span>'+(h.answers?h.answers.length:0)+' 个回答</span></div></div>'
+    + '<div class="card"><p><span class="pill">集市</span><b>'+esc((db.market[0]||{}).title||"")+'</b></p><div class="meta"><span>'+esc((db.market[0]||{}).time||"")+'</span></div></div>'
+    + '<div class="card"><p><span class="pill warm">建议箱</span>匿名提交，能查进度：已收到 → 处理中 → 有回复</p></div>'
+    : "";
+}
+var scriptCat = "全部";
+function renderScripts(){
+  var kw = (document.getElementById("scriptSearch").value||"").trim().toLowerCase();
+  var cats = ["全部","砍价","证书售后","色名意境","活动","英文","越南语","其他"];
+  document.getElementById("scriptCats").innerHTML = cats.map(function(c){
+    return '<span class="pill'+(c===scriptCat?" warm":"")+'" data-cat="'+c+'" style="cursor:pointer;padding:5px 12px;font-size:12px">'+c+'</span>';
+  }).join("");
+  document.querySelectorAll("[data-cat]").forEach(function(el){
+    el.addEventListener("click", function(){ scriptCat = el.getAttribute("data-cat"); renderScripts(); });
+  });
+  var list = db.scripts.filter(function(s){
+    if(scriptCat!=="全部" && s.cat!==scriptCat) return false;
+    if(kw && (s.title+s.body+s.cat).toLowerCase().indexOf(kw)<0) return false;
+    return true;
+  }).sort(function(a,b){return b.fav-a.fav;});
+  document.getElementById("scriptList").innerHTML = list.length ? list.map(function(s){
+    var on = db.favScripts[s.id];
+    return '<div class="card"><h3><span class="pill">'+esc(s.cat)+'</span>'+esc(s.title)+'</h3><p>'+esc(s.body)+'</p>'
+      + '<div class="meta"><span>'+esc(s.author||"匿名")+' · '+esc(s.time)+'</span>'
+      + '<span class="act" data-copy="'+s.id+'">复制话术</span>'
+      + '<span class="act'+(on?" on":"")+'" data-favscript="'+s.id+'">'+(on?"已收藏":"收藏")+' '+s.fav+'</span></div></div>';
+  }).join("") : '<div class="empty">没搜到，换个词试试，或者在下面贡献一条</div>';
+  bindCardActions();
+}
+function renderCases(){
+  document.getElementById("caseList").innerHTML = db.cases.map(caseCard).join("") || '<div class="empty">还没有案例</div>';
+  bindCardActions();
+}
+function renderBoard(){
+  document.getElementById("boardList").innerHTML = db.board.map(boardCard).join("");
+  bindCardActions();
+}
+function renderWall(){
+  var list = db.wall.slice().sort(function(a,b){return b.cheers-a.cheers;});
+  document.getElementById("wallList").innerHTML = list.map(function(w,i){
+    var on = db.cheered[w.id];
+    return '<div class="card"><p style="font-size:15px"><b>“'+esc(w.body)+'”</b></p>'
+      + '<div class="meta"><span>'+(i===0?'<span class="pill warm">今日置顶</span>':"") + esc(w.who)+' · '+esc(w.time)+'</span>'
+      + '<span class="act'+(on?" on":"")+'" data-cheer="'+w.id+'">'+(on?"已加油":"加油")+' '+w.cheers+'</span></div></div>';
+  }).join("");
+  bindCardActions();
+}
+function renderHelp(){
+  document.getElementById("helpList").innerHTML = db.help.map(function(h){
+    var ans = (h.answers||[]).map(function(a){
+      return '<div style="border-top:1px solid var(--line);margin-top:8px;padding-top:8px"><p><b>'+esc(a.who)+'：</b>'+esc(a.body)+'</p><div class="meta"><span>'+esc(a.time)+'</span></div></div>';
+    }).join("");
+    return '<div class="card"><h3>'+esc(h.title)+'</h3>' + (h.body?'<p>'+esc(h.body)+'</p>':"")
+      + '<div class="meta"><span>'+esc(h.who)+' · '+esc(h.time)+'</span>'
+      + '<span class="status '+(h.solved?"done":"wait")+'">'+(h.solved?"已解决":"等回答")+'</span>'
+      + (h.solved?"":'<span class="act" data-solve="'+h.id+'">标为已解决</span>') + '</div>'
+      + ans
+      + '<form class="pub" style="border:none;padding:8px 0 0;margin:0" data-ansform="'+h.id+'"><div class="row"><input type="text" placeholder="写个回答帮帮TA" required><button class="btn small" type="submit">回答</button></div></form></div>';
+  }).join("");
+  document.querySelectorAll("[data-solve]").forEach(function(el){
+    el.addEventListener("click", function(){
+      var h = db.help.find(function(x){return x.id===el.getAttribute("data-solve");});
+      if(h){ h.solved = true; save(); renderAll(); toast("已标为已解决，谢谢大家"); }
+    });
+  });
+  document.querySelectorAll("[data-ansform]").forEach(function(f){
+    f.addEventListener("submit", function(e){
+      e.preventDefault();
+      var input = f.querySelector("input"); var v = input.value.trim(); if(!v) return;
+      var h = db.help.find(function(x){return x.id===f.getAttribute("data-ansform");});
+      if(h){ h.answers = h.answers||[]; h.answers.push({who:"热心同事", body:v, time:now()}); save(); renderAll(); toast("回答已发布"); }
+    });
+  });
+  bindCardActions();
+}
+function renderSuggest(){
+  var mine = db.suggest.filter(function(s){return s.mine;});
+  document.getElementById("mySuggest").innerHTML = mine.length ?
+    '<h2 style="margin-top:16px">我提交的（只在本机显示）</h2>' + mine.map(function(s){
+      return '<div class="card"><p><span class="pill warm">'+esc(s.code)+'</span>'+esc(s.body)+'</p><div class="meta"><span>'+esc(s.time)+'</span><span class="status '+(s.status==="已回复"?"done":"wait")+'">'+esc(s.status)+'</span></div>'
+        + (s.reply?'<p style="margin-top:7px"><b>回复：</b>'+esc(s.reply)+'</p>':"") + '</div>';
+    }).join("") : "";
+  var pub = db.suggest.filter(function(s){return s.status==="已回复";});
+  document.getElementById("suggestPublic").innerHTML = pub.length ? pub.map(function(s){
+    return '<div class="card"><p>'+esc(s.body)+'</p><div class="meta"><span>'+esc(s.code)+' · '+esc(s.time)+'</span></div><p style="margin-top:7px"><b>回复：</b>'+esc(s.reply||"")+'</p></div>';
+  }).join("") : '<div class="empty">暂无公开回复</div>';
+}
+function renderMarket(){
+  document.getElementById("marketList").innerHTML = db.market.map(function(m){
+    return '<div class="card"><h3><span class="pill">'+esc(m.type)+'</span>'+esc(m.title)+'</h3>'
+      + '<div class="meta"><span>联系：'+esc(m.contact||"见发帖人")+'</span><span>'+esc(m.time)+'</span></div></div>';
+  }).join("") || '<div class="empty">集市还空着，来发第一条</div>';
+}
+function bindCardActions(){
+  document.querySelectorAll("[data-cheer]").forEach(function(el){
+    el.addEventListener("click", function(){
+      var id = el.getAttribute("data-cheer");
+      var item = db.wall.find(function(x){return x.id===id;}) || db.board.find(function(x){return x.id===id;});
+      if(!item) return;
+      if(db.cheered[id]){ db.cheered[id]=false; item.cheers--; }
+      else{ db.cheered[id]=true; item.cheers++; }
+      save(); renderAll();
+    });
+  });
+  document.querySelectorAll("[data-favscript]").forEach(function(el){
+    el.addEventListener("click", function(){
+      var s = db.scripts.find(function(x){return x.id===el.getAttribute("data-favscript");});
+      if(!s) return;
+      if(db.favScripts[s.id]){ db.favScripts[s.id]=false; s.fav--; } else { db.favScripts[s.id]=true; s.fav++; }
+      save(); renderAll();
+    });
+  });
+  document.querySelectorAll("[data-favcase]").forEach(function(el){
+    el.addEventListener("click", function(){
+      var c = db.cases.find(function(x){return x.id===el.getAttribute("data-favcase");});
+      if(!c) return;
+      if(db.favCases[c.id]){ db.favCases[c.id]=false; c.fav--; } else { db.favCases[c.id]=true; c.fav++; }
+      save(); renderAll();
+    });
+  });
+  document.querySelectorAll("[data-copy]").forEach(function(el){
+    el.addEventListener("click", function(){
+      var s = db.scripts.find(function(x){return x.id===el.getAttribute("data-copy");});
+      if(!s) return;
+      var done = function(){ toast("话术已复制，去粘贴就能用"); };
+      if(navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(s.body).then(done, done); }
+      else{
+        var ta=document.createElement("textarea"); ta.value=s.body; document.body.appendChild(ta);
+        ta.select(); try{document.execCommand("copy");}catch(e){} document.body.removeChild(ta); done();
+      }
+    });
+  });
+}
+function renderAll(){
+  renderHome(); renderScripts(); renderCases(); renderBoard(); renderWall(); renderHelp(); renderSuggest(); renderMarket();
+  bindCardActions();
+}
+
+/* ---------- 表单 ---------- */
+function on(id, fn){ document.getElementById(id).addEventListener("submit", function(e){ e.preventDefault(); fn(); }); }
+on("scriptForm", function(){
+  var t=document.getElementById("scriptTitle").value.trim(), b=document.getElementById("scriptBody").value.trim();
+  if(!t||!b) return;
+  db.scripts.unshift({id:uid("s"), cat:document.getElementById("scriptCat").value, title:t, body:b,
+    author:document.getElementById("scriptAuthor").value.trim()||"匿名", fav:0, time:now()});
+  save(); document.getElementById("scriptForm").reset(); renderAll(); toast("话术已收进话术库");
+});
+on("caseForm", function(){
+  var t=document.getElementById("caseTitle").value.trim(), b=document.getElementById("caseBody").value.trim();
+  if(!t||!b) return;
+  db.cases.unshift({id:uid("c"), title:t, body:b, author:document.getElementById("caseAuthor").value.trim()||"匿名同事", fav:0, time:now()});
+  save(); document.getElementById("caseForm").reset(); renderAll(); toast("案例已分享，谢谢你");
+});
+on("boardForm", function(){
+  var b=document.getElementById("boardBody").value.trim(); if(!b) return;
+  db.board.unshift({id:uid("b"), who:anonName(), body:b, cheers:0, time:now()});
+  save(); document.getElementById("boardForm").reset(); renderAll(); toast("已匿名发布");
+});
+on("wallForm", function(){
+  var b=document.getElementById("wallBody").value.trim(); if(!b) return;
+  db.wall.unshift({id:uid("w"), body:b, who:"匿名同事", cheers:0, time:now()});
+  save(); document.getElementById("wallForm").reset(); renderAll(); toast("已贴上励志墙");
+});
+on("helpForm", function(){
+  var t=document.getElementById("helpTitle").value.trim(); if(!t) return;
+  db.help.unshift({id:uid("h"), title:t, body:document.getElementById("helpBody").value.trim(), who:"匿名同事", solved:false, time:now(), answers:[]});
+  save(); document.getElementById("helpForm").reset(); renderAll(); toast("求助已发布");
+});
+on("suggestForm", function(){
+  var b=document.getElementById("suggestBody").value.trim(); if(!b) return;
+  var code = "JY-" + Math.floor(1000 + Math.random()*9000);
+  db.suggest.unshift({code:code, body:b, status:"已收到", reply:"", mine:true, time:now()});
+  save(); document.getElementById("suggestForm").reset(); renderAll();
+  toast("已匿名提交，编号 "+code+"，在本页查进度");
+});
+on("marketForm", function(){
+  var t=document.getElementById("marketTitle").value.trim(); if(!t) return;
+  db.market.unshift({id:uid("m"), type:document.getElementById("marketType").value, title:t,
+    contact:document.getElementById("marketContact").value.trim(), time:now()});
+  save(); document.getElementById("marketForm").reset(); renderAll(); toast("已发布到集市");
+});
+document.getElementById("scriptSearch").addEventListener("input", renderScripts);
+document.getElementById("homeSearchBtn").addEventListener("click", function(){
+  var v = document.getElementById("homeSearch").value;
+  document.getElementById("scriptSearch").value = v; go("scripts");
+});
+document.getElementById("homeSearch").addEventListener("keydown", function(e){
+  if(e.key==="Enter"){ document.getElementById("homeSearchBtn").click(); }
+});
+
+renderAll();
+})();
+</script>
+</body>
+</html>
