@@ -1,0 +1,38 @@
+.compare-metric-buttons { display: none; }
+.comparison-table .data-sub { display: block; }
+
+@media (max-width: 640px) {
+  .compare-selector { display: none; }
+  .compare-metric-buttons {
+    display: grid;
+    grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 3px;
+    margin-bottom: 9px;
+  }
+  .compare-metric-buttons button {
+    min-width: 0;
+    min-height: 40px;
+    padding: 4px 0;
+    border: 1px solid #dce5dc;
+    background: #fff;
+    color: #4b6254;
+    font-size: clamp(9px, 2.85vw, 12px);
+    font-weight: 600;
+    white-space: nowrap;
+  }
+  .compare-metric-buttons button[aria-pressed="true"] {
+    background: var(--green);
+    border-color: var(--green);
+    color: #fff;
+  }
+  .comparison-table { table-layout: fixed; min-width: 0; }
+  .comparison-table .compare-metric:not(.current) { display: none; }
+  .comparison-table :is(th, td) { padding: 12px 9px; font-size: 13px; white-space: normal; overflow-wrap: anywhere; }
+  .comparison-table tr > :first-child { width: 40%; }
+  .comparison-table tr > :nth-child(2) { width: 18%; }
+  .comparison-table .current { width: 42%; font-weight: 650; }
+  .comparison-table .table-sort { font-size: 12px; min-height: 32px; }
+  .comparison-table .data-name { gap: 4px; }
+  .comparison-table .rank-number { width: 18px; flex: none; }
+  .comparison-table .data-sub { margin-top: 5px; font-size: 10px; font-weight: 400; }
+}

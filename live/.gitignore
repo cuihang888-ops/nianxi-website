@@ -1,0 +1,9 @@
+data/
+data-production/
+backups/
+outputs/
+tmp/
+screenshots/
+node_modules/
+.env
+*.zip

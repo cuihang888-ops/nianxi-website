@@ -1,0 +1,53 @@
+/* 减少重复选择；维持当天、早中晚和两位大头像的布局。 */
+.saved-room-shortcut{padding:0 18px 16px;display:grid;gap:7px}
+.saved-room-shortcut>span{font-size:12px;color:var(--muted)}
+.saved-room-shortcut>button{display:flex;align-items:center;justify-content:space-between;gap:12px;min-height:56px;border:1px solid #b8cfbe;border-radius:9px;background:#f0f6f1;padding:10px 14px;text-align:left}
+.saved-room-shortcut strong{font-size:16px}
+.saved-room-shortcut button>span{display:flex;align-items:center;gap:4px;font-size:12px;color:var(--green);white-space:nowrap}
+.saved-room-shortcut svg{width:16px;height:16px}
+.schedule-room-bar>.schedule-room-title{gap:3px;min-width:0;align-items:center}
+.schedule-room-name{display:flex;align-items:center;gap:3px;background:transparent;padding:4px 0;text-align:left;min-width:0;min-height:34px}
+.schedule-room-name svg{width:13px;height:13px;color:var(--muted)}
+.favorite-room-button{width:32px;min-height:34px;background:transparent;border-radius:6px;color:#819187;font-size:24px;line-height:1}
+.favorite-room-button.is-saved{color:var(--green);background:var(--mint)}
+.schedule-room-actions{align-items:center}
+.copy-schedule-choices{display:grid;gap:12px;min-width:0}
+.copy-schedule-choice{display:grid;gap:12px;text-align:left;padding:14px;border:1px solid var(--border);background:#fff;border-radius:10px;min-width:0}
+.copy-schedule-choice:hover{border-color:#9cbda6;background:#f8fbf8}
+.copy-choice-heading{display:flex;align-items:center;gap:10px;min-width:0}
+.copy-choice-heading>strong{font-size:16px}
+.copy-choice-heading>small{font-size:12px;color:var(--muted)}
+.copy-choice-heading>svg{margin-left:auto;width:17px}
+.copy-choice-people{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}
+.copy-choice-people>span{display:flex;align-items:center;gap:10px;min-width:0}
+.copy-choice-people .avatar{width:48px;height:56px;border-radius:6px}
+.copy-choice-people b,.copy-choice-people small{display:block;overflow-wrap:anywhere}
+.copy-choice-people b{font-size:15px;line-height:1.4}
+.copy-choice-people small{font-size:11px;color:var(--muted);margin-top:3px}
+.copy-choice-next{font-size:12px;line-height:1.5;color:var(--green);border-top:1px solid #edf1ed;padding-top:9px}
+.copy-source-notice{font-size:12px;line-height:1.6;color:var(--muted)}
+.schedule-save-summary{display:grid;gap:5px;border:1px solid #d8e4d9;border-radius:9px;background:#f6f9f4;padding:12px;font-size:13px;line-height:1.5;min-width:0;overflow-wrap:anywhere}
+.schedule-save-summary .save-summary-label{font-size:11px;color:var(--muted)}
+.schedule-save-summary>strong{font-size:14px}
+.schedule-save-summary>small{padding-top:6px;border-top:1px solid #e1e9dc;font-size:12px;color:var(--muted)}
+.schedule-save-summary .summary-conflict{color:var(--red)}
+@media(max-width:760px){
+  .schedule-room-bar .schedule-room-title{gap:2px}
+  .schedule-room-bar .schedule-room-actions{gap:5px}
+  .schedule-room-actions>.icon-button{width:32px;height:32px}
+  .schedule-room-name{min-height:34px}
+  .schedule-room-bar .schedule-room-name h2{font-size:15px}
+  .favorite-room-button{width:28px;font-size:22px}
+  .schedule-room-bar .button{min-height:34px;padding:5px 9px;font-size:12px}
+  .saved-room-shortcut{padding:0 12px 12px}
+  .saved-room-shortcut>button{min-height:56px}
+  .copy-schedule-choice{padding:12px}
+  .copy-choice-people{gap:8px}
+}
+@media(max-width:360px){
+  .schedule-room-bar .schedule-room-name h2{font-size:13px}
+  .schedule-room-name svg{display:none}
+  .schedule-room-bar .schedule-room-actions{gap:3px}
+  .schedule-room-bar .button{padding:5px 6px;font-size:11px}
+  .favorite-room-button{width:24px}
+}
