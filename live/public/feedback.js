@@ -119,7 +119,8 @@ export function setupFeedback(api) {
         <label>周期 <select name="periodType"><option value="month">月度之星</option><option value="week">本周之星</option><option value="yesterday">昨日之星</option></select></label>
         <label>获奖人 <input type="text" name="personName" maxlength="40" required placeholder="昵称"></label>
         <label>颁奖词 <input type="text" name="citation" maxlength="200" required placeholder="一句话颁奖词"></label>
-        <label>照片地址（可空）<input type="text" name="photoUrl" maxlength="500" placeholder="https://… 或 / 开头"></label>
+        <label>上传照片 <input type="file" name="photoFile" accept="image/*"></label>
+        <label>或照片地址（可空）<input type="text" name="photoUrl" maxlength="500" placeholder="https://… 或 / 开头"></label>
         <button type="submit">发布到荣誉墙</button>
       </form>
       ${honors.length ? `<ul class="fb-honors">${honors.map(item => `<li><span class="fb-chip wait">${esc(item.periodLabel)}</span> <b>${esc(item.personName)}</b> · ${esc(item.citation)} <span class="fb-note">${esc(item.time)}</span></li>`).join('')}</ul>` : '<p class="fb-note">尚未发布过荣誉。</p>'}
@@ -183,11 +184,13 @@ export function setupFeedback(api) {
         message = '协调状态已更新。';
       } else {
         const photoUrl = form.elements.photoUrl.value.trim();
+        const file = form.elements.photoFile?.files?.[0];
+        const photoData = file ? await shrinkImage(file) : '';
         await api('/api/dashboard/honors', {
           periodType: form.elements.periodType.value,
           personName: form.elements.personName.value.trim(),
           citation: form.elements.citation.value.trim(),
-          ...(photoUrl ? { photoUrl } : {})
+          ...(photoData ? { photoData } : photoUrl ? { photoUrl } : {})
         }, 'POST');
         honors = (await api('/api/dashboard/honors')).honors || [];
         message = '荣誉已发布到茶水间荣誉墙。';

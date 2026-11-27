@@ -168,12 +168,18 @@ export function createFeedback({ store, now = () => new Date() }) {
 
   function publishHonor(input, actorName) {
     object(input);
-    keys(input, ['periodType', 'personName', 'citation', 'photoUrl']);
+    keys(input, ['periodType', 'personName', 'citation', 'photoUrl', 'photoData']);
     if (!Object.hasOwn(HONOR_TYPES, input.periodType ?? '')) throw new ApiError(400, '荣誉周期无效');
     const personName = text(input.personName, '获奖人', 40, true);
     const citation = text(input.citation, '颁奖词', 200, true);
     let photoUrl = null;
-    if (input.photoUrl !== undefined && input.photoUrl !== null && input.photoUrl !== '') {
+    if (typeof input.photoData === 'string' && input.photoData !== '') {
+      // 管理层发布时直接上传的照片（前端已压到长边 720 的 JPEG），以 data URL 存入 photoUrl 列。
+      if (!/^data:image\/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$/.test(input.photoData) || input.photoData.length > 1_800_000) {
+        throw new ApiError(400, '照片数据无效或过大');
+      }
+      photoUrl = input.photoData;
+    } else if (input.photoUrl !== undefined && input.photoUrl !== null && input.photoUrl !== '') {
       photoUrl = text(input.photoUrl, '照片地址', 500, true);
       if (!/^(https?:\/\/|\/|\.\/)/.test(photoUrl)) throw new ApiError(400, '照片地址无效');
     }
@@ -203,14 +209,13 @@ export function createFeedback({ store, now = () => new Date() }) {
   // 不带任何帖子正文。隐私口径：
   // - 协调事项（coordinates）绝不进动态，连计数都不出现；
   // - 建议只报「有同事提交了一条新建议」，不带正文、身份与编号；
-  // - 吐槽只报「有同事发表了心声」，不带正文与身份；
-  // - 已下架的吐槽不进动态。
+  // - 吐槽仅管理层可见（用户 2026-11-28 定版），不进动态，连脱敏播报也不出现。
   function activityFeed(limit = 20) {
     const items = [];
     const push = (kind, actorName, text, createdAt, view) => items.push({ kind, actorName, text, createdAt, view });
     const recent = db.prepare(`
       SELECT id, section, createdAt, data FROM tearoom_posts
-      WHERE section IN ('market', 'board', 'wall', 'gratitude', 'help', 'cases', 'suggest', 'vents')
+      WHERE section IN ('market', 'board', 'wall', 'gratitude', 'help', 'cases', 'suggest')
       ORDER BY createdAt DESC, rowid DESC LIMIT 120
     `).all();
     for (const row of recent) {
@@ -229,9 +234,6 @@ export function createFeedback({ store, now = () => new Date() }) {
         push('case', record.author ?? null, '分享了一个优秀案例', row.createdAt, 'cases');
       } else if (row.section === 'suggest') {
         push('suggest', null, '有同事提交了一条新建议', row.createdAt, 'suggest');
-      } else if (row.section === 'vents') {
-        if (record.hidden === true) continue;
-        push('vent', null, '有同事在吐槽墙发表了心声', row.createdAt, 'vents');
       }
     }
     const wishes = db.prepare('SELECT name, kind, createdAt FROM tearoom_wishes ORDER BY createdAt DESC, rowid DESC LIMIT 20').all();

@@ -181,30 +181,33 @@ test('feedback: 48h overdue flag, status flow, coordinate isolation and board-on
   assert.equal((await alice.tea()).body.coordinates[0].status, '协调中');
 });
 
-test('vents: anonymous on the wall, board can take a post down, hidden posts leave the wall and the feed', async t => {
+test('vents: management-only — employees never receive vent content, board sees and can take down', async t => {
   const { browser } = await fixture(t);
   const alice = browser();
   await alice.enterTea();
   await alice.rename('吐槽员工');
   const posted = await alice.action('vent', { body: '晚场空调太冷了，希望能调高两度。' });
   assert.equal(posted.status, 200, JSON.stringify(posted.body));
-  assert.equal(posted.body.vents.length, 1);
-  assert.doesNotMatch(JSON.stringify(posted.body.vents), /吐槽员工/);
+  // 提交成功，但员工端状态里不下发任何吐槽内容（包括自己刚发的）。
+  assert.deepEqual(posted.body.vents, []);
 
   const bob = browser();
   await bob.enterTea();
-  assert.equal((await bob.tea()).body.vents.length, 1);
+  assert.deepEqual((await bob.tea()).body.vents, []);
+  assert.doesNotMatch(JSON.stringify((await bob.tea()).body), /晚场空调太冷了/);
 
   const board = browser();
   await board.unlockBoard();
   const feedback = (await board.request('/api/dashboard/feedback')).body;
+  assert.equal(feedback.vents.length, 1);
+  assert.doesNotMatch(JSON.stringify(feedback.vents), /吐槽员工/);
   const ventId = feedback.vents[0].id;
   const hidden = await board.request(`/api/dashboard/feedback/vents/${ventId}/visibility`, { hidden: true });
   assert.equal(hidden.status, 200);
-  assert.deepEqual((await bob.tea()).body.vents, []);
   const activity = (await bob.request('/api/tearoom/activity')).body;
   assert.equal(activity.items.filter(item => item.kind === 'vent').length, 0);
 });
+
 
 test('honors: three periods publish from the board and show on the tearoom wall without performance numbers', async t => {
   const { browser } = await fixture(t);
@@ -230,6 +233,22 @@ test('honors: three periods publish from the board and show on the tearoom wall 
   assert.doesNotMatch(JSON.stringify(wall), /orderAmount|业绩|实收|投流|退款/);
 });
 
+test('honors photo: board can publish with an uploaded photo (data URL) and the wall serves it back', async t => {
+  const { browser } = await fixture(t);
+  const board = browser();
+  await board.unlockBoard();
+  const pixel = 'data:image/jpeg;base64,' + Buffer.from('fake-jpeg-bytes').toString('base64');
+  const published = await board.request('/api/dashboard/honors', { periodType: 'week', personName: '带照片的星', citation: '照片版荣誉墙测试。', photoData: pixel });
+  assert.equal(published.status, 201, JSON.stringify(published.body));
+  assert.equal(published.body.photoUrl, pixel);
+  const bad = await board.request('/api/dashboard/honors', { periodType: 'week', personName: '坏照片', citation: '应被拒绝。', photoData: 'data:text/html;base64,PGI+' });
+  assert.equal(bad.status, 400);
+  const visitor = browser();
+  await visitor.enterTea();
+  const wall = (await visitor.request('/api/tearoom/honors')).body;
+  assert.equal(wall.current.week.photoUrl, pixel);
+});
+
 test('activity feed: new posts appear with light fields only; coordinates, suggestion and vent bodies never leak', async t => {
   const { browser } = await fixture(t);
   const alice = browser();
@@ -247,7 +266,7 @@ test('activity feed: new posts appear with light fields only; coordinates, sugge
   assert.match(market.text, /拼烧烤/);
   assert.equal(market.view, 'market');
   assert.ok(feed.items.some(item => item.kind === 'suggest' && item.actorName === null));
-  assert.ok(feed.items.some(item => item.kind === 'vent' && item.actorName === null));
+  assert.equal(feed.items.some(item => item.kind === 'vent'), false);
   assert.equal(feed.items.some(item => item.kind === 'coordinate'), false);
   const serialized = JSON.stringify(feed);
   assert.doesNotMatch(serialized, /协调正文绝密内容|协调标题不应出现|建议正文不应出现在动态|吐槽正文不应出现在动态/);

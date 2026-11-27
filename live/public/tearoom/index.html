@@ -78,7 +78,7 @@
       <a class="cell wish-link" href="./wishes.html"><span class="ic warm">愿</span><span class="lb">愿望墙</span></a>
     </div>
     <div class="grid grid3">
-      <button type="button" class="cell" data-go="vents"><span class="ic warm">声</span><span class="lb">吐槽墙</span></button>
+      <button type="button" class="cell" data-go="vents"><span class="ic warm">声</span><span class="lb">吐槽</span></button>
       <button type="button" class="cell" data-go="coordinates"><span class="ic">调</span><span class="lb">协调求助</span></button>
       <button type="button" class="cell" data-go="honors"><span class="ic warm">誉</span><span class="lb">荣誉墙</span></button>
     </div>
@@ -265,12 +265,12 @@
   <!-- 吐槽墙视图 -->
   <main id="view-vents" class="hidden">
     <section>
-      <h2>吐槽墙</h2>
+      <h2>吐槽</h2>
       <p class="sub vent-promise">我们会认真对待每一个心声。</p>
-      <p class="sub">匿名发布，只显示系统分配的匿名昵称，不显示真实身份。内容不文明的帖子会被管理员下架。</p>
+      <p class="sub">匿名提交，内容只有管理层能看到，其他同事看不到，请放心说。</p>
       <form class="pub" id="ventForm">
         <textarea id="ventBody" aria-label="吐槽内容" maxlength="1000" placeholder="说说最近让你不舒服的事…" required></textarea>
-        <button class="btn warm" type="submit" disabled>匿名发布</button>
+        <button class="btn warm" type="submit" disabled>匿名提交</button>
       </form>
       <div id="ventList"></div>
     </section>

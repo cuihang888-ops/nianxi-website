@@ -330,14 +330,7 @@ function renderSuggestions() {
 }
 
 function renderVents() {
-  byId('ventList').innerHTML = (state.vents || []).map(row => `<article class="card">
-    <p>${escape(row.body)}</p>
-    <div class="meta"><span>${escape(row.who)} · ${escape(displayTime(stamp(row)))}</span>
-    ${row.hidden ? '<span class="pill red">已下架</span>' : ''}
-    ${state.canModerate ? (row.hidden
-      ? action('恢复展示', { action: 'ventUnhide', id: row.id })
-      : action('下架', { action: 'ventHide', id: row.id })) : ''}</div>
-  </article>`).join('') || empty('暂时还没有心声');
+  byId('ventList').innerHTML = empty('你提交的心声只有管理层能看到，处理情况会认真对待。');
 }
 
 function renderCoordinates() {
@@ -360,9 +353,10 @@ async function renderHonors() {
     }
   }
   const card = (row, big) => row ? `<article class="card honor-card${big ? ' big' : ''}">
-    <div class="honor-head">${row.photoUrl
+    ${big && row.photoUrl ? `<img class="honor-banner" src="${escape(row.photoUrl)}" alt="">` : ''}
+    <div class="honor-head">${row.photoUrl && !big
       ? `<img class="honor-photo" src="${escape(row.photoUrl)}" alt="">`
-      : `<span class="honor-avatar" aria-hidden="true">${escape((row.personName || '星').slice(0, 1))}</span>`}
+      : big && row.photoUrl ? '' : `<span class="honor-avatar" aria-hidden="true">${escape((row.personName || '星').slice(0, 1))}</span>`}
       <div><span class="pill warm">${escape(row.periodLabel)}</span><h3>${escape(row.personName)}</h3></div></div>
     <p>${escape(row.citation)}</p>
     <div class="meta"><span>${escape(displayTime(row.publishedAt))} 发布</span></div>

@@ -200,7 +200,7 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
     }
     const recentPosts = db.prepare('SELECT id, actor, createdAt, data FROM tearoom_posts WHERE section = ? AND actor <> ? ORDER BY createdAt DESC, rowid DESC LIMIT 150');
     const referenceScripts = db.prepare("SELECT id, actor, createdAt, data FROM tearoom_posts WHERE section = 'scripts' AND actor = 'starter' ORDER BY rowid");
-    for (const section of Object.values(sections).filter(name => name !== 'suggest' && name !== 'coordinates')) {
+    for (const section of Object.values(sections).filter(name => name !== 'suggest' && name !== 'coordinates' && name !== 'vents')) {
       const posts = recentPosts.all(section, 'starter');
       if (section === 'scripts') posts.push(...referenceScripts.all());
       for (const row of posts) {

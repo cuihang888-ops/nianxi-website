@@ -64,12 +64,12 @@ export function configuration(env = process.env) {
   return { demo: !production, mode: env.PREVIEW_IMPORT === 'true' ? 'imported' : production ? 'production' : 'demo', production, host, port, dataDir: resolve(env.DATA_DIR || resolve(ROOT, 'data')), adminPassword: env.ADMIN_PASSWORD, adminUsername: env.ADMIN_USERNAME, adminName: env.ADMIN_NAME, cookieSecure: env.COOKIE_SECURE === 'true', dashboardPassword, bookingUrl, assistantAccess: env.ASSISTANT_ACCESS };
 }
 
-async function body(request) {
+async function body(request, maxBytes = 64 * 1024) {
   if (!(request.headers['content-type'] || '').startsWith('application/json')) throw new ApiError(415, '请使用 application/json');
   const chunks = []; let length = 0;
   for await (const chunk of request) {
     length += chunk.length;
-    if (length > 64 * 1024) throw new ApiError(413, '单次录入内容过大');
+    if (length > maxBytes) throw new ApiError(413, '单次录入内容过大');
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new ApiError(400, 'JSON 格式无效'); }
@@ -444,7 +444,7 @@ export function createApplication(options = {}) {
             if (request.method === 'GET') return send(response, 200, { honors: feedback.listHonors() });
             if (request.method === 'POST') {
               if (!canManage) throw new ApiError(403, '仅管理层可以发布荣誉');
-              return send(response, 201, feedback.publishHonor(await body(request), user.name));
+              return send(response, 201, feedback.publishHonor(await body(request, 2 * 1024 * 1024), user.name));
             }
           }
           throw new ApiError(404, '接口不存在');
