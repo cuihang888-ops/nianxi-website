@@ -1,0 +1,18 @@
+@media(max-width:760px){
+  .heatmap-table{min-width:0;table-layout:fixed}
+  .heatmap-table .identity-col{width:82px;padding-left:5px}
+  .heatmap-table .summary-col{width:65px}
+  .heatmap-table td{padding:5px 2px}
+  .heatmap-table th{padding:10px 1px}
+  .identity-col button{gap:3px}
+  .identity-col b{font-size:10px}
+  .identity-col small{font-size:7px;max-width:58px}
+  .rank-chip{width:11px;font-size:7px}
+  .heat-value{font-size:9px;min-height:32px}
+  .heatmap-table th strong{font-size:9px}
+  .heatmap-table th small{font-size:7px;white-space:normal}
+  .summary-col>b{font-size:9px}
+  .summary-col>small{font-size:7px}
+  .heatmap-table tfoot td{font-size:8px}
+  .heatmap-table.seven-days{min-width:455px}
+}

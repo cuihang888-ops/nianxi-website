@@ -1,0 +1,38 @@
+.session-details .session-detail-table {
+  min-width: 940px;
+  font-variant-numeric: tabular-nums;
+}
+
+.session-detail-table tbody th {
+  font-weight: 650;
+}
+
+.session-detail-table td small {
+  display: block;
+  color: var(--muted, #52685d);
+  white-space: nowrap;
+}
+
+.session-detail-table th,
+.session-detail-table td {
+  white-space: nowrap;
+}
+
+.session-scroll-hint {
+  display: none;
+  margin: 0 0 8px;
+}
+
+@media (max-width: 760px) {
+  .session-scroll-hint {
+    display: block;
+  }
+
+  .session-detail-table thead th:nth-child(2),
+  .session-detail-table tbody th[scope="row"] {
+    position: sticky;
+    left: 0;
+    background: #f7faf8;
+    box-shadow: 1px 0 var(--line);
+  }
+}

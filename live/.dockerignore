@@ -1,0 +1,11 @@
+data*
+backups
+outputs
+screenshots
+tmp
+node_modules
+.env
+.git
+tests
+docs
+*.zip

@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>AI 助手 · 茶水间</title>
+  <link rel="stylesheet" href="./styles.css?v=20261127-pilot">
+  <link rel="stylesheet" href="./assistant.css?v=20261127-pilot">
+  <script type="module" src="./assistant.js?v=20261127-pilot"></script>
+</head>
+<body>
+  <div class="wrap ai-workspace">
+    <header class="top">
+      <a class="back" href="./">‹ 返回茶水间</a>
+      <h1>AI 助手</h1>
+      <p id="ai-service" role="status">正在检查服务…</p>
+    </header>
+    <main>
+      <section>
+        <form id="ai-form" class="pub ai-fields">
+          <label for="ai-task">处理方式</label>
+          <select id="ai-task" name="task">
+            <option value="translate">翻译</option>
+            <option value="polish">话术润色</option>
+          </select>
+          <div id="ai-language" class="ai-language">
+            <label for="ai-target">目标语言</label>
+            <select id="ai-target" name="target">
+              <option value="zh">中文</option>
+              <option value="en">英语</option>
+              <option value="vi">越南语</option>
+              <option value="my">缅语</option>
+            </select>
+          </div>
+          <label for="ai-source">原文</label>
+          <textarea id="ai-source" name="text" maxlength="2000" placeholder="输入需要处理的文字" required></textarea>
+          <div class="ai-actions">
+            <button id="ai-submit" class="btn" type="submit" disabled>开始翻译</button>
+            <span id="ai-count" class="ai-count">0 / 2000 字</span>
+            <button id="ai-retry" class="btn ghost" type="button" hidden>重试连接</button>
+          </div>
+          <p id="ai-feedback" class="sub" role="status"></p>
+        </form>
+      </section>
+      <section id="ai-result" class="card ai-result" hidden>
+        <div class="ai-result-title">
+          <h2><label for="ai-output">处理结果</label></h2>
+          <span id="ai-result-mode" class="pill warm" hidden>模拟结果</span>
+        </div>
+        <textarea id="ai-output" readonly></textarea>
+        <div class="ai-actions">
+          <button id="ai-copy" class="btn" type="button">复制结果</button>
+          <span id="ai-copy-status" class="ai-count" role="status"></span>
+        </div>
+      </section>
+      <section id="ai-usage-panel" class="card" aria-labelledby="ai-usage-title" hidden>
+        <h2 id="ai-usage-title">管理用量</h2>
+        <p class="sub">词元数量采用服务商回传值，字段缺失时显示「—」。</p>
+        <button id="ai-usage-toggle" class="btn ghost small" type="button" aria-expanded="false" aria-controls="ai-usage-details">查看每日用量</button>
+        <div id="ai-usage-details" hidden>
+          <p id="ai-usage-feedback" class="room-status" role="status"></p>
+          <div class="ai-usage-scroll" tabindex="0" aria-label="每日用量表，可横向滚动">
+            <table id="ai-usage-table" class="ai-usage-table" hidden>
+              <thead><tr><th scope="col">日期</th><th scope="col">请求</th><th scope="col">主模型调用</th><th scope="col">备用调用</th><th scope="col">输入词元</th><th scope="col">输出词元</th><th scope="col">有计量调用</th></tr></thead>
+              <tbody></tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

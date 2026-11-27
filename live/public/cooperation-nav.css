@@ -1,0 +1,54 @@
+:root { --cooperation-nav-height: 60px; }
+
+.cooperation-nav {
+  position: sticky;
+  top: 0;
+  z-index: 45;
+  display: flex;
+  align-items: center;
+  min-height: var(--cooperation-nav-height);
+  padding: 6px clamp(12px, 3vw, 44px);
+  background: #174c3e;
+}
+
+.cooperation-nav a,
+.cooperation-dialog-link {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 46px;
+  font-size: 18px;
+  font-weight: 700;
+  text-decoration: none;
+  white-space: nowrap;
+}
+
+.cooperation-nav a {
+  padding: 0 16px;
+  border-radius: 8px;
+  color: #123c36;
+  background: #fff;
+}
+.cooperation-nav a span { font-size: 21px; line-height: 1; }
+.cooperation-nav a:hover { color: #123c36; background: #e7f2eb; }
+.cooperation-nav a:focus-visible { outline: 2px solid #fff; outline-offset: 3px; }
+
+.cooperation-dialog-link {
+  padding: 0 11px;
+  min-height: 44px;
+  font-size: 15px;
+  border-radius: 7px;
+  color: #fff;
+  background: #174c3e;
+}
+.cooperation-dialog-link:hover { background: #23604d; color: #fff; }
+.cooperation-dialog-actions { display: flex; align-items: center; gap: 6px; }
+
+.cooperation-nav ~ #app :is(.app-shell, .board-auth, .daily-board, .loading) {
+  min-height: calc(100dvh - var(--cooperation-nav-height));
+}
+
+@media (min-width: 761px) {
+  .cooperation-nav ~ #app .sidebar { top: var(--cooperation-nav-height); }
+}

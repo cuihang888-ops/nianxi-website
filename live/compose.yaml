@@ -1,0 +1,21 @@
+services:
+  command-center:
+    build: .
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      HOST: 0.0.0.0
+      PORT: 4177
+      DATA_DIR: /app/data
+    ports:
+      - "127.0.0.1:4177:4177"
+    volumes:
+      - command-data:/app/data
+    init: true
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+volumes:
+  command-data:

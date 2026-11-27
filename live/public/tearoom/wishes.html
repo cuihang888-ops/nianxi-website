@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>愿望墙 · 茶水间</title>
+  <link rel="stylesheet" href="./styles.css?v=20261127-pilot">
+  <script type="module" src="./wishes.js?v=20261127-wish-wall"></script>
+</head>
+<body>
+  <div class="wrap wish-workspace">
+    <header class="top">
+      <a class="back" href="./">‹ 返回茶水间</a>
+      <h1>愿望墙</h1>
+    </header>
+    <main>
+      <section>
+        <h2>写下心愿</h2>
+        <form id="wish-form" class="pub wish-form">
+          <label for="wish-kind">愿望类型</label>
+          <select id="wish-kind" name="kind">
+            <option value="today">今日小愿望</option>
+            <option value="year">今年的礼物</option>
+          </select>
+          <label for="wish-text">愿望</label>
+          <textarea id="wish-text" name="text" maxlength="500" placeholder="例如：今天想喝一杯拿铁" required></textarea>
+          <label for="wish-phone">联系电话 <small>（选填）</small></label>
+          <input id="wish-phone" name="phone" type="tel" maxlength="40" inputmode="tel" autocomplete="tel" aria-describedby="wish-privacy">
+          <p id="wish-privacy" class="sub">电话仅供管理员联系，请把号码填在这里。</p>
+          <div class="wish-actions">
+            <button id="wish-submit" type="submit" class="btn" disabled>发布愿望</button>
+            <button id="wish-retry" type="button" class="btn ghost" hidden>重试连接</button>
+          </div>
+        </form>
+        <p id="wish-feedback" class="room-status" role="status">正在打开愿望墙…</p>
+      </section>
+      <section aria-labelledby="wish-today-title">
+        <h2 id="wish-today-title">今日小愿望</h2>
+        <div id="wish-list-today" class="wish-list"></div>
+      </section>
+      <section aria-labelledby="wish-year-title">
+        <h2 id="wish-year-title">今年的礼物</h2>
+        <div id="wish-list-year" class="wish-list"></div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>

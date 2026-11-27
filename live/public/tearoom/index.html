@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>茶水间 · 协作中心</title>
+<link rel="stylesheet" href="./styles.css?v=20261128-feedback">
+<script type="module" src="./app.js?v=20261128-feedback"></script>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <a class="back" href="../">‹ 返回协作中心</a>
+    <h1>茶水间</h1>
+    <div class="room-meta">
+      <small class="release-version">协作中心 v1.3.0</small>
+      <span id="room-pending" role="status"></span>
+    </div>
+  </header>
+
+  <div id="room-loading">
+    <p id="room-status" class="room-status" role="status">正在打开茶水间…</p>
+    <button id="room-retry" class="btn" type="button" hidden>重试</button>
+  </div>
+  <div id="room-content">
+  <div class="room-profile">
+    <span>当前昵称 <strong id="profile-name">加载中</strong></span>
+    <button id="profile-toggle" type="button" class="btn ghost" data-action="open-profile" aria-expanded="false" aria-controls="profile-form" disabled>个人中心</button>
+  </div>
+  <form id="profile-form" class="pub" hidden>
+    <label for="profile-input">自定义昵称</label>
+    <input id="profile-input" name="name" type="text" maxlength="24" autocomplete="nickname" required>
+    <fieldset class="profile-suggestions">
+      <legend>推荐昵称</legend>
+      <div id="profile-options"></div>
+    </fieldset>
+    <div class="profile-actions">
+      <button type="submit" class="btn" disabled>保存昵称</button>
+      <button type="button" class="btn ghost" data-action="close-profile">保留当前昵称</button>
+    </div>
+  </form>
+  <!-- 首页视图 -->
+  <main id="view-home">
+    <div class="quote" id="dailyQuote"></div>
+
+    <section class="activity-section">
+      <h2>最新动态</h2>
+      <div id="homeActivity"><div class="empty">正在加载动态…</div></div>
+    </section>
+
+    <div class="search">
+      <span class="search-icon" aria-hidden="true">搜</span>
+      <input id="homeSearch" aria-label="搜索话术、案例和求助" type="search" maxlength="120" placeholder="搜索话术、案例和求助">
+      <button class="btn small" id="homeSearchBtn">搜</button>
+    </div>
+    <!-- assistant-entry -->
+    <button class="training-link" type="button" data-go="scripts" data-cat="色名意境">翡翠色名与意境培训 <span aria-hidden="true">›</span></button>
+    <div class="training-topics">
+      <button class="training-link" type="button" data-go="scripts" data-cat="采购沟通">采购沟通练习 <span aria-hidden="true">›</span></button>
+      <button class="training-link" type="button" data-go="scripts" data-cat="缅语">缅语练习 <span aria-hidden="true">›</span></button>
+    </div>
+    <div class="notice">发帖请保护客户隐私，尊重同事。</div>
+
+    <div class="grid" id="coreGrid">
+      <button type="button" class="cell" data-go="scripts"><span class="ic">话</span><span class="lb">话术库</span></button>
+      <button type="button" class="cell" data-go="cases"><span class="ic">案</span><span class="lb">优秀案例</span></button>
+      <button type="button" class="cell" data-go="board"><span class="ic warm">言</span><span class="lb">匿名留言板</span></button>
+      <button type="button" class="cell" data-go="wall"><span class="ic">志</span><span class="lb">励志墙</span></button>
+    </div>
+    <div class="grid grid3">
+      <button type="button" class="cell" data-go="help"><span class="ic">助</span><span class="lb">求助台</span></button>
+      <button type="button" class="cell" data-go="suggest"><span class="ic">箱</span><span class="lb">匿名建议箱</span></button>
+      <button type="button" class="cell" data-go="market"><span class="ic">集</span><span class="lb">生活集市</span></button>
+    </div>
+    <div class="grid collaboration-grid">
+      <button type="button" class="cell" data-go="gratitude"><span class="ic warm">谢</span><span class="lb">感谢墙</span></button>
+      <button type="button" class="cell" data-go="goals"><span class="ic">协</span><span class="lb">协作目标墙</span></button>
+      <a class="cell wish-link" href="./wishes.html"><span class="ic warm">愿</span><span class="lb">愿望墙</span></a>
+    </div>
+    <div class="grid grid3">
+      <button type="button" class="cell" data-go="vents"><span class="ic warm">声</span><span class="lb">吐槽墙</span></button>
+      <button type="button" class="cell" data-go="coordinates"><span class="ic">调</span><span class="lb">协调求助</span></button>
+      <button type="button" class="cell" data-go="honors"><span class="ic warm">誉</span><span class="lb">荣誉墙</span></button>
+    </div>
+
+    <section>
+      <h2>优秀案例 · 最新 <button class="more" type="button" data-go="cases">全部 ›</button></h2>
+      <div id="homeCases"></div>
+    </section>
+
+    <section>
+      <h2>匿名留言板 · 最新 <button class="more" type="button" data-go="board">去留言 ›</button></h2>
+      <div id="homeBoard"></div>
+    </section>
+
+    <section>
+      <h2>互助角 · 最新 <button class="more" type="button" data-go="help">求助台 ›</button></h2>
+      <div id="homeHelp"></div>
+    </section>
+  </main>
+
+  <main id="view-search" class="hidden">
+    <section>
+      <h2>搜索话术、案例和求助</h2>
+      <div class="search search-compact"><input id="resourceSearch" aria-label="搜索话术、案例和求助" type="search" maxlength="120" placeholder="输入关键词"></div>
+      <div id="resourceResults"></div>
+    </section>
+  </main>
+
+  <!-- 话术库视图 -->
+  <main id="view-scripts" class="hidden">
+    <section>
+      <h2>话术库</h2>
+      <p class="sub">可以按分类搜索并复制话术。收藏多的话术会排前面。</p>
+      <div class="search search-compact">
+        <span class="search-icon" aria-hidden="true">搜</span>
+        <input id="scriptSearch" aria-label="搜索话术" type="search" placeholder="输入关键词，如：砍价、证书、晴底、hello">
+      </div>
+      <div id="scriptCats" class="script-cats" aria-label="话术分类"></div>
+      <div id="scriptList"></div>
+      <form class="pub" id="scriptForm">
+        <input type="text" id="scriptTitle" aria-label="话术标题" maxlength="120" placeholder="标题，如：客户说再便宜点怎么接" required>
+        <textarea id="scriptBody" aria-label="话术正文" maxlength="3000" placeholder="话术正文（可以写中文，附英文/越南语更好）" required></textarea>
+        <div class="row">
+          <select id="scriptCat" aria-label="话术分类">
+            <option>砍价</option><option>证书售后</option><option>色名意境</option>
+            <option>活动</option><option>英文</option><option>越南语</option><option>采购沟通</option><option>缅语</option><option>其他</option>
+          </select>
+        </div>
+        <button class="btn" type="submit" disabled>贡献一条话术</button>
+      </form>
+    </section>
+  </main>
+
+  <!-- 优秀案例视图 -->
+  <main id="view-cases" class="hidden">
+    <section>
+      <h2>优秀案例分享</h2>
+      <p class="sub">谁有一段好应对、一个好办法，写下来大家学。写清“当时什么情况、你怎么说/怎么做、结果怎样”就够了。</p>
+      <form class="pub" id="caseForm">
+        <input type="text" id="caseTitle" aria-label="案例标题" maxlength="120" placeholder="标题，如：客户嫌贵先别降价，先问她戴的场合" required>
+        <textarea id="caseBody" aria-label="情况、做法与结果" maxlength="3000" placeholder="情况 + 做法 + 结果" required></textarea>
+        <button class="btn" type="submit" disabled>分享案例</button>
+      </form>
+      <div id="caseList"></div>
+    </section>
+  </main>
+
+  <!-- 匿名留言板视图 -->
+  <main id="view-board" class="hidden">
+    <section>
+      <h2>匿名留言板</h2>
+      <p class="sub">系统会分配匿名昵称。请保护客户隐私，尊重同事。</p>
+      <form class="pub" id="boardForm">
+        <textarea id="boardBody" aria-label="留言" maxlength="1000" placeholder="说一句心里话，或者给同事打打气…" required></textarea>
+        <button class="btn" type="submit" disabled>匿名发布</button>
+      </form>
+      <div id="boardList"></div>
+    </section>
+  </main>
+
+  <!-- 励志墙视图 -->
+  <main id="view-wall" class="hidden">
+    <section>
+      <h2>励志墙</h2>
+      <p class="sub">每天被“加油”最多的一句，会置顶到首页。也可以写一句自己的话，给今晚的同事打气。</p>
+      <form class="pub" id="wallForm">
+        <textarea id="wallBody" aria-label="励志内容" maxlength="400" placeholder="写一句励志的话…" required></textarea>
+        <button class="btn warm" type="submit" disabled>贴上励志墙</button>
+      </form>
+      <div id="wallList"></div>
+    </section>
+  </main>
+
+  <!-- 求助台视图 -->
+  <main id="view-help" class="hidden">
+    <section>
+      <h2>求助台</h2>
+      <p class="sub">同事可以认领求助，发帖人确认解决后可以向认领人发送感谢。</p>
+      <form class="pub" id="helpForm">
+        <input type="text" id="helpTitle" aria-label="求助问题" maxlength="120" placeholder="问题，如：FB后台这个按钮是干嘛的？" required>
+        <textarea id="helpBody" aria-label="补充说明" maxlength="2000" placeholder="补充说明（可留空）"></textarea>
+        <button class="btn" type="submit" disabled>发布求助</button>
+      </form>
+      <div id="helpList"></div>
+    </section>
+  </main>
+
+  <main id="view-gratitude" class="hidden">
+    <section>
+      <h2>感谢墙</h2>
+      <p class="sub">用当前昵称发送感谢，写清楚同事帮了什么忙。</p>
+      <form class="pub" id="gratitudeForm">
+        <input id="gratitudeRecipient" aria-label="感谢的同事" maxlength="40" placeholder="这次想感谢谁？" required>
+        <textarea id="gratitudeBody" aria-label="感谢内容" maxlength="600" placeholder="写下同事帮了你什么忙" required></textarea>
+        <button class="btn warm" type="submit" disabled>发送感谢</button>
+      </form>
+      <div id="gratitudeList"></div>
+    </section>
+  </main>
+
+  <main id="view-goals" class="hidden">
+    <section>
+      <h2>协作目标墙</h2>
+      <p class="sub">在这里跟进共用资料、培训和交接等协作事项。请在看板查看经营数据。</p>
+      <form class="pub" id="goalForm" hidden>
+        <input id="goalTitle" aria-label="协作目标" maxlength="100" placeholder="例如：更新新人开播检查单" required>
+        <textarea id="goalBody" aria-label="协作说明" maxlength="500" placeholder="写清预计交付的成果" required></textarea>
+        <input id="goalOwner" aria-label="负责人" maxlength="40" placeholder="负责人" required>
+        <label class="goal-date">完成日期 <input id="goalDue" type="date"></label>
+        <button class="btn" type="submit" disabled>添加协作目标</button>
+      </form>
+      <div id="goalList"></div>
+    </section>
+  </main>
+
+  <!-- 建议箱视图 -->
+  <main id="view-suggest" class="hidden">
+    <section>
+      <h2>建议箱</h2>
+      <p class="sub">实名或匿名都可以提交。管理层会在 48 小时内给出调整动作或处理进展；进度分已收到、处理中、已调整、已回复。提交后请保存编号，凭编号可查询进度。</p>
+      <form class="pub" id="suggestForm">
+        <textarea id="suggestBody" aria-label="建议" maxlength="2000" placeholder="你的建议…" required></textarea>
+        <div class="anon-choice" role="radiogroup" aria-label="提交方式">
+          <label><input type="radio" name="suggestAnon" value="anonymous" checked> 匿名提交</label>
+          <label><input type="radio" name="suggestAnon" value="named"> 用当前昵称实名提交</label>
+        </div>
+        <button class="btn" type="submit" disabled>提交建议</button>
+      </form>
+      <div id="suggest-receipt" role="status"></div>
+      <form class="pub" id="suggestLookup">
+        <label for="lookupCode">建议编号</label>
+        <div class="row">
+          <input type="text" id="lookupCode" maxlength="64" placeholder="输入提交后获得的编号" autocapitalize="characters" required>
+          <button class="btn small" type="submit" disabled>查询进度</button>
+        </div>
+      </form>
+      <div id="mySuggest"></div>
+      <h2 class="suggest-heading">已公开回复的建议</h2>
+      <p class="sub">这里显示管理人员选择公开的回复。</p>
+      <div id="suggestPublic"></div>
+      <section id="suggest-admin" hidden>
+        <h2>处理建议</h2>
+        <div id="suggest-admin-list"></div>
+      </section>
+    </section>
+  </main>
+
+  <!-- 生活集市视图 -->
+  <main id="view-market" class="hidden">
+    <section>
+      <h2>生活集市</h2>
+      <p class="sub">拼车、夜宵拼单、二手闲置、租房转租。联系人显示你的昵称。发布时请勿填写私人电话。</p>
+      <form class="pub" id="marketForm">
+        <div class="row">
+          <select id="marketType" aria-label="集市类别"><option>拼车</option><option>夜宵拼单</option><option>二手闲置</option><option>租房</option><option>其他</option></select>
+        </div>
+        <input type="text" id="marketTitle" aria-label="集市标题" maxlength="160" placeholder="标题，如：晚场下播拼车去夜宵，还有2个位" required>
+        <button class="btn" type="submit" disabled>发布</button>
+      </form>
+      <div id="marketList"></div>
+    </section>
+  </main>
+
+  <!-- 吐槽墙视图 -->
+  <main id="view-vents" class="hidden">
+    <section>
+      <h2>吐槽墙</h2>
+      <p class="sub vent-promise">我们会认真对待每一个心声。</p>
+      <p class="sub">匿名发布，只显示系统分配的匿名昵称，不显示真实身份。内容不文明的帖子会被管理员下架。</p>
+      <form class="pub" id="ventForm">
+        <textarea id="ventBody" aria-label="吐槽内容" maxlength="1000" placeholder="说说最近让你不舒服的事…" required></textarea>
+        <button class="btn warm" type="submit" disabled>匿名发布</button>
+      </form>
+      <div id="ventList"></div>
+    </section>
+  </main>
+
+  <!-- 协调求助视图 -->
+  <main id="view-coordinates" class="hidden">
+    <section>
+      <h2>协调求助</h2>
+      <p class="sub">需要管理层协调或帮助的事写在这里。内容只有管理层在看板能看到，其他同事看不到；你可以在这里查看自己事项的处理状态。</p>
+      <form class="pub" id="coordinateForm">
+        <input type="text" id="coordinateTitle" aria-label="需要协调的事项" maxlength="120" placeholder="事项，如：晚场空调需要维修" required>
+        <textarea id="coordinateBody" aria-label="问题与所需帮助" maxlength="2000" placeholder="写清问题和你需要的帮助" required></textarea>
+        <button class="btn" type="submit" disabled>提交给管理层</button>
+      </form>
+      <h2 class="suggest-heading">我提交的协调事项</h2>
+      <div id="coordinateList"></div>
+    </section>
+  </main>
+
+  <!-- 荣誉墙视图 -->
+  <main id="view-honors" class="hidden">
+    <section>
+      <h2>荣誉墙</h2>
+      <p class="sub">月度之星、本周之星、昨日之星由管理层评选发布。这里只展示荣誉，不展示业绩数字。</p>
+      <div id="honorCurrent"></div>
+      <h2 class="suggest-heading">历史荣誉</h2>
+      <div id="honorHistory"></div>
+    </section>
+  </main>
+  </div>
+</div>
+
+<nav class="bottom" aria-label="茶水间导航"><div class="in">
+  <button type="button" data-go="home" class="on" aria-current="page">首页</button>
+  <button type="button" data-go="scripts">话术库</button>
+  <button type="button" data-go="cases">案例</button>
+  <button type="button" data-go="board">留言板</button>
+  <button type="button" data-go="wall">励志墙</button>
+</div></nav>
+<div class="toast" id="toast" role="status"></div>
+</body>
+</html>
