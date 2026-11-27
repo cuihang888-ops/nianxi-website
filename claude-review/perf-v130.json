@@ -1,0 +1,137 @@
+{
+  "base": "http://127.0.0.1:4297",
+  "viewport": "390x844",
+  "ua": "WeChat Android",
+  "network": "Slow 4G 1.6Mbps/RTT150ms",
+  "cpu": "4x throttle",
+  "measuredAt": "2026-11-27T14:56:28.515Z",
+  "results": {
+    "home": [
+      {
+        "mode": "cold",
+        "visibleMs": 553,
+        "requests": 3,
+        "transferKB": 10
+      },
+      {
+        "mode": "warm",
+        "visibleMs": 479,
+        "requests": 2,
+        "transferKB": 10
+      }
+    ],
+    "entry": [
+      {
+        "mode": "cold",
+        "visibleMs": 870,
+        "requests": 6,
+        "transferKB": 34
+      },
+      {
+        "mode": "warm",
+        "visibleMs": 715,
+        "requests": 5,
+        "transferKB": 33
+      }
+    ],
+    "dashboardGate": [
+      {
+        "mode": "cold",
+        "visibleMs": 2256,
+        "requests": 27,
+        "transferKB": 241
+      },
+      {
+        "mode": "warm",
+        "visibleMs": 2155,
+        "requests": 27,
+        "transferKB": 241
+      }
+    ],
+    "dashboardUnlocked": [
+      {
+        "mode": "cold",
+        "visibleMs": 3717,
+        "requests": 29,
+        "transferKB": 419
+      },
+      {
+        "mode": "warm",
+        "visibleMs": 17056,
+        "requests": 29,
+        "transferKB": 453
+      }
+    ],
+    "bookingRooms": [
+      {
+        "mode": "cold",
+        "visibleMs": 2356,
+        "requests": 14,
+        "transferKB": 254
+      },
+      {
+        "mode": "warm",
+        "visibleMs": 2175,
+        "requests": 15,
+        "transferKB": 256
+      }
+    ],
+    "bookingSchedule": [
+      {
+        "mode": "cold",
+        "visibleMs": 2319,
+        "requests": 14,
+        "transferKB": 254
+      },
+      {
+        "mode": "warm",
+        "visibleMs": 2167,
+        "requests": 14,
+        "transferKB": 256
+      }
+    ],
+    "tearoom": [
+      {
+        "mode": "cold",
+        "visibleMs": 791,
+        "requests": 4,
+        "transferKB": 46
+      },
+      {
+        "mode": "warm",
+        "visibleMs": 371,
+        "requests": 4,
+        "transferKB": 46
+      }
+    ],
+    "wishes": [
+      {
+        "mode": "cold",
+        "visibleMs": 650,
+        "requests": 4,
+        "transferKB": 19
+      },
+      {
+        "mode": "warm",
+        "visibleMs": 312,
+        "requests": 4,
+        "transferKB": 19
+      }
+    ],
+    "assistant": [
+      {
+        "mode": "cold",
+        "visibleMs": 585,
+        "requests": 4,
+        "transferKB": 21
+      },
+      {
+        "mode": "warm",
+        "visibleMs": 307,
+        "requests": 4,
+        "transferKB": 21
+      }
+    ]
+  },
+  "note": "visible 标记: home=协作中心, entry=直播场次登记, dashboardGate=进入看板, dashboardUnlocked=部门月目标(经口令解锁交互), bookingRooms=一期五号直播间, bookingSchedule=卖手排班, tearoom=茶水间, wishes=发布愿望, assistant=开始翻译。"
+}
