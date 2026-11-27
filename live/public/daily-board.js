@@ -1,3 +1,5 @@
+import { departmentGoalsSlot } from './department-goals.js?v=20261127-goals';
+
 const calendar = new Intl.DateTimeFormat('sv-SE', {
   timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit'
 });
@@ -83,7 +85,9 @@ function collectAnchorDailyMetrics(data, date, metric) {
   const anchors = (data.anchors || []).map(anchor => {
     const rows = sessions.get(anchor.id);
     const latest = rows.reduce((best, row) => !best || row.date > best.date ? row : best, null);
-    const monthSales = sumMetric(rows.filter(row => row.date >= monthStart), 'orderAmount');
+    const monthRows = rows.filter(row => row.date >= monthStart);
+    const monthSales = sumMetric(monthRows, 'orderAmount');
+    const monthValue = metric === 'orderAmount' ? monthSales : sumMetric(monthRows, metric);
     const dayValues = dates.map(day => {
       const dayRows = rows.filter(row => row.date === day);
       return {
@@ -91,7 +95,7 @@ function collectAnchorDailyMetrics(data, date, metric) {
         stopped: dayRows.length > 0 && dayRows.every(row => row.sourceStatus === 'stopped')
       };
     });
-    return { id: anchor.id, name: anchor.name, account: accounts.get(latest?.accountId || anchor.accountId), monthSales, dayValues };
+    return { id: anchor.id, name: anchor.name, account: accounts.get(latest?.accountId || anchor.accountId), monthSales, monthValue, dayValues };
   });
 
   anchors.sort((a, b) => {
@@ -119,7 +123,7 @@ function coverage(totals) {
   return parts.join(' · ');
 }
 
-export function renderDailySales(data, selectedDate, canEdit, manage, selectedMetric = 'orderAmount') {
+export function renderDailySales(data, selectedDate, canEdit, manage, selectedMetric = 'orderAmount', canManageDirectory = false) {
   const today = beijingToday();
   const yesterday = lastCompletedDay();
   const date = selectedDate && selectedDate <= today ? selectedDate : yesterday;
@@ -147,6 +151,7 @@ export function renderDailySales(data, selectedDate, canEdit, manage, selectedMe
         <button type="button" data-view="performance">播后变化</button>
         <button type="button" data-view="compare">数据对比</button>
         <button type="button" data-view="session-details">主播场次明细</button>
+        <button type="button" data-view="anchor-review">主播复盘</button>
       </nav>
     </header>
     <div class="daily-totals">
@@ -161,6 +166,7 @@ export function renderDailySales(data, selectedDate, canEdit, manage, selectedMe
         <p>${hasCompletedDayThisMonth ? coverage(month) : '本月暂无已结束日期'}</p>
       </section>
     </div>
+    ${departmentGoalsSlot(today.slice(0, 7))}
     <div class="daily-data">
       <section class="daily-changes" aria-labelledby="daily-changes-title">
         <header>
@@ -170,13 +176,13 @@ export function renderDailySales(data, selectedDate, canEdit, manage, selectedMe
               ${metrics.map(([key, label]) => `<button type="button" data-daily-metric="${key}" aria-pressed="${key === metric}">${label}</button>`).join('')}
             </div>
           </div>
-          <p class="daily-table-note">月累计业绩按元显示 · 当前指标：${metricLabel}（${unit}）</p>
+          <p class="daily-table-note">月初至所选日期 · ${metricLabel}（${unit}）</p>
         </header>
         <div class="daily-scroll" role="region" tabindex="0" aria-labelledby="daily-changes-title">
           <table data-testid="daily-changes" aria-label="各主播近五天${metricLabel}">
             <colgroup><col class="daily-person-col"><col class="daily-month-col">${dates.map(() => '<col>').join('')}</colgroup>
             <thead>
-              <tr><th scope="col">主播</th><th scope="col"><span class="daily-month-desktop">月累计业绩</span><span class="daily-month-mobile">月累计</span></th>
+              <tr><th scope="col">主播</th><th scope="col" aria-label="月累计${metricLabel}（${unit}）"><span class="daily-month-desktop">月累计${metricLabel}</span><span class="daily-month-mobile">月累计</span></th>
               ${dates.map(day => `<th scope="col"><time datetime="${day}">${day.slice(5)}</time></th>`).join('')}</tr>
             </thead>
             <tbody>
@@ -185,7 +191,7 @@ export function renderDailySales(data, selectedDate, canEdit, manage, selectedMe
                   <span class="daily-rank">${anchor.monthSales === null ? '—' : index + 1}</span>
                   <span class="daily-anchor-name">${escapeHtml(anchor.name)}${anchor.account ? `<small>${escapeHtml(anchor.account)}</small>` : ''}</span>
                 </th>
-                ${renderDailyValue({ value: anchor.monthSales }, metrics[0][2], value => `${whole.format(value / 100)}元`)}
+                ${renderDailyValue({ value: anchor.monthValue }, format, accessibleFormat)}
                 ${anchor.dayValues.map(value => renderDailyValue(value, format, accessibleFormat)).join('')}
               </tr>`).join('') || '<tr><td colspan="7">暂无主播</td></tr>'}
             </tbody>
@@ -208,6 +214,7 @@ export function renderDailySales(data, selectedDate, canEdit, manage, selectedMe
         <button type="button" data-action="refresh">刷新</button>
         ${manage ? '<button type="button" data-view="monthly" data-testid="nav-monthly">主播月度总结报告</button>' : ''}
         ${canEdit ? '<button type="button" data-action="daily-schedule">补录销售</button>' : ''}
+        ${canManageDirectory ? '<button type="button" data-view="directory">直播名录</button>' : ''}
         ${!manage ? '<button type="button" data-action="logout">锁定看板</button><a href="./dashboard?mode=manage">销售管理</a>' : ''}
       </div>
     </footer>

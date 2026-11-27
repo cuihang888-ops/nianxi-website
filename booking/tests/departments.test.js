@@ -24,7 +24,7 @@ async function fixture(t, options = {}) {
   const dataDir = fs.mkdtempSync(path.join(os.tmpdir(), 'room-departments-test-'));
   const legacyFile = path.join(dataDir, 'bookings.json');
   fs.writeFileSync(legacyFile, JSON.stringify({ version: 2, bookings: [{
-    id: 'preserved-room-reservation', date: '2026-10-27', room: '直播间 A', slot: 'afternoon',
+    id: 'preserved-room-reservation', date: '2026-10-27', room: '一期五号直播间', slot: 'afternoon',
     department: '原预约部门', bookerName: '原预约人', note: '部门维护不可改动', clientId: 'isolated-fixture'
   }] }) + '\n');
   fs.writeFileSync(path.join(dataDir, 'sellers.json'), '{"version":1,"talents":[],"schedules":[]}\n');

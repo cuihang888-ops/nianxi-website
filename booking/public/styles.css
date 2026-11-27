@@ -803,3 +803,69 @@ textarea[name=introduction]{min-height:145px;line-height:1.7}
   .is-admin .manager-footer .manager-quick{gap:1px}
   .is-admin .manager-footer .manager-quick .text-button{font-size:9px;padding-inline:1px}
 }
+
+.cooperation-return-bar{
+  --cooperation-bar-height:60px;
+  position:sticky;
+  top:0;
+  z-index:10;
+  display:flex;
+  align-items:center;
+  min-height:var(--cooperation-bar-height);
+  padding-inline:clamp(12px,3vw,32px);
+  background:#123c36;
+}
+.cooperation-return-bar a,.cooperation-modal-return{
+  display:inline-flex;
+  align-items:center;
+  gap:8px;
+  min-height:44px;
+  font-weight:750;
+  text-decoration:none;
+  white-space:nowrap;
+}
+.cooperation-return-bar a{
+  padding:0 15px;
+  border:1px solid #e2ece4;
+  border-radius:999px;
+  background:#f4faf4;
+  color:#123c36;
+  font-size:18px;
+}
+.cooperation-return-bar a:hover{background:#e0efe3}
+.cooperation-modal-return{
+  padding:0 12px;
+  border:1px solid #d7e6d9;
+  border-radius:9px;
+  background:#e7f1e7;
+  color:#174c3e;
+  font-size:16px;
+}
+.cooperation-modal-return:hover{background:#d9eadc}
+.cooperation-return-bar ~ #app{--cooperation-bar-height:60px}
+.cooperation-return-bar ~ #app .sidebar{top:var(--cooperation-bar-height)}
+.cooperation-return-bar ~ #app .loading-screen,.cooperation-return-bar ~ #app .simple-entry{min-height:calc(100svh - var(--cooperation-bar-height));height:auto}
+@media(min-width:901px){
+  .cooperation-return-bar ~ #app .sidebar{height:calc(100vh - var(--cooperation-bar-height))}
+}
+@media(max-width:760px){
+  .cooperation-return-bar ~ #app .rooms-page .room-board{--room-row-height:clamp(30px,calc((100svh - 218px - var(--cooperation-bar-height)) / var(--room-count)),46px)}
+  .cooperation-return-bar ~ #app .rooms-page.is-admin .room-board{--room-row-height:clamp(30px,calc((100svh - 250px - var(--cooperation-bar-height)) / var(--room-count)),46px)}
+}
+
+.room-management-bar{display:flex;flex-wrap:wrap;justify-content:flex-end;gap:6px;padding:6px 14px;border-bottom:1px solid var(--border)}
+.room-directory-empty{padding:24px 12px;color:var(--muted);text-align:center}
+.directory-management{display:grid;gap:10px;justify-items:start}
+.directory-list{width:100%;padding:0;margin:0;list-style:none}
+.directory-list li{display:flex;align-items:center;justify-content:space-between;gap:8px;min-height:44px;padding:7px 0;border-bottom:1px solid var(--border)}
+.directory-list li>div:first-child{display:grid;gap:3px;overflow-wrap:anywhere;min-width:0}
+.directory-list strong{min-width:0;overflow-wrap:anywhere}
+.directory-list .muted{font-size:11px}
+.directory-actions{display:flex;flex-wrap:wrap;flex-shrink:0;justify-content:flex-end;gap:2px}
+.directory-list .text-button,.talent-card-actions .text-button{min-height:32px;padding-inline:7px;white-space:nowrap}
+.directory-recovery{margin-top:15px;padding:13px}
+.directory-recovery h2{font-size:15px}
+@media(max-width:760px){
+  .room-management-bar{padding:4px 7px}
+  .talent-card-foot .talent-card-actions{flex-wrap:wrap}
+}

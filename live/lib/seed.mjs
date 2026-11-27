@@ -7,7 +7,16 @@ export const accountDefaults = [
 ];
 
 export const anchorDefaults = ['阿玉', '小满', '若琳', '阿明', '瑶瑶', '苏苏', '阿杰', '小禾', '小晴', '木木', '小雅', '阿林', '小悦', '安安', '沐沐']
-  .map((name, index) => ({ id: `anchor-${index + 1}`, name }));
+  .map((name, index) => {
+    const slot = index % 3 + 1;
+    return {
+      id: `anchor-${index + 1}`,
+      name,
+      accountId: `account-${Math.floor(index / 3) + 1}`,
+      slotId: `slot-${slot}`,
+      slotLabel: `第 ${slot} 场`
+    };
+  });
 
 export function chinaDate(value = new Date()) {
   return new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(value);
@@ -49,8 +58,7 @@ export function demoData(today = chinaDate()) {
           anchorId: `anchor-${account * 3 + slot + 1}`, start: slots[slot][0], end: slots[slot][1],
           actualMinutes: 180 + modulo(account * 7 + slot * 13 + serialDay, 66),
           status: 'completed', target: Math.round(orders * average * (account % 2 ? 1.12 : 0.92)),
-          reach: Math.round(viewers * 2.75), impressions: Math.round(viewers * 4.2), viewers,
-          shares: Math.round(viewers * 0.02), peak: Math.round(viewers * 0.18),
+          reach: Math.round(viewers * 2.75), viewers, peak: Math.round(viewers * 0.18),
           watchSeconds: 95 + slot * 23 + account * 9,
           interactions: Math.round(viewers * 0.24), newFollowers: Math.round(viewers * 0.035),
           messages, qualified, orders, orderAmount: orders * average,

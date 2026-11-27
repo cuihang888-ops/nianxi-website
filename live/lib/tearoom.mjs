@@ -1,5 +1,6 @@
 import { createHash, randomBytes, randomInt, randomUUID } from 'node:crypto';
-import { ApiError, keys, text } from './validation.mjs';
+import { ApiError, date, keys, text } from './validation.mjs';
+import { trainingSamples } from './tearoom-training.mjs';
 
 const SESSION_SECONDS = 12 * 60 * 60;
 const BROWSER_SECONDS = 365 * 24 * 60 * 60;
@@ -10,7 +11,7 @@ const WRITE_WINDOW = 60 * 1000;
 const ACCESS_COOKIE = 'tearoom_session';
 const BROWSER_COOKIE = 'tearoom_browser';
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
-const categories = ['砍价', '证书售后', '色名意境', '活动', '英文', '越南语', '其他'];
+const categories = ['砍价', '证书售后', '色名意境', '活动', '英文', '越南语', '采购沟通', '缅语', '其他'];
 const marketTypes = ['拼车', '夜宵拼单', '二手闲置', '租房', '其他'];
 const suggestionStates = ['已收到', '处理中', '已回复'];
 const anonNames = ['晚场的一颗小翠', '匿名的助理', '路过的翻译', '夜班小太阳', '一颗冰种', '匿名的客服', '刚下播的主播', '茶水间常客', '匿名的卖手', '一颗晴底'];
@@ -22,7 +23,8 @@ const suggestedNames = [
   '客户问答记录者', '选品记录者', '货盘观察员', '陈列搭档', '选题记录者',
   '案例整理人', '趋势观察员', '经验记录者', '场次分析员', '首饰细节观察者'
 ];
-const sections = { script: 'scripts', case: 'cases', board: 'board', wall: 'wall', help: 'help', suggest: 'suggest', market: 'market' };
+const goalStates = ['待开始', '进行中', '已完成'];
+const sections = { script: 'scripts', case: 'cases', board: 'board', wall: 'wall', help: 'help', suggest: 'suggest', market: 'market', gratitude: 'gratitude', goal: 'goals' };
 const formatter = new Intl.DateTimeFormat('zh-CN', {
   timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
 });
@@ -62,6 +64,16 @@ function fieldsFor(action, input, name) {
     case 'help':
       keys(input, ['action', 'title', 'body']);
       return { title: text(input.title, '问题', 120, true), body: text(input.body ?? '', '详情', 2000), who: name, solved: false };
+    case 'gratitude':
+      keys(input, ['action', 'recipient', 'body']);
+      return { from: name, recipient: text(input.recipient, '同事姓名', 40, true), body: text(input.body, '感谢内容', 600, true) };
+    case 'goal':
+      keys(input, ['action', 'title', 'body', 'owner', 'due', 'status']);
+      return {
+        title: text(input.title, '协作目标', 100, true), body: text(input.body, '协作说明', 500, true),
+        owner: text(input.owner, '负责人', 40, true), due: input.due ? date(input.due, '完成日期') : '',
+        status: allowedValue(input.status ?? '待开始', goalStates, '目标状态')
+      };
     case 'suggest':
       keys(input, ['action', 'body']);
       return { body: text(input.body, '建议', 2000, true), status: '已收到', reply: '' };
@@ -120,10 +132,10 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
       PRIMARY KEY (postId, actor)
     );
   `);
-  if (seedScripts.length) {
-    const initial = seedScripts.map(({ id, cat, title, body, author = '茶水间示例' }) => ({
+  {
+    const initial = [...seedScripts, ...trainingSamples].map(({ id, cat, title, body, author = '茶水间示例', sample = false }) => ({
       id: text(id, '示例话术编号', 64, true),
-      data: fieldsFor('script', { action: 'script', cat, title, body }, text(author, '话术来源', 60, true))
+      data: { ...fieldsFor('script', { action: 'script', cat, title, body }, text(author, '话术来源', 60, true)), ...(sample ? { sample } : {}) }
     }));
     const insert = db.prepare("INSERT OR IGNORE INTO tearoom_posts (id, section, actor, createdAt, data) VALUES (?, 'scripts', 'starter', ?, ?)");
     db.exec('BEGIN IMMEDIATE');
@@ -156,7 +168,7 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
   }
 
   function state({ actor, name }, canModerate, extra = {}) {
-    const data = { scripts: [], cases: [], board: [], wall: [], help: [], suggest: [], market: [], favScripts: {}, favCases: {}, cheered: {}, canModerate, name, suggestedNames };
+    const data = { scripts: [], cases: [], board: [], wall: [], help: [], suggest: [], market: [], gratitude: [], goals: [], favScripts: {}, favCases: {}, cheered: {}, likedGratitude: {}, canModerate, name, suggestedNames };
     const reactions = db.prepare(`
       SELECT postId, COUNT(*) AS total, MAX(actor = ?) AS mine
       FROM tearoom_reactions GROUP BY postId
@@ -186,9 +198,16 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
           item.cheers = reaction?.total ?? 0;
           if (reaction?.mine) data.cheered[row.id] = true;
         }
+        if (section === 'gratitude') {
+          item.likes = reaction?.total ?? 0;
+          if (reaction?.mine) data.likedGratitude[row.id] = true;
+        }
         if (section === 'help') {
           item.mine = row.actor === actor;
           item.answers = byQuestion.get(row.id) || [];
+          item.handler = item.claim?.name ?? '';
+          item.claimedByMe = item.claim?.actor === actor;
+          delete item.claim;
         }
         data[section].push(item);
       }
@@ -211,6 +230,7 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
   function applyAction(input, { actor, name }, canModerate) {
     const action = text(input.action, '操作', 40, true);
     if (Object.hasOwn(sections, action)) {
+      if (action === 'goal' && !canModerate) throw new ApiError(403, '请先登录管理账号');
       const record = fieldsFor(action, input, name);
       const id = action === 'suggest' ? 'JY-' + randomBytes(8).toString('hex').toUpperCase() : randomUUID();
       db.prepare('INSERT INTO tearoom_posts (id, section, actor, createdAt, data) VALUES (?, ?, ?, ?, ?)').run(id, sections[action], actor, Date.now(), JSON.stringify(record));
@@ -221,9 +241,9 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
     const row = db.prepare('SELECT section, actor, createdAt, data FROM tearoom_posts WHERE id = ?').get(id);
     if (!row) throw new ApiError(404, '记录不存在');
 
-    if (action === 'favorite' || action === 'cheer') {
+    if (['favorite', 'cheer', 'gratitudeLike'].includes(action)) {
       keys(input, ['action', 'id', 'active']);
-      const eligible = action === 'favorite' ? ['scripts', 'cases'] : ['board', 'wall'];
+      const eligible = { favorite: ['scripts', 'cases'], cheer: ['board', 'wall'], gratitudeLike: ['gratitude'] }[action];
       if (!eligible.includes(row.section)) throw new ApiError(404, '记录不存在');
       if (typeof input.active !== 'boolean') throw new ApiError(400, '操作状态无效');
       if (input.active) db.prepare('INSERT OR IGNORE INTO tearoom_reactions (postId, actor) VALUES (?, ?)').run(id, actor);
@@ -231,8 +251,9 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
       return;
     }
 
-    if (action === 'answer' || action === 'solve') {
+    if (['answer', 'claim', 'unclaim', 'solve', 'helpThank'].includes(action)) {
       if (row.section !== 'help') throw new ApiError(404, '求助记录不存在');
+      const record = JSON.parse(row.data);
       if (action === 'answer') {
         keys(input, ['action', 'id', 'body']);
         const message = text(input.body, '回答', 1500, true);
@@ -240,8 +261,47 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
         return;
       }
       keys(input, ['action', 'id']);
-      if (row.actor !== actor) throw new ApiError(403, '请由发帖人标为已解决');
-      const record = { ...JSON.parse(row.data), solved: true };
+      if (action === 'helpThank') {
+        if (row.actor !== actor) throw new ApiError(403, '请由发帖人发送感谢');
+        if (!record.solved || !record.claim) throw new ApiError(409, '求助解决并有认领同事后可发送感谢');
+        const thanksId = 'help-thanks-' + id;
+        db.exec('BEGIN IMMEDIATE');
+        try {
+          db.prepare("INSERT OR IGNORE INTO tearoom_posts (id, section, actor, createdAt, data) VALUES (?, 'gratitude', ?, ?, ?)")
+            .run(thanksId, actor, Date.now(), JSON.stringify({ from: name, recipient: record.claim.name, body: '感谢你帮忙解决这次求助。' }));
+          record.thanked = true;
+          db.prepare('UPDATE tearoom_posts SET data = ? WHERE id = ?').run(JSON.stringify(record), id);
+          db.exec('COMMIT');
+        } catch (error) {
+          db.exec('ROLLBACK');
+          throw error;
+        }
+        return;
+      }
+      if (action === 'solve') {
+        if (row.actor !== actor) throw new ApiError(403, '请由发帖人标为已解决');
+        record.solved = true;
+      } else {
+        if (record.solved) throw new ApiError(409, '这条求助已解决');
+        if (action === 'claim') {
+          if (row.actor === actor) throw new ApiError(403, '请由其他同事认领');
+          if (record.claim && record.claim.actor !== actor) throw new ApiError(409, '已由其他同事认领');
+          record.claim ??= { actor, name };
+        } else {
+          if (record.claim?.actor !== actor) throw new ApiError(403, '请由认领同事撤回认领');
+          delete record.claim;
+        }
+      }
+      db.prepare('UPDATE tearoom_posts SET data = ? WHERE id = ?').run(JSON.stringify(record), id);
+      return;
+    }
+
+    if (action === 'goalUpdate') {
+      if (!canModerate) throw new ApiError(403, '请先登录管理账号');
+      if (row.section !== 'goals') throw new ApiError(404, '协作目标不存在');
+      keys(input, ['action', 'id', 'title', 'body', 'owner', 'due', 'status']);
+      const { id: ignored, ...fields } = input;
+      const record = fieldsFor('goal', { ...fields, action: 'goal' });
       db.prepare('UPDATE tearoom_posts SET data = ? WHERE id = ?').run(JSON.stringify(record), id);
       return;
     }
@@ -263,7 +323,7 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
     throw new ApiError(400, '茶水间操作无效');
   }
 
-  return async function handleTearoom({ path, request, response, send, body, getAdmin }) {
+  async function handle({ path, request, response, send, body, getAdmin }) {
     if (path !== '/api/tearoom' && !path.startsWith('/api/tearoom/')) return false;
     const method = request.method;
     const canModerate = () => getAdmin?.() === true;
@@ -325,6 +385,11 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
       return true;
     }
     throw new ApiError(404, '茶水间接口不存在');
+  }
+
+  return {
+    handle, session,
+    limitWrite: actor => limit(writeAttempts, actor, WRITE_LIMIT, WRITE_WINDOW)
   };
 }
 

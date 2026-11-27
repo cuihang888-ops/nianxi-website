@@ -57,13 +57,17 @@ test('command center API preserves permissions, data and collaboration rules', a
     assert.equal(result.status, 201, result.content); createdSession = result.json.session;
     assert.equal(createdSession.version, 1); assert.equal(createdSession.orders, null); assert.equal(createdSession.updatedBy, '演示运营');
     assert.equal(createdSession.actualMinutes, null);
+    assert.equal(createdSession.period, 'early');
+    assert.equal(createdSession.end, '13:40');
     assert.equal((await call('/api/sessions', { cookie: editorCookie, method: 'POST', data: { ...input, id: 'injected' } })).status, 400);
   });
-  await t.test('same account and same anchor time conflicts are rejected', async () => {
-    const input = { date: '2026-11-26', accountId: 'account-1', anchorId: 'anchor-2', start: '11:59', end: '13:00' };
+  await t.test('same room and unassigned anchor conflicts are rejected while canonical periods coexist', async () => {
+    const input = { date: '2026-11-26', accountId: 'account-1', anchorId: 'anchor-1', start: '11:59', end: '13:00' };
     assert.equal((await call('/api/sessions', { cookie: editorCookie, method: 'POST', data: input })).status, 409);
-    assert.equal((await call('/api/sessions', { cookie: editorCookie, method: 'POST', data: { ...input, accountId: 'account-2', anchorId: 'anchor-1' } })).status, 409);
-    assert.equal((await call('/api/sessions', { cookie: editorCookie, method: 'POST', data: { ...input, start: '12:00' } })).status, 201);
+    assert.equal((await call('/api/sessions', { cookie: editorCookie, method: 'POST', data: { ...input, accountId: 'account-2' } })).status, 409);
+    const middle = await call('/api/sessions', { cookie: editorCookie, method: 'POST', data: { ...input, anchorId: 'anchor-2' } });
+    assert.equal(middle.status, 201);
+    assert.equal(middle.json.session.start, '14:00');
   });
   await t.test('optimistic locking prevents one editor overwriting another', async () => {
     const first = await call(`/api/sessions/${createdSession.id}`, { cookie: editorCookie, method: 'PUT', data: { version: 1, orders: 2, paidOrders: 1, orderAmount: 5000, received: 2000, cogs: 900, status: 'completed' } });
@@ -314,8 +318,10 @@ test('nullable real metrics, unknown schedules and imported data remain separate
   assert.equal(created.status, 201, 'unknown schedules must not cause invented time conflicts');
   const added = (await created.json()).session;
   assert.equal(added.orders, null); assert.equal(added.received, null); assert.equal(added.orderAmount, null);
+  assert.equal(added.scheduleUnknown, false);
+  assert.equal(added.start, '08:00');
   const scheduled = await fetch(base + '/api/sessions', { method: 'POST', headers: { 'Content-Type': 'application/json', Cookie: cookie }, body: JSON.stringify({ date: source.date, accountId: 'account-1', anchorId: 'anchor-1', start: '00:00', end: '00:01' }) });
-  assert.equal(scheduled.status, 201, 'known schedule may overlap an unknown placeholder');
+  assert.equal(scheduled.status, 409, 'a second canonical schedule conflicts with the newly created schedule');
   const csv = await (await fetch(base + '/api/export.csv?dateFrom=2026-11-25&dateTo=2026-11-25', { headers: { Cookie: cookie } })).text();
   const lines = csv.trim().split('\r\n');
   const cells = line => [...line.matchAll(/"((?:[^"]|"")*)"(?:,|$)/g)].map(match => match[1].replaceAll('""', '"'));

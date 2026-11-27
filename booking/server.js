@@ -6,7 +6,7 @@ const path = require('path');
 const crypto = require('crypto');
 const config = require('./lib/config');
 const { HttpError, object, text, date, addDays, shanghaiDate, dateRange, avatar } = require('./lib/validation');
-const { atomicWrite, loadSellers, loadRooms, saveRooms, normalizeIntroduction, normalizeMultiline, loadStories, deriveAvatar, loadScheduleConfig } = require('./lib/storage');
+const { atomicWrite, loadSellers, loadRooms, saveRooms, loadRoomDirectory, normalizeIntroduction, normalizeMultiline, loadStories, deriveAvatar, loadScheduleConfig } = require('./lib/storage');
 const { makeAuth, makeSecurity } = require('./lib/auth');
 
 function send(res, status, value, type = 'application/json; charset=utf-8') {
@@ -49,8 +49,8 @@ function readBody(req) {
     req.on('error', reject);
   });
 }
-function publicBooking(item) {
-  return { id: item.id, room: item.room, slot: item.slot, date: item.date, department: item.department, bookerName: item.bookerName, note: item.note || '', createdAt: item.createdAt || '' };
+function publicBooking(item, roomId) {
+  return { id: item.id, room: item.room, roomId, slot: item.slot, date: item.date, department: item.department, bookerName: item.bookerName, note: item.note || '', createdAt: item.createdAt || '' };
 }
 function introduction(value) {
   const normalized = normalizeIntroduction(value);
@@ -108,6 +108,7 @@ function searchTalents(data, query, instant) {
 function createServer(options = {}) {
   const dataDir = path.resolve(options.dataDir || process.env.DATA_DIR || path.join(__dirname, 'data'));
   const roomFile = path.resolve(options.legacyFile || process.env.BOOKINGS_FILE || path.join(__dirname, 'bookings.json'));
+  const roomDirectoryFile = path.join(dataDir, 'room-directory.json');
   const sellerFile = path.join(dataDir, 'sellers.json');
   const storyFile = path.join(dataDir, 'talent-stories.json');
   const slotConfigFile = path.join(dataDir, 'schedule-config.json');
@@ -288,6 +289,19 @@ function createServer(options = {}) {
     saveSlotConfig(nextConfig);
     return departmentResult(nextConfig, department);
   }
+  function restoreDepartment(id) {
+    const nextConfig = editableDirectory();
+    const index = nextConfig.archivedDepartments.findIndex(department => department.id === id);
+    if (index < 0) throw new HttpError(404, '已归档部门不存在');
+    const department = nextConfig.archivedDepartments[index];
+    if (nextConfig.departments.some(item => config.directoryNameKey(item.name) === config.directoryNameKey(department.name))) {
+      throw new HttpError(409, '有同名在用部门，请先修改其名称');
+    }
+    nextConfig.archivedDepartments.splice(index, 1);
+    nextConfig.departments.push(department);
+    saveSlotConfig(nextConfig);
+    return departmentResult(nextConfig, department);
+  }
   const sellerSignature = () => {
     const stat = fs.statSync(sellerFile, { bigint: true });
     return [stat.dev, stat.ino, stat.size, stat.mtimeNs, stat.ctimeNs].join(':');
@@ -321,7 +335,65 @@ function createServer(options = {}) {
     if (result < today()) throw new HttpError(400, '过去的日期只能查看，不能新增或修改预约');
     return result;
   }
-  function availableRooms(state) { return [...new Set([...config.rooms, ...state.bookings.map(b => b.room)])]; }
+  function readRoomDirectory(state = loadRooms(roomFile)) {
+    return loadRoomDirectory(roomDirectoryFile, state.bookings);
+  }
+  function roomsPayload(directory) {
+    return {
+      rooms: directory.rooms.filter(room => room.active).map(room => room.name),
+      roomDirectory: directory.rooms.map(({ id, name, active, archived }) => ({ id, name, active, archived }))
+    };
+  }
+  function roomByName(directory, name) {
+    return directory.rooms.find(room => room.name === name || room.aliases.includes(name));
+  }
+  function roomName(directory, value, current) {
+    const name = directoryName(value, '场地名称', 80);
+    const key = config.directoryNameKey(name);
+    if (directory.rooms.some(room => room !== current &&
+        [room.name, ...room.aliases].some(used => config.directoryNameKey(used) === key))) {
+      throw new HttpError(409, '该场地名称已被使用');
+    }
+    return name;
+  }
+  function changeRoom(id, method, body) {
+    const directory = readRoomDirectory();
+    let room = directory.rooms.find(item => item.id === id);
+    if (!id) {
+      if (Object.keys(body).length !== 1 || !Object.hasOwn(body, 'name')) throw new HttpError(400, '请填写场地名称');
+      room = { id: 'room-' + crypto.randomBytes(16).toString('hex'), name: roomName(directory, body.name), active: true, archived: false, aliases: [] };
+      directory.rooms.push(room);
+    } else {
+      if (!room) throw new HttpError(404, '场地不存在');
+      if (method === 'DELETE') {
+        room.active = false;
+        room.archived = true;
+      } else if (method === 'POST') {
+        room.active = true;
+        room.archived = false;
+      } else {
+        if (room.archived) throw new HttpError(409, '请先恢复已归档场地');
+        if (!Object.keys(body).length || Object.keys(body).some(key => !['name', 'active'].includes(key))) {
+          throw new HttpError(400, '请填写需要修改的场地名称或状态');
+        }
+        if (Object.hasOwn(body, 'active')) {
+          if (typeof body.active !== 'boolean') throw new HttpError(400, '场地状态格式不正确');
+          room.active = body.active;
+        }
+        if (Object.hasOwn(body, 'name')) {
+          const name = roomName(directory, body.name, room);
+          if (name !== room.name) {
+            room.aliases = room.aliases.filter(alias => alias !== name);
+            room.aliases.push(room.name);
+            room.name = name;
+          }
+        }
+      }
+    }
+    atomicWrite(roomDirectoryFile, directory);
+    const payload = roomsPayload(directory);
+    return { ...payload, room: payload.roomDirectory.find(item => item.id === room.id) };
+  }
   function selection(body, data, retainedTalentIds) {
     const slotConfig = readSlotConfig();
     const departments = dynamicDepartments(slotConfig);
@@ -366,7 +438,7 @@ function createServer(options = {}) {
         '/api/audit': '查看安全日志', '/api/slot-config': '维护场次' };
       let auditEvent = route.startsWith('/api/') && !['GET', 'HEAD'].includes(method) && route !== '/api/view-events'
         ? { category: route.includes('login') || route.includes('logout') ? 'login' : 'operation',
-          action: actions[route] || (route.startsWith('/api/talents') ? '维护卖手' : route.startsWith('/api/schedules') ? '调整排班' : route.startsWith('/api/departments') ? '维护直播间部门' : '访问接口') }
+          action: actions[route] || (route.startsWith('/api/talents') ? '维护卖手' : route.startsWith('/api/schedules') ? '调整排班' : route.startsWith('/api/departments') ? '维护直播间部门' : route.startsWith('/api/rooms') ? '维护场地' : '访问接口') }
         : route === '/api/audit' ? { category: 'security', action: actions[route] } : null;
       if (auditEvent) auditEvent.actor = security.identity(req);
       // An attempt entry must be persisted before executing a mutation.
@@ -391,7 +463,7 @@ function createServer(options = {}) {
       if (method === 'GET' && route === '/api/health') return send(res, 200, { ok: true });
       if (method === 'GET' && route === '/api/access') return send(res, 200, security.me(req));
       if (method === 'GET' && route === '/api/audit') return send(res, 200, security.list(req, url.searchParams));
-      if (method === 'GET' && route === '/api/config') return send(res, 200, { ...config, ...config.scheduleDirectory(readSlotConfig()), rooms: availableRooms(loadRooms(roomFile)), today: today() });
+      if (method === 'GET' && route === '/api/config') return send(res, 200, { ...config, ...config.scheduleDirectory(readSlotConfig()), ...roomsPayload(readRoomDirectory()), today: today() });
       if (method === 'GET' && ['/api/slot-config', '/api/departments'].includes(route)) {
         return send(res, 200, { ...config.scheduleDirectory(readSlotConfig()), slots: config.slots });
       }
@@ -401,6 +473,14 @@ function createServer(options = {}) {
         auditEvent.action = '新增直播间部门';
         auditEvent.detail = `${result.department.name} · ${result.department.groups.join('、')}`;
         return send(res, 201, result);
+      }
+      const departmentRestore = /^\/api\/departments\/([A-Za-z0-9_-]+)\/restore$/.exec(route);
+      if (method === 'POST' && departmentRestore) {
+        auth.requireAdmin(req);
+        const result = restoreDepartment(departmentRestore[1]);
+        auditEvent.action = '恢复直播间部门';
+        auditEvent.detail = result.department.name;
+        return send(res, 200, result);
       }
       const departmentRoute = /^\/api\/departments\/([A-Za-z0-9_-]{1,20})(\/groups)?(?:\/([^/]+))?$/.exec(route);
       if (departmentRoute && ['PATCH', 'POST', 'DELETE'].includes(method)) {
@@ -523,21 +603,41 @@ function createServer(options = {}) {
         const body = await readBody(req), state = loadSellers(sellerFile);
         auditEvent.detail = `新增 ${String(body.number || '').slice(0, 24)} ${String(body.name || '').slice(0, 40)}`;
         const talent = { id: crypto.randomUUID(), number: text(body.number, '编号', 24), name: text(body.name, '姓名', 40), avatar: avatar(body.avatar), introduction: Object.hasOwn(body, 'introduction') ? introduction(body.introduction) : '', active: true };
+        auditEvent.action = '新增卖手';
         if (!/^[A-Za-z0-9_-]+$/.test(talent.number)) throw new HttpError(400, '编号只允许字母、数字、下划线或连字符');
         if (state.talents.some(t => t.number.toLowerCase() === talent.number.toLowerCase())) throw new HttpError(409, '该编号已存在，请使用其他编号');
         state.talents.push(talent);
         saveSellers(state);
         return send(res, 201, { talent });
       }
-      const talentRoute = /^\/api\/talents\/([A-Za-z0-9-]+)$/.exec(route);
+      const talentRoute = /^\/api\/talents\/([A-Za-z0-9_-]+)$/.exec(route);
+      const talentRestore = /^\/api\/talents\/([A-Za-z0-9_-]+)\/restore$/.exec(route);
+      if ((method === 'DELETE' && talentRoute) || (method === 'POST' && talentRestore)) {
+        auth.requireAdmin(req);
+        const state = loadSellers(sellerFile);
+        const talent = state.talents.find(item => item.id === (talentRoute || talentRestore)[1]);
+        if (!talent) throw new HttpError(404, '未找到该卖手');
+        const archived = method === 'DELETE';
+        talent.archived = archived;
+        talent.active = !archived;
+        auditEvent.action = archived ? '归档卖手' : '恢复卖手';
+        auditEvent.detail = `${talent.number} ${talent.name}`;
+        saveSellers(state);
+        return send(res, 200, { talent });
+      }
       if (method === 'PATCH' && talentRoute) {
         auth.requireAdmin(req);
         const body = await readBody(req), state = loadSellers(sellerFile);
         const index = state.talents.findIndex(t => t.id === talentRoute[1]);
         if (index < 0) throw new HttpError(404, '未找到该卖手');
-        if (!Object.keys(body).some(k => ['name', 'number', 'avatar', 'introduction', 'active'].includes(k))) throw new HttpError(400, '请提供需要修改的信息');
+        const fields = Object.keys(body);
+        if (!fields.length || fields.some(key => !['name', 'number', 'avatar', 'introduction', 'active'].includes(key))) {
+          throw new HttpError(400, '请提供有效的卖手资料或在用状态');
+        }
         const talent = { ...state.talents[index] };
-        auditEvent.detail = `${talent.number} ${talent.name} · 修改 ${Object.keys(body).filter(key => ['name', 'number', 'avatar', 'introduction', 'active'].includes(key)).join('、')}`;
+        if (talent.archived) throw new HttpError(409, '请先恢复已归档卖手');
+        auditEvent.action = body.active === false ? '停用卖手' : body.active === true ? '启用卖手' : '修改卖手';
+        auditEvent.detail = `${talent.number} ${talent.name} · 修改 ${fields.join('、')}`;
         if (Object.hasOwn(body, 'number')) {
           talent.number = text(body.number, '编号', 24);
           if (!/^[A-Za-z0-9_-]+$/.test(talent.number)) throw new HttpError(400, '编号只允许字母、数字、下划线或连字符');
@@ -597,24 +697,43 @@ function createServer(options = {}) {
         saveSellers(state);
         return send(res, 200, { schedule });
       }
-      if (method === 'GET' && route === '/api/rooms') return send(res, 200, { rooms: availableRooms(loadRooms(roomFile)) });
+      if (method === 'GET' && route === '/api/rooms') return send(res, 200, roomsPayload(readRoomDirectory()));
+      const roomRoute = /^\/api\/rooms\/(room-[a-f0-9]{32})$/.exec(route);
+      const roomRestore = /^\/api\/rooms\/(room-[a-f0-9]{32})\/restore$/.exec(route);
+      const isNewRoom = method === 'POST' && route === '/api/rooms';
+      if (isNewRoom || (roomRoute && ['PATCH', 'DELETE'].includes(method)) || (roomRestore && method === 'POST')) {
+        auth.requireAdmin(req);
+        const body = isNewRoom || method === 'PATCH' ? await readBody(req) : null;
+        const result = changeRoom((roomRoute || roomRestore)?.[1], method, body);
+        auditEvent.action = isNewRoom ? '新增场地' : roomRestore ? '恢复场地'
+          : method === 'DELETE' ? '归档场地' : body.active === false ? '停用场地' : '修改场地';
+        auditEvent.detail = result.room.name;
+        return send(res, isNewRoom ? 201 : 200, result);
+      }
       if (method === 'GET' && route === '/api/bookings') {
         const { from, to } = dateRange(url.searchParams, today()), state = loadRooms(roomFile);
-        return send(res, 200, { bookings: state.bookings.filter(b => b.date >= from && b.date <= to).map(publicBooking) });
+        const directory = readRoomDirectory(state);
+        return send(res, 200, { bookings: state.bookings.filter(b => b.date >= from && b.date <= to)
+          .map(item => publicBooking(item, item.roomId || roomByName(directory, item.room).id)) });
       }
       if (method === 'POST' && route === '/api/book') {
         auth.requireAdmin(req);
         const body = await readBody(req), day = futureDate(body.date);
-        const room = text(body.room || body.roomName, '房间', 80), department = text(body.department, '预约部门', 80), bookerName = text(body.bookerName, '预约人姓名', 80);
+        const department = text(body.department, '预约部门', 80), bookerName = text(body.bookerName, '预约人姓名', 80);
         const note = text(body.note, '备注', 300, true), clientId = text(body.clientId, '设备标识', 128), state = loadRooms(roomFile);
-        auditEvent.detail = `${day} · ${room} · ${String(body.slot || '').slice(0, 20)} · ${department} ${bookerName}`;
-        if (!availableRooms(state).includes(room) || !config.slots.some(s => s.id === body.slot)) throw new HttpError(400, '请选择有效房间和时段');
-        const conflict = state.bookings.find(b => b.date === day && b.room === room && b.slot === body.slot);
-        if (conflict) throw new HttpError(409, `该时段已被 ${conflict.department} · ${conflict.bookerName} 预约`, { booking: publicBooking(conflict) });
-        const booking = { id: crypto.randomUUID(), date: day, room, slot: body.slot, department, bookerName, note, clientId, createdAt: now().toISOString() };
+        const directory = readRoomDirectory(state);
+        const room = body.roomId !== undefined
+          ? directory.rooms.find(item => item.id === body.roomId)
+          : roomByName(directory, text(body.room || body.roomName, '房间', 80));
+        if (!room?.active || !config.slots.some(slot => slot.id === body.slot)) throw new HttpError(400, '请选择在用场地和有效时段');
+        auditEvent.detail = `${day} · ${room.name} · ${body.slot} · ${department} ${bookerName}`;
+        const conflict = state.bookings.find(b => b.date === day && b.slot === body.slot &&
+          (b.roomId || roomByName(directory, b.room).id) === room.id);
+        if (conflict) throw new HttpError(409, `该时段已被 ${conflict.department} · ${conflict.bookerName} 预约`, { booking: publicBooking(conflict, room.id) });
+        const booking = { id: crypto.randomUUID(), date: day, room: room.name, roomId: room.id, slot: body.slot, department, bookerName, note, clientId, createdAt: now().toISOString() };
         state.bookings.push(booking);
         saveRooms(roomFile, state);
-        return send(res, 201, { booking: publicBooking(booking), token: booking.id });
+        return send(res, 201, { booking: publicBooking(booking, room.id), token: booking.id });
       }
       if (method === 'POST' && route === '/api/cancel') {
         auth.requireAdmin(req);

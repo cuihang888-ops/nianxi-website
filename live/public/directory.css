@@ -1,0 +1,26 @@
+.directory { display: grid; gap: 16px; max-width: 920px; }
+.directory-title { display: flex; align-items: center; justify-content: space-between; gap: 16px; }
+.directory-title h1 { margin: 0 0 6px; }
+.directory-title p { margin: 0; color: #52685d; }
+.directory button { min-height: 40px; }
+.directory-title button { flex: none; }
+.directory-filters, .directory-filters [role=group], .directory-actions { display: flex; flex-wrap: wrap; gap: 7px; }
+.directory-filters { justify-content: space-between; }
+.directory-filters [aria-pressed=true] { background: #174c3e; color: white; }
+.directory-list { margin: 0; padding: 0; display: grid; gap: 8px; list-style: none; }
+.directory-list li { padding: 12px 14px; border: 1px solid #d8e1d8; border-radius: 8px; background: #fff; display: flex; align-items: center; justify-content: space-between; gap: 12px; min-width: 0; }
+.directory-list li > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.directory-list small { color: #52685d; display: block; margin-top: 4px; }
+.directory-actions { justify-content: end; flex: none; }
+.directory-form { display: grid; gap: 12px; }
+.directory-form label { display: grid; gap: 4px; }
+.directory-form input, .directory-form select { width: 100%; min-height: 38px; padding: 7px; }
+.directory-dates { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 9px; }
+.directory-dates input { min-width: 0; }
+@media (max-width: 550px) {
+  .directory-title, .directory-list li { flex-wrap: wrap; }
+  .directory-actions { justify-content: start; }
+}
+@media (max-width: 410px) {
+  .directory-dates { grid-template-columns: minmax(0, 1fr); }
+}

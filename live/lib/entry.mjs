@@ -1,4 +1,5 @@
-import { ApiError, keys, text, date, version, numeric, sessionInput } from './validation.mjs';
+import { ApiError, keys, text, date, numeric, sessionInput, moneyFields, countFields } from './validation.mjs';
+import { active, activeOn, slotTiming } from './directory.mjs';
 
 export const ROLES = ['admin', 'manager', 'anchor_entry', 'service_entry', 'editor', 'viewer'];
 export const PUBLIC_ENTRY_USER = { id: 'public-entry', name: '匿名录入', role: 'public_entry' };
@@ -6,71 +7,79 @@ export const isStaff = user => ['anchor_entry', 'service_entry'].includes(user?.
 export const anchorEntryFields = ['actualStart', 'actualEnd', 'reach', 'views', 'viewers', 'impressions', 'interactions', 'reactions', 'comments', 'shares', 'linkClicks', 'newFollowers', 'peak', 'watchSeconds'];
 export const serviceEntryFields = ['orders', 'paidOrders', 'units', 'refundOrders', 'messages', 'qualified'];
 const publicEntryFields = ['orderAmount', 'orders', 'actualMinutes', 'impressions', 'shares', 'newFollowers', 'viewers'];
+const sessionMetrics = [...moneyFields.filter(field => field !== 'target'), ...countFields, 'actualMinutes', 'actualStart', 'actualEnd'];
 export function entryFields(user) {
   if (user.role === 'anchor_entry') return anchorEntryFields;
   if (user.role === 'service_entry') return serviceEntryFields;
   return [...anchorEntryFields, ...serviceEntryFields];
 }
 export function safeDataset(dataset) { return { kind: dataset.kind, label: dataset.label }; }
-const own = (item, key) => item[key] ?? null;
-export function safeEntrySession(item, user) {
-  const result = Object.fromEntries(['id', 'date', 'accountId', 'anchorId', 'version', 'updatedAt'].map(key => [key, own(item, key)]));
-  result.slotId = item.slotId || item.anchorId;
-  result.slotLabel = item.slotLabel || '直播场次';
-  result.scheduleUnknown = !!item.scheduleUnknown;
-  if (user.role === PUBLIC_ENTRY_USER.role) {
-    result.salesRecorded = Number.isFinite(item.orderAmount);
-    for (const field of publicEntryFields) result[field] = own(item, field);
-    return result;
-  }
-  result.updatedBy = own(item, 'updatedBy');
-  for (const field of entryFields(user)) result[field] = own(item, field);
-  if (user.role !== 'service_entry') result.actualMinutes = own(item, 'actualMinutes');
-  return result;
-}
-export function entryDirectory(store) {
-  const sessions = store.list('sessions');
+export function entryDirectory(roster) {
+  const accounts = roster.accounts.filter(active);
+  const accountsById = new Set(accounts.map(account => account.id));
+  const slots = roster.slots.filter(slot => active(slot) && accountsById.has(slot.accountId));
   return {
-    accounts: store.list('accounts').map(({ id, name }) => ({ id, name })),
-    anchors: store.list('anchors').map(item => {
-      const latest = sessions.filter(session => session.anchorId === item.id).sort((a, b) => b.date.localeCompare(a.date))[0];
-      return {
-        id: item.id, name: item.name, accountId: item.accountId || latest?.accountId || null,
-        slotId: item.slotId || latest?.slotId || item.id, slotLabel: item.slotLabel || latest?.slotLabel || '直播场次',
-        activeFrom: item.activeFrom || null, activeTo: item.activeTo || null
-      };
-    })
+    accounts: accounts.map(({ id, name }) => ({ id, name })),
+    slots: slots.map(({ id, accountId, name, period, start, end, endDayOffset }) => ({ id, accountId, name, period, start, end, endDayOffset })),
+    anchors: roster.anchors.filter(item => active(item) && slots.some(slot => slot.accountId === item.accountId && slot.id === item.slotId))
+      .map(({ id, name, accountId, slotId, slotLabel, activeFrom, activeTo }) => ({
+        id, name, accountId, slotId, slotLabel, activeFrom: activeFrom ?? null, activeTo: activeTo ?? null
+      }))
   };
 }
 
-export function entryInput(input, existing, user, known) {
+export function entryInput(input, user, known) {
   const isPublic = user.role === PUBLIC_ENTRY_USER.role;
   const allowed = isPublic ? publicEntryFields : entryFields(user);
-  keys(input, existing ? ['version', ...allowed] : ['date', 'accountId', 'anchorId', ...allowed]);
-  if (existing) version(input.version);
-  const anchorId = existing?.anchorId || text(input.anchorId, '主播', 160, true);
-  const accountId = existing?.accountId || text(input.accountId, '账号', 160, true);
-  const selectedDate = existing?.date || date(input.date);
+  keys(input, ['date', 'accountId', 'anchorId', ...allowed, ...(isPublic ? ['confirmAmount'] : [])]);
+  if (isPublic && Object.hasOwn(input, 'confirmAmount') && typeof input.confirmAmount !== 'boolean') {
+    throw new ApiError(400, '金额确认须为布尔值');
+  }
+  const anchorId = text(input.anchorId, '主播', 160, true);
+  const accountId = text(input.accountId, '账号', 160, true);
+  const selectedDate = date(input.date);
   const anchor = known.anchors.find(item => item.id === anchorId);
   if (!anchor) throw new ApiError(400, '请选择有效主播');
-  const entryAnchor = known.entryAnchors.find(item => item.id === anchorId);
-  if (!known.accounts.some(item => item.id === accountId)) throw new ApiError(400, '请选择有效直播间');
-  if (!existing && entryAnchor?.accountId && entryAnchor.accountId !== accountId) throw new ApiError(400, '主播与直播间归属不一致');
-  if (!existing && ((anchor.activeFrom && selectedDate < anchor.activeFrom) || (anchor.activeTo && selectedDate > anchor.activeTo))) throw new ApiError(400, '该主播在此日期不在录入名录有效期内');
+  if (!active(known.accounts.find(item => item.id === accountId))) throw new ApiError(400, '请选择已启用的直播间');
+  if (!activeOn(anchor, selectedDate)) throw new ApiError(400, '该主播在此日期不在录入名录有效期内');
+  if (anchor.accountId !== accountId) throw new ApiError(400, '主播与直播间归属不一致');
+  const slot = known.slots.find(item => item.accountId === accountId && item.id === anchor.slotId);
+  if (!active(slot)) throw new ApiError(400, '请选择已启用的场次');
   const patch = Object.fromEntries(allowed.filter(key => Object.hasOwn(input, key)).map(key => [key, input[key]]));
+  if (!Object.values(patch).some(value => value !== null)) {
+    throw new ApiError(400, '请至少填写一项指标');
+  }
   if (isPublic && Object.hasOwn(patch, 'actualMinutes') && patch.actualMinutes !== null) {
     if (numeric(patch.actualMinutes, '直播时长（分钟）', true) > 1440) throw new ApiError(400, '单场直播时长最长 24 小时');
   }
-  if (!existing) Object.assign(patch, { date: selectedDate, accountId, anchorId, start: '00:00', end: '00:01', status: 'completed', scheduleUnknown: true });
-  const result = sessionInput(patch, existing, known);
-  if (!existing) {
-    result.slotId = entryAnchor?.slotId || anchor.id;
-    result.slotLabel = entryAnchor?.slotLabel || '直播场次';
-  }
+  Object.assign(patch, {
+    date: selectedDate, accountId, anchorId, start: '00:00', end: '00:01', status: 'completed',
+    scheduleUnknown: true, ...slotTiming(slot)
+  });
+  const result = sessionInput(patch, null, known);
+  result.slotId = slot.id;
+  result.slotLabel = slot.name;
+  result.period = slot.period;
   return result;
 }
 
 export function duplicateEntry(item, sessions, anchors) {
-  const slot = item.slotId || anchors.find(anchor => anchor.id === item.anchorId)?.slotId || item.anchorId;
-  return sessions.find(other => other.date === item.date && other.accountId === item.accountId && (other.slotId || anchors.find(anchor => anchor.id === other.anchorId)?.slotId || other.anchorId) === slot);
+  return sessions.filter(other => !other.cancelled && other.date === item.date && other.accountId === item.accountId &&
+    (other.anchorId === item.anchorId || (other.slotId || anchors.find(anchor => anchor.id === other.anchorId)?.slotId) === item.slotId));
+}
+
+export function hasSessionMetrics(row) {
+  return sessionMetrics.some(field => row[field] != null);
+}
+
+export function fillableSession(row, entry) {
+  if (row.anchorId !== entry.anchorId || (row.slotId && row.slotId !== entry.slotId) ||
+    row.status !== 'planned' || row.cancelled || hasSessionMetrics(row)) return false;
+  if (row.sourceStatus === 'missing') return row.version === 1 && row.scheduleUnknown === true && row.target == null;
+  return row.sourceStatus == null && (row.managedSchedule === true || row.scheduleUnknown !== true);
+}
+
+export function fillSession(row, entry) {
+  const values = sessionMetrics.filter(field => entry[field] != null).map(field => [field, entry[field]]);
+  return { ...row, ...Object.fromEntries(values), slotId: row.slotId ?? entry.slotId, slotLabel: row.slotLabel ?? entry.slotLabel, status: 'completed' };
 }

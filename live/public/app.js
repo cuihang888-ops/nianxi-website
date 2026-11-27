@@ -1,13 +1,20 @@
 import { totals, change, decomposeSales } from './metrics.js?v=20261127-impressions';
 import { renderImported } from './imported-view.js?v=20261127-impressions';
 import { setupMonthly, monthlyPage } from './monthly.js';
-import { beijingToday, lastCompletedDay, renderDailySales } from './daily-board.js?v=20261127-impressions';
-import { renderSessionDetails } from './session-details.js?v=20261127-impressions';
+import { beijingToday, lastCompletedDay, renderDailySales } from './daily-board.js?v=20261127-goals';
+import { renderSessionDetails } from './session-details.js?v=20261127-v130';
+import { setupAnchorReview } from './anchor-review.js?v=20261127-v12';
+import { setupDirectory } from './directory.js?v=20261127-v130';
+import { setupDepartmentGoals } from './department-goals.js?v=20261127-goals';
+import { PERIODS, resolveShiftPeriod } from './shift-periods.js?v=20261127-comparison';
 const $ = (s, root = document) => root.querySelector(s);
 const root = $('#app');
 const dialog = $('#editor');
-const manage = new URLSearchParams(location.search).get('mode') === 'manage';
-const initialView = manage && new URLSearchParams(location.search).get('view') === 'monthly' ? 'monthly' : 'daily';
+const search = new URLSearchParams(location.search);
+const manage = search.get('mode') === 'manage';
+const requestedView = search.get('view');
+const initialView = manage && ['monthly', 'directory'].includes(requestedView) ? requestedView
+  : requestedView === 'anchor-review' ? 'anchor-review' : 'daily';
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const state = { data: null, view: initialView, dailyDate: '', dailyMetric: 'orderAmount', date: today, from: today, to: today, account: '', anchor: '', status: '', group: 'account', sort: 'orderAmount', direction: -1, scheduleMode: 'grid', inventoryFilter: '', query: '', taskFilter: '', loadedAt: '', audit: [], periodEnd: today, windowDays: 5, performanceGroup: 'anchor', performanceMetric: 'orderAmount', selectedPerformer: '', trendMetric: 'orderAmount' };
 const num = n => Number(n) || 0;
@@ -48,7 +55,7 @@ function icons() {
   if (state.data?.dataset?.kind === 'imported') {
     const marker = $('.top-right .badge') || $('.top-right .demo');
     if (marker) { marker.textContent = '真实表格 · 仅销售'; marker.className = 'badge imported-badge'; }
-    const side = $('.side-bottom p'); if (side) side.textContent = '5个直播间 · 15场次位 · 16位主播历史';
+    const side = $('.side-bottom p'); if (side) side.textContent = '直播间与主播历史';
     document.querySelectorAll('.heatmap-table').forEach(table => table.classList.toggle('seven-days', Number(state.windowDays) === 7));
     return;
   }
@@ -64,7 +71,7 @@ function icons() {
     });
   }
   if ($('#member-form') && !$('#directory-button')) {
-    const button = document.createElement('button'); button.id = 'directory-button'; button.type = 'button'; button.dataset.action = 'directory'; button.textContent = '管理账号与主播名称'; $('#member-form').before(button);
+    const button = document.createElement('button'); button.id = 'directory-button'; button.type = 'button'; button.dataset.action = 'directory'; button.textContent = '管理直播间、主播与场次'; $('#member-form').before(button);
   }
   if (state.view === 'performance' && state.data && !$('.data-completeness')) {
     const p = periodInfo(), applicable = state.data.sessions.filter(s => (!state.account || s.accountId === state.account) && (!state.anchor || s.anchorId === state.anchor));
@@ -94,7 +101,7 @@ async function api(path, data, method = 'GET') {
   return result;
 }
 function normalize(data) {
-  for (const key of ['accounts', 'anchors', 'sessions', 'inventory', 'tasks']) data[key] ||= [];
+  for (const key of ['accounts', 'anchors', 'slots', 'sessions', 'inventory', 'tasks']) data[key] ||= [];
   return data;
 }
 async function reload() {
@@ -130,7 +137,10 @@ function loadDashboard(payload) {
 function sessions(range = false) {
   return state.data.sessions.filter(s => (range ? s.date >= state.from && s.date <= state.to : s.date === state.date) && (!state.account || s.accountId === state.account) && (!state.anchor || s.anchorId === state.anchor) && (!state.status || s.status === state.status));
 }
-function hours(row) { const t = s => { const [h, m] = String(s).split(':').map(Number); return h + m / 60; }; return Math.max(0, t(row.end) - t(row.start)); }
+function hours(row) { const t = s => { const [h, m] = String(s).split(':').map(Number); return h + m / 60; }; return Math.max(0, t(row.end) - t(row.start) + 24 * (row.endDayOffset || 0)); }
+function sessionTime(row) {
+  return row.scheduleUnknown ? '实际时段待补' : `${row.start}—${row.endDayOffset === 1 ? '次日' : ''}${row.end}`;
+}
 function aggregate(rows) {
   const result = {};
   for (const k of ['target', 'reach', 'impressions', 'views', 'viewers', 'shares', 'peak', 'interactions', 'newFollowers', 'messages', 'qualified', 'orders', 'orderAmount', 'paidOrders', 'received', 'refundOrders', 'refunds', 'units', 'cogs', 'adSpend', 'shipping', 'fees', 'otherCost']) result[k] = sum(rows, k);
@@ -158,16 +168,22 @@ function kpis(rows, inventory = false) {
   return `<div class="kpi-grid">${kpi('确认成交额', money(a.orderAmount), `目标 ${money(a.target)} · 达成 <span class="positive">${rate(a.orderAmount, a.target)}</span>`, 'badge-check')}${kpi('净实收', money(a.net), `已收 ${money(a.received)} · 已退 ${money(a.refunds)}`, 'wallet')}${kpi('贡献利润', money(a.profit), `<span class="${a.profit < 0 ? 'negative' : 'positive'}">已扣售出成本与场次费用</span> · 未扣固定成本`, 'chart-no-axes-combined')}${kpi('有效询单 / 确认订单', `${fmt(a.qualified)}<span class="quiet"> / </span>${fmt(a.orders)}`, `询单转化 ${rate(a.orders, a.qualified)} · ${a.count} 场`, 'messages-square')}</div>`;
 }
 function kpi(label, value, note, symbol) { return `<div class="kpi"><div class="kpi-label">${icon(symbol)}${label}</div><div class="kpi-value">${value}</div><div class="kpi-note">${note}</div></div>`; }
-const manageNav = [ ['daily', 'layout-dashboard', '单日大屏'], ['performance', 'activity', '播后变化'], ['schedule', 'calendar-range', '场次排期'], ['compare', 'columns-3', '数据对比'], ['session-details', 'list', '主播场次明细'], ['monthly', 'notebook-pen', '主播月度总结报告'], ['review', 'clipboard-check', '复盘行动'], ['inventory', 'gem', '采购库存'], ['overview', 'chart-no-axes-combined', '经营总览'], ['method', 'book-open', '指标口径'] ];
-const nav = manage ? manageNav : manageNav.filter(([id]) => ['daily', 'performance', 'compare', 'session-details'].includes(id));
+const manageNav = [ ['daily', 'layout-dashboard', '单日大屏'], ['directory', 'settings', '直播名录'], ['performance', 'activity', '播后变化'], ['schedule', 'calendar-range', '场次排期'], ['compare', 'columns-3', '数据对比'], ['session-details', 'list', '主播场次明细'], ['monthly', 'notebook-pen', '主播月度总结报告'], ['review', 'clipboard-check', '复盘行动'], ['inventory', 'gem', '采购库存'], ['overview', 'chart-no-axes-combined', '经营总览'], ['method', 'book-open', '指标口径'] ];
+const nav = [
+  ...(manage ? manageNav : manageNav.filter(([id]) => ['daily', 'performance', 'compare', 'session-details'].includes(id))),
+  ['anchor-review', 'clipboard-check', '主播复盘']
+];
+const isDirectoryAdmin = () => manage && state.data?.user?.role === 'admin';
+const directory = setupDirectory({ api, dialog, toast, reload, render, isAdmin: isDirectoryAdmin });
+const anchorReview = setupAnchorReview({ api, render, today, isActive: () => state.view === 'anchor-review' && Boolean(state.data) });
 function render() {
   const d = state.data;
   if (!d) return;
   if (state.view === 'daily') {
-    root.innerHTML = renderDailySales(d, state.dailyDate, manage && canEdit(), manage, state.dailyMetric);
+    root.innerHTML = renderDailySales(d, state.dailyDate, manage && canEdit(), manage, state.dailyMetric, isDirectoryAdmin());
     return;
   }
-  root.innerHTML = `<div class="app-shell"><aside class="sidebar"><div class="brand"><div class="brandmark">${icon('radar')}</div><div><strong>协作中心</strong></div></div><div class="workspace"><small>当前工作空间</small><strong>直播数据工作空间</strong><p>Facebook / 人民币 CNY</p></div><div class="nav-label">工作台</div><nav class="navigation">${nav.map(([id, symbol, title]) => `<button type="button" data-view="${id}" data-testid="nav-${id}" class="${state.view === id ? 'active' : ''} ${['method', 'inventory', 'overview'].includes(id) ? 'desktop-nav' : ''}">${icon(symbol)}<span>${title}</span></button>`).join('')}</nav><div class="side-bottom"><div class="connection"><span class="dot"></span>共享工作空间</div><p>${d.accounts.length} 个账号 · 每天计划 15 场</p><p>最近同步 ${esc(state.loadedAt)}</p></div></aside><main class="main"><header class="topbar"><div class="mobile-brand">协作中心</div><div class="crumb">工作空间 <span style="margin:0 10px">/</span> <b>${nav.find(n => n[0] === state.view)?.[2]}</b></div><div class="top-right">${d.demo ? '<span class="demo">演示数据 · 非真实经营数据</span>' : '<span class="badge neutral">人民币 CNY</span>'}<button type="button" class="icon" data-action="refresh" title="刷新共享数据" aria-label="刷新共享数据">${icon('refresh-cw')}</button>${manage ? `<button type="button" class="user-button" data-action="profile"><span class="avatar">${esc(d.user?.name?.slice(0, 1) || '我')}</span><span>${esc(d.user?.name || '成员')}</span>${icon('chevron-down')}</button>` : `<button type="button" class="icon" data-action="logout" aria-label="锁定看板" title="锁定看板">${icon('lock-keyhole')}</button>`}</div></header><div class="content">${content()}</div></main></div>`;
+  root.innerHTML = `<div class="app-shell"><aside class="sidebar"><div class="brand"><div class="brandmark">${icon('radar')}</div><div><strong>协作中心</strong></div></div><div class="workspace"><small>当前工作空间</small><strong>直播数据工作空间</strong><p>Facebook / 人民币 CNY</p></div><div class="nav-label">工作台</div><nav class="navigation">${nav.filter(([id]) => id !== 'directory' || isDirectoryAdmin()).map(([id, symbol, title]) => `<button type="button" data-view="${id}" data-testid="nav-${id}" class="${state.view === id ? 'active' : ''} ${['method', 'inventory', 'overview'].includes(id) ? 'desktop-nav' : ''}">${icon(symbol)}<span>${title}</span></button>`).join('')}</nav><div class="side-bottom"><div class="connection"><span class="dot"></span>共享工作空间</div><p>${d.accounts.length} 个直播账号</p><p>最近同步 ${esc(state.loadedAt)}</p></div></aside><main class="main"><header class="topbar"><div class="mobile-brand">协作中心</div><div class="crumb">工作空间 <span style="margin:0 10px">/</span> <b>${nav.find(n => n[0] === state.view)?.[2]}</b></div><div class="top-right">${d.demo ? '<span class="demo">演示数据 · 非真实经营数据</span>' : '<span class="badge neutral">人民币 CNY</span>'}<button type="button" class="icon" data-action="refresh" title="刷新共享数据" aria-label="刷新共享数据">${icon('refresh-cw')}</button>${manage ? `<button type="button" class="user-button" data-action="profile"><span class="avatar">${esc(d.user?.name?.slice(0, 1) || '我')}</span><span>${esc(d.user?.name || '成员')}</span>${icon('chevron-down')}</button>` : `<button type="button" class="icon" data-action="logout" aria-label="锁定看板" title="锁定看板">${icon('lock-keyhole')}</button>`}</div></header><div class="content">${content()}</div></main></div>`;
   icons();
 }
 function heading(title, description, actions = '', tag = 'FACEBOOK LIVE · JADE OPERATIONS') { return `<div class="page-heading"><div><div class="eyebrow"><span class="dot"></span>${tag}</div><h1>${title}</h1><p>${description}</p></div><div class="heading-actions">${actions}</div></div>`; }
@@ -176,6 +192,8 @@ function filters(range = false, extra = '') {
 }
 function exportButton() { return `<button data-action="export">${icon('download')}导出数据</button>`; }
 function content() {
+  if (state.view === 'directory') return directory.page();
+  if (state.view === 'anchor-review') return anchorReview.page(state.data.anchors, state.dailyDate || lastCompletedDay());
   if (state.view === 'session-details') {
     return renderSessionDetails(
       state.data, state.detailDate || state.dailyDate || lastCompletedDay(),
@@ -253,14 +271,27 @@ function schedulePage() {
   return `${heading('场次作战台', `${dateLabel(state.date)} · 把每一场的流量、成交和利润放在同一张作战图上。`, `${exportButton()}${canEdit() ? `<button class="primary" data-action="add-session">${icon('plus')}新建场次</button>` : ''}`)}${filters(false, `<select aria-label="筛选场次状态" data-filter="status">${statusOptions(['planned', 'live', 'completed'], state.status, '全部状态')}</select>`)}${kpis(rows)}<div class="section-bar"><h2>账号 × 场次排期</h2><span class="quiet">${rows.length} 场 · ${rows.filter(s => s.status === 'completed').length} 已结束 · ${rows.filter(s => s.status === 'live').length} 直播中</span><span class="spacer"></span><button class="icon ${state.scheduleMode === 'grid' ? 'good' : ''}" data-action="grid-mode" title="排期布局" aria-label="排期布局">${icon('layout-grid')}</button><button class="icon ${state.scheduleMode === 'list' ? 'good' : ''}" data-action="list-mode" title="列表布局" aria-label="列表布局">${icon('list')}</button></div>${state.scheduleMode === 'grid' ? scheduleGrid(rows) : sessionList(rows)}<div class="bottom-grid"><section class="unframed"><div class="section-bar"><h2>今日主播 · 贡献排行</h2><span class="spacer"></span><button data-view="compare" class="icon" title="查看完整对比" aria-label="查看完整对比">${icon('arrow-up-right')}</button></div>${ranking(rows)}</section><section class="unframed"><div class="section-bar"><h2>待跟进行动</h2><span class="spacer"></span><span class="quiet">${state.data.tasks.filter(t => t.status !== 'done').length} 项未完成</span></div>${attention(rows, a)}</section></div>`;
 }
 function scheduleGrid(rows) {
-  const accounts = state.data.accounts.filter(a => !state.account || a.id === state.account);
-  const slots = [['早场', '08:00—12:00', 0, 12], ['午场', '12:30—16:30', 12, 17], ['晚场', '17:00—21:00', 17, 24]];
-  return `<div class="schedule-wrap"><div class="schedule" style="grid-template-columns:110px repeat(${accounts.length},minmax(156px,1fr));min-width:${Math.max(360, 110 + accounts.length * 166)}px"><div class="grid-corner">${icon('clock-3')}&nbsp; 场次 / 账号</div>${accounts.map((a, i) => `<div class="account-head"><div class="account-head-top"><span class="account-icon">f</span>${esc(a.name)}</div><p>${esc(a.page || `Facebook · ${i + 1} 号主页`)}</p></div>`).join('')}${slots.map(([label, time, start, end]) => `<div class="slot-label"><strong>${label}</strong><span>${time}</span></div>${accounts.map(account => { const group = rows.filter(s => s.accountId === account.id && Number(s.start.split(':')[0]) >= start && Number(s.start.split(':')[0]) < end).sort((a, b) => a.start.localeCompare(b.start)); return `<div class="slot-cell">${group.length ? group.map(sessionCard).join('') : canEdit() ? `<button class="slot-add" data-add-account="${esc(account.id)}" data-add-start="${label === '早场' ? '08:00' : label === '午场' ? '12:30' : '17:00'}" data-add-end="${label === '早场' ? '12:00' : label === '午场' ? '16:30' : '21:00'}">${icon('plus')}安排场次</button>` : '<span class="empty">未安排</span>'}</div>`; }).join('')}`).join('')}</div></div>`;
+  const accounts = state.data.accounts.filter(a => (!state.account || a.id === state.account) &&
+    (a.active !== false || rows.some(row => row.accountId === a.id)));
+  const catalog = state.data.slots;
+  const byPeriod = rows.map(row => ({ row, period: resolveShiftPeriod(row, catalog) }));
+  const periods = byPeriod.some(item => item.period === 'unknown')
+    ? [...PERIODS, { id: 'unknown', name: '场次待确认' }] : PERIODS;
+  const cells = periods.map(period => `<div class="slot-label"><strong>${period.name}</strong>${period.start ? `<span>${sessionTime(period)}</span>` : ''}</div>
+    ${accounts.map(account => {
+      const matches = byPeriod.filter(item => item.row.accountId === account.id && item.period === period.id);
+      const slot = catalog.find(item => item.accountId === account.id && item.period === period.id && item.active !== false);
+      const canSchedule = canEdit() && account.active !== false && slot;
+      return `<div class="slot-cell">${matches.length ? matches.map(({ row }) => sessionCard(row)).join('')
+        : canSchedule ? `<button class="slot-add" data-add-account="${esc(account.id)}" data-add-slot="${esc(slot.id)}">${icon('plus')}安排场次</button>`
+          : '<span class="empty">未安排</span>'}</div>`;
+    }).join('')}`).join('');
+  return `<div class="schedule-wrap"><div class="schedule" style="grid-template-columns:110px repeat(${accounts.length},minmax(156px,1fr));min-width:${Math.max(360, 110 + accounts.length * 166)}px"><div class="grid-corner">${icon('clock-3')}&nbsp; 场次 / 账号</div>${accounts.map((a, i) => `<div class="account-head"><div class="account-head-top"><span class="account-icon">f</span>${esc(a.name)}</div><p>${esc(a.page || `Facebook · ${i + 1} 号主页`)}</p></div>`).join('')}${cells}</div></div>`;
 }
 function sessionCard(s) {
-  return `<button type="button" data-session="${esc(s.id)}" data-testid="session-card" class="session-card ${esc(s.status)}"><div class="session-top"><span class="session-time">${esc(s.start)}—${esc(s.end)}</span><span class="badge ${s.status}">${s.status === 'live' ? '<span class="dot"></span>' : ''}${statusName(s.status)}</span></div><div class="session-anchor"><span class="session-avatar">${esc(anchorName(s.anchorId).slice(0, 1))}</span>${esc(anchorName(s.anchorId))}</div><div class="session-metric"><span>确认成交</span><b>${money(s.orderAmount)}</b></div><div class="meter"><i style="width:${Math.min(100, num(s.target) ? num(s.orderAmount) / s.target * 100 : 0)}%"></i></div><div class="session-footer"><span>目标 ${money(s.target)}</span><span>${rate(s.orderAmount, s.target)}</span></div><div class="session-metric"><span>${fmt(s.orders)} 单 · 有效询单 ${fmt(s.qualified)}</span><span>净收 ${money(num(s.received) - num(s.refunds))}</span></div></button>`;
+  return `<button type="button" data-session="${esc(s.id)}" data-testid="session-card" class="session-card ${esc(s.status)}"><div class="session-top"><span class="session-time">${esc(sessionTime(s))}</span><span class="badge ${s.status}">${s.status === 'live' ? '<span class="dot"></span>' : ''}${s.cancelled ? '已取消' : statusName(s.status)}</span></div><div class="session-anchor"><span class="session-avatar">${esc(anchorName(s.anchorId).slice(0, 1))}</span>${esc(anchorName(s.anchorId))}</div>${s.slotLabel ? `<div class="quiet">${esc(s.slotLabel)}</div>` : ''}<div class="session-metric"><span>确认成交</span><b>${money(s.orderAmount)}</b></div><div class="meter"><i style="width:${Math.min(100, num(s.target) ? num(s.orderAmount) / s.target * 100 : 0)}%"></i></div><div class="session-footer"><span>目标 ${money(s.target)}</span><span>${rate(s.orderAmount, s.target)}</span></div><div class="session-metric"><span>${fmt(s.orders)} 单 · 有效询单 ${fmt(s.qualified)}</span><span>净收 ${money(num(s.received) - num(s.refunds))}</span></div></button>`;
 }
-function sessionList(rows) { return `<div class="table-scroll"><table class="data-table"><thead><tr><th>账号 / 主播</th><th>时段</th><th>状态</th><th>确认成交额</th><th>目标达成</th><th>净实收</th><th>贡献利润</th><th></th></tr></thead><tbody>${rows.sort((a, b) => a.start.localeCompare(b.start)).map(s => `<tr><td><b>${esc(anchorName(s.anchorId))}</b><div class="data-sub">${esc(accountName(s.accountId))}</div></td><td>${esc(s.start)}—${esc(s.end)}</td><td><span class="badge ${s.status}">${statusName(s.status)}</span></td><td>${money(s.orderAmount)}</td><td>${rate(s.orderAmount, s.target)}</td><td>${money(aggregate([s]).net)}</td><td>${money(aggregate([s]).profit)}</td><td><button class="icon" data-session="${esc(s.id)}" title="查看场次">${icon('arrow-up-right')}</button></td></tr>`).join('') || '<tr><td colspan="8" class="empty">当前日期没有场次</td></tr>'}</tbody></table></div>`; }
+function sessionList(rows) { return `<div class="table-scroll"><table class="data-table"><thead><tr><th>账号 / 主播</th><th>时段</th><th>状态</th><th>确认成交额</th><th>目标达成</th><th>净实收</th><th>贡献利润</th><th></th></tr></thead><tbody>${rows.sort((a, b) => a.start.localeCompare(b.start)).map(s => `<tr><td><b>${esc(anchorName(s.anchorId))}</b><div class="data-sub">${esc(accountName(s.accountId))}</div></td><td>${esc(sessionTime(s))}</td><td><span class="badge ${s.status}">${s.cancelled ? '已取消' : statusName(s.status)}</span></td><td>${money(s.orderAmount)}</td><td>${rate(s.orderAmount, s.target)}</td><td>${money(aggregate([s]).net)}</td><td>${money(aggregate([s]).profit)}</td><td><button class="icon" data-session="${esc(s.id)}" title="查看场次">${icon('arrow-up-right')}</button></td></tr>`).join('') || '<tr><td colspan="8" class="empty">当前日期没有场次</td></tr>'}</tbody></table></div>`; }
 function ranking(rows) {
   const groups = groupRows(rows, 'anchor').sort((a, b) => b.profit - a.profit).slice(0, 5);
   return `<table class="mini-table"><thead><tr><th>主播</th><th>成交额</th><th>净实收</th><th>贡献利润</th></tr></thead><tbody>${groups.map((r, i) => `<tr><td><span class="rank-number ${i < 3 ? 'top' : ''}">${String(i + 1).padStart(2, '0')}</span>${esc(r.name)}</td><td>${money(r.orderAmount)}</td><td>${money(r.net)}</td><td class="${r.profit < 0 ? 'bad' : 'good'}">${money(r.profit)}</td></tr>`).join('') || '<tr><td colspan="4" class="empty">暂无数据</td></tr>'}</tbody></table>`;
@@ -283,24 +314,78 @@ const comparisons = [
   ['actualMinutes', '实际时长', 'duration'], ['impressions', '浏览量', 'number'],
   ['shares', '分享次数', 'number'], ['newFollowers', '关注数', 'number']
 ];
+const compareModes = [
+  ['total', '全累计'],
+  ['room-periods', '同直播间早中晚'],
+  ['rooms', '直播间对比'],
+  ['same-period', '同场次对比']
+];
+const comparePeriods = [...PERIODS, { id: 'unknown', name: '时段待补' }];
+const compare = { mode: 'total', from: '', to: '', account: '', anchor: '', room: '', period: 'early' };
+const comparisonStopped = row => row.sourceStatus === 'stopped' || row.cancelled === true;
 function comparisonFigures(rows) {
-  const applicable = rows.filter(row => row.sourceStatus !== 'stopped');
+  const applicable = rows.filter(row => !comparisonStopped(row));
   return Object.fromEntries(comparisons.map(([key]) => {
     const recorded = applicable.filter(row => Number.isFinite(row[key]));
     return [key, { value: recorded.length ? recorded.reduce((sum, row) => sum + (key === 'orderAmount' ? Math.round(row[key] * 100) : row[key]), 0) / (key === 'orderAmount' ? 100 : 1) : null, known: recorded.length, expected: applicable.length }];
   }));
 }
+function comparisonSelection() {
+  const latest = lastCompletedDay();
+  const first = state.data.sessions.reduce((day, row) => row.date < day ? row.date : day, latest);
+  const from = compare.from || first;
+  const to = compare.to || latest;
+  const acrossRooms = compare.mode !== 'room-periods';
+  const matchingDates = state.data.sessions.filter(row => row.date >= from && row.date <= to);
+  const roomsWithRecords = new Set(matchingDates.map(row => row.accountId));
+  const account = acrossRooms ? compare.account : compare.room ||
+    state.data.accounts.find(room => roomsWithRecords.has(room.id))?.id || state.data.accounts[0]?.id || '';
+  const accountRows = matchingDates.filter(row => !account || row.accountId === account);
+  const anchorIds = new Set(accountRows.map(row => row.anchorId));
+  const anchors = state.data.anchors.filter(anchor => anchorIds.has(anchor.id));
+  const rows = accountRows.filter(row => !compare.anchor || row.anchorId === compare.anchor);
+  return { from, to, latest, account, acrossRooms, anchors, rows };
+}
+
 function comparePage() {
-  const rows = sessions(true);
+  const selection = comparisonSelection();
+  const { from, to, latest, account, acrossRooms, anchors } = selection;
+  const tagged = selection.rows.map(row => ({ row, period: resolveShiftPeriod(row, state.data.slots) }));
+  const shown = compare.mode === 'same-period' ? tagged.filter(item => item.period === compare.period) : tagged;
+  const rows = shown.map(item => item.row);
   const columns = comparisons;
+  const dayCount = Math.max(0, Math.round((Date.parse(to) - Date.parse(from)) / 86400000) + 1);
+  const countsByDay = new Map();
+  for (const row of rows) countsByDay.set(row.date, (countsByDay.get(row.date) || 0) + 1);
+  const lowest = countsByDay.size === dayCount && dayCount ? Math.min(...countsByDay.values()) : 0;
+  const highest = Math.max(0, ...countsByDay.values());
+  const dailyCount = lowest === highest ? fmt(highest) : `${fmt(lowest)}–${fmt(highest)}`;
+  const countCell = records => {
+    const stopped = records.filter(comparisonStopped).length;
+    const reported = records.filter(row => !comparisonStopped(row) && comparisons.some(([key]) => Number.isFinite(row[key]))).length;
+    const pending = records.length - stopped - reported;
+    const counts = [`已填 ${fmt(reported)}`];
+    if (pending) counts.push(`待补 ${fmt(pending)}`);
+    if (stopped) counts.push(`停播或取消 ${fmt(stopped)}`);
+    return `<td class="compare-count"><strong>${fmt(records.length)}</strong><small class="data-sub">${counts.join(' · ')}</small></td>`;
+  };
   if (!columns.some(([key]) => key === state.sort)) { state.sort = 'orderAmount'; state.direction = -1; }
-  const groups = groupRows(rows, state.group).map(group => ({ ...group, figures: comparisonFigures(group.rows) }));
-  groups.sort((a, b) => {
-    const first = a.figures[state.sort].value, second = b.figures[state.sort].value;
-    if (first === null) return second === null ? 0 : 1;
-    if (second === null) return -1;
-    return (first - second) * state.direction;
-  });
+  const makeGroup = (name, records) => ({ name, rows: records, figures: comparisonFigures(records) });
+  const byRoom = compare.mode === 'rooms' || compare.mode === 'same-period';
+  let groups = [];
+  if (compare.mode === 'room-periods') {
+    groups = comparePeriods.filter(period => period.id !== 'unknown' || tagged.some(item => item.period === 'unknown'))
+      .map(period => makeGroup(period.name, shown.filter(item => item.period === period.id).map(item => item.row)));
+  } else if (byRoom) {
+    groups = state.data.accounts.filter(room => !account || room.id === account).map(room =>
+      makeGroup(room.name, rows.filter(row => row.accountId === room.id)));
+    groups.sort((a, b) => {
+      const first = a.figures[state.sort].value, second = b.figures[state.sort].value;
+      if (first === null) return second === null ? 0 : 1;
+      if (second === null) return -1;
+      return (first - second) * state.direction;
+    });
+  }
   const total = comparisonFigures(rows);
   const metricClass = key => `compare-metric${key === state.sort ? ' current' : ''}`;
   const value = (figure, type) => {
@@ -314,23 +399,27 @@ function comparePage() {
     const label = { orderAmount: '业绩', actualMinutes: '时长' }[key] || title;
     return `<button type="button" data-compare-metric="${key}" aria-pressed="${key === state.sort}">${label}</button>`;
   }).join('');
-  return `${heading('数据对比', '按账号、主播、日期或场次，对比当前登记的六项基础数据。', manage ? exportButton() : '')}${filters(true)}
-  <div class="tabs">${[['account', '按账号'], ['anchor', '按主播'], ['date', '按日期'], ['slot', '按场次']].map(([key, title]) => `<button data-group="${key}" class="${state.group === key ? 'active' : ''}">${title}</button>`).join('')}</div>
-  <div class="section-bar">
-    <h2>${{ account: '账号', anchor: '主播', date: '日期', slot: '场次' }[state.group]}对比</h2>
-    <span class="quiet">${groups.length} 组 · 按${columns.find(c => c[0] === state.sort)?.[1]}${state.direction === -1 ? '从高到低' : '从低到高'}</span>
-    <span class="spacer"></span>
-    <label class="quiet compare-selector">排序 <select data-filter="sort" aria-label="排序指标">${columns.map(([key, title]) => `<option value="${key}" ${state.sort === key ? 'selected' : ''}>${title}</option>`).join('')}</select></label>
+  return `${heading('数据对比', '按日期汇总直播运营数据。', manage ? exportButton() : '')}
+  <div class="compare-modes" role="group" aria-label="对比方式">${compareModes.map(([key, title]) =>
+    `<button type="button" data-compare-mode="${key}" aria-pressed="${compare.mode === key}">${title}</button>`).join('')}</div>
+  <div class="compare-filters">
+    <label>起始日期 <input type="date" aria-label="开始日期" data-compare-filter="from" value="${esc(from)}" max="${latest}"></label>
+    <label>截止日期 <input type="date" aria-label="结束日期" data-compare-filter="to" value="${esc(to)}" max="${latest}"></label>
+    <label>直播间 <select aria-label="筛选账号" data-compare-filter="${acrossRooms ? 'account' : 'room'}">${options(state.data.accounts, account, acrossRooms ? '全部直播间' : '')}</select></label>
+    <label>主播 <select aria-label="筛选主播" data-compare-filter="anchor">${options(anchors, compare.anchor, '全部主播')}</select></label>
+    ${compare.mode === 'same-period' ? `<label>场次时段 <select aria-label="场次时段" data-compare-filter="period">${options(comparePeriods, compare.period)}</select></label>` : ''}
+    ${compare.from || compare.to ? '<button type="button" data-action="compare-reset-dates">恢复全量日期</button>' : ''}
   </div>
+  <p class="compare-period-note" data-testid="compare-period-summary">已选 ${fmt(dayCount)} 天 · 区间累计 ${fmt(rows.length)} 场 · 每天 ${dailyCount} 条场次记录</p>
   <div class="compare-metric-buttons" role="group" aria-label="对比指标">${metricButtons}</div>
   <div class="table-scroll comparison-scroll">
     <table class="data-table comparison-table" data-testid="comparison-table">
-      <thead><tr><th>对比对象</th><th>场次</th>${columns.map(([key, title]) => `<th class="${metricClass(key)}"><button class="table-sort" data-sort="${key}">${title}${state.sort === key ? icon(state.direction === -1 ? 'arrow-down' : 'arrow-up') : ''}</button></th>`).join('')}</tr></thead>
-      <tbody>${groups.map((g, index) => `<tr><td><div class="data-name"><span class="rank-number ${index < 3 ? 'top' : ''}">${String(index + 1).padStart(2, '0')}</span>${esc(g.name)}</div></td><td>${g.count}</td>${columns.map(([key, , type]) => `<td class="${metricClass(key)}">${value(g.figures[key], type)}</td>`).join('')}</tr>`).join('')}
-      ${groups.length ? `<tr class="total-row"><td>已登记合计</td><td>${rows.length}</td>${columns.map(([key, , type]) => `<td class="${metricClass(key)}">${value(total[key], type)}</td>`).join('')}</tr>` : `<tr><td colspan="8" class="empty">所选条件下暂无场次</td></tr>`}</tbody>
+      <thead><tr><th>${compare.mode === 'room-periods' ? '时段' : byRoom ? '直播间' : '汇总范围'}</th><th>区间累计场次</th>${columns.map(([key, title]) => `<th class="${metricClass(key)}">${byRoom ? `<button class="table-sort" data-sort="${key}">${title}${state.sort === key ? icon(state.direction === -1 ? 'arrow-down' : 'arrow-up') : ''}</button>` : title}</th>`).join('')}</tr></thead>
+      <tbody>${groups.map(group => `<tr><th scope="row">${esc(group.name)}</th>${countCell(group.rows)}${columns.map(([key, , type]) => `<td class="${metricClass(key)}">${value(group.figures[key], type)}</td>`).join('')}</tr>`).join('')}
+      <tr class="total-row"><th scope="row">区间合计</th>${countCell(rows)}${columns.map(([key, , type]) => `<td class="${metricClass(key)}">${value(total[key], type)}</td>`).join('')}</tr></tbody>
     </table>
   </div>
-  <p class="rule-note">仅汇总已登记值；待补不作0，部分填报显示已填场次数。浏览量（次）、分享和关注按场次累加。</p>`;
+  <p class="rule-note">场次按所选日期逐日累加，含已填、待补、停播和取消记录。已填指至少登记一项指标，具体指标按各自的已填场次汇总。</p>`;
 }
 function overviewPage() {
   const rows = sessions(true), a = aggregate(rows);
@@ -370,9 +459,93 @@ function openForm(title, subtitle, body, kind, record, testid = '') {
 }
 const sessionNumbers = ['target', 'reach', 'impressions', 'viewers', 'peak', 'watchSeconds', 'interactions', 'newFollowers', 'messages', 'qualified', 'orders', 'orderAmount', 'paidOrders', 'received', 'refundOrders', 'refunds', 'units', 'cogs', 'adSpend', 'shipping', 'fees', 'otherCost'];
 function openSession(id, preset = {}) {
-  const s = state.data.sessions.find(s => s.id === id) || { date: state.date, accountId: state.account || state.data.accounts[0]?.id, anchorId: state.anchor || state.data.anchors[0]?.id, start: '08:00', end: '12:00', status: 'planned', ...Object.fromEntries(sessionNumbers.map(k => [k, 0])), impressions: null, ...preset };
+  const roomChoices = state.data.accounts;
+  const existing = state.data.sessions.find(session => session.id === id);
+  if (id && !existing) return;
+  const activeRooms = roomChoices.filter(room => room.active !== false || room.id === existing?.accountId);
+  if (!activeRooms.length) { toast('请先启用一个直播间'); return; }
+  const s = existing || {
+    date: state.date, accountId: state.account, anchorId: state.anchor,
+    start: '08:00', end: '12:00', status: 'planned', ...preset
+  };
+  if (!existing && !activeRooms.some(room => room.id === s.accountId)) s.accountId = activeRooms[0].id;
+  const currentOptions = `${selectField('accountId', '直播间', options(activeRooms, s.accountId))}${selectField('anchorId', '主播', '')}${selectField('slotId', '直播场次', '')}`;
   const numbers = list => list.map(([name, label, help]) => field(name, label, s[name] ?? '', 'number', help)).join('');
-  openForm(id ? `${accountName(s.accountId)} · ${anchorName(s.anchorId)}` : '新建直播场次', '流量由运营录入，订单与回款由客服 / 财务核对。', `<h3 class="form-section">排期与实际直播</h3><div class="form-grid">${field('date', '直播日期', s.date, 'date')}${selectField('accountId', 'Facebook 账号', options(state.data.accounts, s.accountId))}${selectField('anchorId', '主播', options(state.data.anchors, s.anchorId))}${field('start', '排期开始时间', s.start, 'time')}${field('end', '排期结束时间', s.end, 'time')}${selectField('status', '场次状态', statusOptions(['planned', 'live', 'completed'], s.status))}${field('actualMinutes', '实际直播时长（分钟）', s.actualMinutes ?? '', 'number', '播后登记；空白为未登记，0 为确实未播')}${numbers([['target', '目标成交额（元）']])}</div><h3 class="form-section">Facebook 流量</h3><div class="form-grid">${numbers([['reach', '本场触达人数'], ['impressions', '本场浏览量（曝光总数）'], ['viewers', '本场观看人数'], ['peak', '最高同时在线'], ['watchSeconds', '平均观看时长（秒）'], ['interactions', '互动次数'], ['newFollowers', '本场新增粉丝'], ['messages', '私信人数'], ['qualified', '有效询单人数', '同场同客去重，有明确货品 / 购买意向']])}</div><h3 class="form-section">成交、收款与退款</h3><div class="form-grid">${numbers([['orders', '确认订单（单）'], ['orderAmount', '销售金额（元）'], ['units', '成交件数（件）'], ['paidOrders', '已付款订单（单）'], ['received', '实际收款（元）', '退款前实收，归属原场次'], ['refundOrders', '退款订单（单）'], ['refunds', '已退金额（元）']])}</div><h3 class="form-section">销售匹配成本与场次费用</h3><div class="form-grid">${numbers([['cogs', '已售商品净成本（元）', '已退入库货品的成本需调减，不填整批采购支出'], ['adSpend', '广告费用（元）'], ['shipping', '物流 / 包装（元）'], ['fees', '平台 / 支付费用（元）'], ['otherCost', '其他变动费用（元）']])}${textField('notes', '场次备注 / 复盘线索', s.notes)}</div>`, 'session', id ? s : null, 'session-dialog');
+  openForm(id ? `${accountName(s.accountId)} · ${anchorName(s.anchorId)}` : '新建直播场次', '流量由运营录入，订单与回款由客服 / 财务核对。', `<h3 class="form-section">排期与实际直播</h3><div class="form-grid">${field('date', '直播日期', s.date, 'date')}${currentOptions}${field('start', '排期开始时间', s.start, 'time')}${field('end', '排期结束时间', s.end, 'time')}${selectField('status', '场次状态', statusOptions(['planned', 'live', 'completed'], s.status))}${field('actualMinutes', '实际直播时长（分钟）', s.actualMinutes ?? '', 'number', '播后登记；空白为未登记，0 为确实未播')}${numbers([['target', '目标成交额（元）']])}</div><h3 class="form-section">Facebook 流量</h3><div class="form-grid">${numbers([['reach', '本场触达人数'], ['impressions', '本场浏览量（曝光总数）'], ['viewers', '本场观看人数'], ['peak', '最高同时在线'], ['watchSeconds', '平均观看时长（秒）'], ['interactions', '互动次数'], ['newFollowers', '本场新增粉丝'], ['messages', '私信人数'], ['qualified', '有效询单人数', '同场同客去重，有明确货品 / 购买意向']])}</div><h3 class="form-section">成交、收款与退款</h3><div class="form-grid">${numbers([['orders', '确认订单（单）'], ['orderAmount', '销售金额（元）'], ['units', '成交件数（件）'], ['paidOrders', '已付款订单（单）'], ['received', '实际收款（元）', '退款前实收，归属原场次'], ['refundOrders', '退款订单（单）'], ['refunds', '已退金额（元）']])}</div><h3 class="form-section">销售匹配成本与场次费用</h3><div class="form-grid">${numbers([['cogs', '已售商品净成本（元）', '已退入库货品的成本需调减，不填整批采购支出'], ['adSpend', '广告费用（元）'], ['shipping', '物流 / 包装（元）'], ['fees', '平台 / 支付费用（元）'], ['otherCost', '其他变动费用（元）']])}${textField('notes', '场次备注 / 复盘线索', s.notes)}</div>`, 'session', existing, 'session-dialog');
+  const form = dialog.querySelector('form');
+  const { accountId, anchorId, slotId, date } = form.elements;
+  const eligible = (anchor, room) => anchor.active !== false && (!anchor.accountId || anchor.accountId === room)
+    && (!anchor.activeFrom || anchor.activeFrom <= date.value) && (!anchor.activeTo || anchor.activeTo >= date.value);
+  function refreshSlots(preferred) {
+    const assigned = state.data.anchors.find(anchor => anchor.id === anchorId.value);
+    const room = accountId.value;
+    const preserve = existing?.accountId === room && existing?.anchorId === anchorId.value && existing?.date === date.value;
+    const activeSlots = state.data.slots.filter(slot => slot.accountId === room && (slot.active !== false || (preserve && slot.id === existing.slotId)));
+    if (preserve && !existing.slotId) activeSlots.unshift({ id: '', name: '历史场次' });
+    slotId.innerHTML = activeSlots.length ? options(activeSlots, preferred ?? assigned?.slotId) : '<option value="">尚无可用场次</option>';
+  }
+  function refreshAnchors(preferred, preferredSlot) {
+    const room = accountId.value;
+    const preserve = existing?.accountId === room && existing?.date === date.value;
+    const available = state.data.anchors.filter(anchor => eligible(anchor, room) || (preserve && anchor.id === existing.anchorId));
+    const selected = available.find(anchor => anchor.id === preferred) || available[0];
+    anchorId.innerHTML = available.length ? options(available, selected.id) : '<option value="">暂无可用主播</option>';
+    anchorId.required = true;
+    refreshSlots(preferredSlot);
+  }
+  const scheduledAnchor = preset.slotId && state.data.anchors.find(anchor => anchor.slotId === preset.slotId && eligible(anchor, s.accountId));
+  if (preset.slotId && !scheduledAnchor) {
+    dialog.close();
+    toast('请先在直播名录分配此场次的主播');
+    return;
+  }
+  refreshAnchors(scheduledAnchor?.id || s.anchorId, preset.slotId ?? existing?.slotId ?? (existing ? '' : undefined));
+  const startInput = form.elements.start;
+  const endInput = form.elements.end;
+  const unknown = dialog.querySelector('#f-scheduleUnknown');
+  function showSlotTiming() {
+    const selected = state.data.slots.find(item => item.id === slotId.value && item.accountId === accountId.value);
+    const reassigned = !existing || accountId.value !== existing.accountId || anchorId.value !== existing.anchorId ||
+      date.value !== existing.date || slotId.value !== (existing.slotId || '');
+    const fixed = reassigned && Boolean(selected?.period);
+    startInput.readOnly = fixed;
+    endInput.readOnly = fixed;
+    endInput.labels[0].textContent = (fixed ? selected.endDayOffset : existing?.endDayOffset) === 1 ? '排期结束时间（次日）' : '排期结束时间';
+    if (!fixed) return;
+    if (unknown) {
+      unknown.checked = false;
+      startInput.disabled = false;
+      endInput.disabled = false;
+    }
+    startInput.value = selected.start;
+    endInput.value = selected.end;
+  }
+  showSlotTiming();
+  accountId.addEventListener('change', () => refreshAnchors());
+  date.addEventListener('change', () => refreshAnchors(anchorId.value, slotId.value));
+  anchorId.addEventListener('change', () => refreshSlots());
+  for (const input of [accountId, date, anchorId, slotId]) input.addEventListener('change', showSlotTiming);
+  if (isDirectoryAdmin() && existing?.status === 'planned' && !existing.cancelled) {
+    const cancel = document.createElement('button');
+    cancel.type = 'button';
+    cancel.textContent = '取消此排期';
+    dialog.querySelector('.dialog-footer').prepend(cancel);
+    cancel.addEventListener('click', async () => {
+      if (!window.confirm('取消这次排期？历史记录会标记为停播。')) return;
+      cancel.disabled = true;
+      try {
+        await api('/api/sessions/' + encodeURIComponent(existing.id), { version: existing.version }, 'DELETE');
+        dialog.close();
+        await reload();
+        toast('排期已取消');
+      } catch (error) {
+        const errorBox = dialog.querySelector('[role=alert]');
+        errorBox.hidden = false;
+        errorBox.textContent = error.message;
+        cancel.disabled = false;
+      }
+    });
+  }
 }
 function openInventory(id) {
   const i = state.data.inventory.find(i => i.id === id) || { sku: '', name: '', size: '', supplier: '', purchaseDate: today, cost: 0, askingPrice: 0, state: 'in_stock', sessionId: '', notes: '' };
@@ -401,12 +574,15 @@ async function saveRecord(form) {
   const data = Object.fromEntries(new FormData(form));
   const numberKeys = kind === 'session' ? sessionNumbers : kind === 'inventory' ? ['cost', 'askingPrice'] : [];
   for (const key of numberKeys) data[key] = data[key] === '' ? null : Number(data[key]);
-  if (kind === 'session') data.actualMinutes = data.actualMinutes === '' ? null : Number(data.actualMinutes);
+  if (kind === 'session') {
+    data.actualMinutes = data.actualMinutes === '' ? null : Number(data.actualMinutes);
+    if (!data.slotId || data.slotId === dialog.record?.slotId) delete data.slotId;
+  }
   if (kind === 'session' && dialog.record?.scheduleUnknown) {
     data.scheduleUnknown = $('#f-scheduleUnknown')?.checked ?? true;
     if (data.scheduleUnknown) { data.start='00:00'; data.end='00:01'; }
   }
-  if (kind === 'session' && !data.scheduleUnknown && data.end <= data.start) throw new Error('结束时间必须晚于开始时间，请拆分跨午夜场次。');
+  if (kind === 'session' && !data.scheduleUnknown) data.endDayOffset = data.end < data.start ? 1 : 0;
   if (kind === 'task' && (!data.title.trim() || !data.owner.trim())) throw new Error('请填写改进目标和责任人。');
   const record = dialog.record;
   if (record) data.version = record.version;
@@ -417,6 +593,9 @@ async function saveRecord(form) {
   toast('已保存，全体成员可查看最新记录');
 }
 function resetDashboard() {
+  Object.assign(compare, { mode: 'total', from: '', to: '', account: '', anchor: '', room: '', period: 'early' });
+  directory.reset();
+  anchorReview.reset();
   state.data = null;
   state.view = initialView;
   window.dispatchEvent(new Event('monthly-reset'));
@@ -515,7 +694,7 @@ document.addEventListener('click', async e => {
     $('[data-daily-metric][aria-pressed="true"]')?.focus({ preventScroll: true });
     return;
   }
-  if (target.dataset.view && nav.some(([id]) => id === target.dataset.view)) {
+  if (target.dataset.view && (target.dataset.view !== 'directory' || isDirectoryAdmin()) && nav.some(([id]) => id === target.dataset.view)) {
     if (state.view === 'daily') {
       const date = state.dailyDate || lastCompletedDay();
       state.periodEnd = date;
@@ -535,13 +714,14 @@ document.addEventListener('click', async e => {
   if (target.dataset.importGroup) { state.importGroup=target.dataset.importGroup; render(); return; }
   if (target.dataset.inventory) { openInventory(target.dataset.inventory); return; }
   if (target.dataset.task) { openTask(target.dataset.task); return; }
-  if (target.dataset.directory) {
-    const kind = target.dataset.directory; const record = state.data[kind === 'account' ? 'accounts' : 'anchors'].find(x => x.id === target.dataset.id);
-    dialog.close();
-    openForm(kind === 'account' ? '编辑 Facebook 账号' : '编辑主播名称', '历史场次按固定编号关联，改名不会丢失历史数据。', `<div class="form-grid two">${field('name', '名称', record.name, 'text')}${kind === 'account' ? field('page', '主页标识 / 说明', record.page, 'text') : ''}</div>`, kind, record);
+  if (target.dataset.addAccount) { openSession(null, { accountId: target.dataset.addAccount, slotId: target.dataset.addSlot }); return; }
+  if (target.dataset.compareMode) {
+    compare.mode = target.dataset.compareMode;
+    compare.anchor = '';
+    render();
+    $(`[data-compare-mode="${compare.mode}"]`)?.focus({ preventScroll: true });
     return;
   }
-  if (target.dataset.addAccount) { openSession(null, { accountId: target.dataset.addAccount, start: target.dataset.addStart, end: target.dataset.addEnd }); return; }
   if (target.dataset.group) { state.group = target.dataset.group; render(); return; }
   if (target.dataset.days) { state.windowDays = Number(target.dataset.days); render(); return; }
   if (target.dataset.performanceGroup) { state.performanceGroup = target.dataset.performanceGroup; if (state.performanceGroup === 'anchor' && state.performanceMetric === 'monthFollowers') state.performanceMetric = 'orderAmount'; state.selectedPerformer = ''; render(); return; }
@@ -559,6 +739,12 @@ document.addEventListener('click', async e => {
   if (target.dataset.sort) { state.direction = state.sort === target.dataset.sort ? -state.direction : -1; state.sort = target.dataset.sort; render(); return; }
   const action = target.dataset.action;
   try {
+    if (action === 'compare-reset-dates') {
+      compare.from = '';
+      compare.to = '';
+      compare.anchor = '';
+      render();
+    }
     if (action === 'daily-today') { state.dailyDate = beijingToday(); render(); }
     if (action === 'daily-yesterday') { state.dailyDate = ''; render(); }
     if (action === 'daily-fullscreen') {
@@ -582,8 +768,10 @@ document.addEventListener('click', async e => {
     if (action === 'refresh') { window.dispatchEvent(new Event('monthly-invalidate')); await reload(); toast('已同步最新数据'); }
     if (action === 'profile') await profile();
     if (action === 'detail-toggle-history') { state.detailHistory = !state.detailHistory; render(); }
-    if (action === 'directory') {
-      dialog.close(); dialog.innerHTML = `<header class="dialog-head"><div><h2>账号与主播名录</h2><div class="quiet">管理员维护 · 固定5账号与15主播槽位</div></div><button class="icon" data-close aria-label="关闭">${icon('x')}</button></header><div class="dialog-body"><h3 class="form-section">Facebook 账号</h3>${state.data.accounts.map(a => `<div class="user-row"><strong>${esc(a.name)}</strong><span class="quiet">${esc(a.page)}</span><button class="icon" data-directory="account" data-id="${a.id}" title="编辑账号">${icon('square-pen')}</button></div>`).join('')}<h3 class="form-section">主播</h3>${state.data.anchors.map(a => `<div class="user-row"><strong>${esc(a.name)}</strong><button class="icon" data-directory="anchor" data-id="${a.id}" title="编辑主播">${icon('square-pen')}</button></div>`).join('')}</div>`; dialog.showModal(); icons();
+    if (action === 'directory' && isDirectoryAdmin()) {
+      dialog.close();
+      state.view = 'directory';
+      render();
     }
     if (action === 'audit') await openAudit();
     if (action === 'logout') { await api('/api/logout', {}, 'POST'); showAccessForm('', state.data?.demo); }
@@ -592,7 +780,23 @@ document.addEventListener('click', async e => {
     if (action === 'grid-mode' || action === 'list-mode') { state.scheduleMode = action === 'grid-mode' ? 'grid' : 'list'; render(); }
     if (action === 'period-prev' || action === 'period-next' || action === 'period-today') { const latest = manage && state.data.dataset?.cutoffDate ? [state.data.dataset.cutoffDate, today].sort().at(-1) : beijingToday(); state.periodEnd = action === 'period-today' ? latest : shiftDate(state.periodEnd, action === 'period-prev' ? -1 : 1); if (state.periodEnd > latest) state.periodEnd=latest; render(); }
     if (action === 'performance-task') { openTask(); $('#f-title').value = '销售变化复盘：' + (state.selectedPerformer ? (state.performanceGroup === 'account' ? accountName(state.selectedPerformer) : anchorName(state.selectedPerformer)) : '当前账号合计'); const p = periodInfo(); $('#f-evidence').value = `${p.start}—${p.end} 与 ${p.previousStart}—${p.previousEnd} 对比。请结合触达、私信、询单、订单均价、实际时长填写具体证据。`; }
-    if (action === 'export') { const range = state.view !== 'schedule'; const imported=state.data.dataset?.kind==='imported'; const params = new URLSearchParams({ dateFrom: imported?periodInfo().start:range ? state.from : state.date, dateTo: imported?state.periodEnd:range ? state.to : state.date }); if (state.account) params.set('accountId', state.account); if (state.anchor) params.set('anchorId', state.anchor); const a = document.createElement('a'); a.href = `./api/export.csv?${params}`; a.download = '直播场次统计.csv'; a.click(); }
+    if (action === 'export') {
+      const range = state.view !== 'schedule';
+      const imported = state.data.dataset?.kind === 'imported';
+      const selection = state.view === 'compare' ? comparisonSelection() : null;
+      const dateFrom = selection?.from ?? (imported ? periodInfo().start : range ? state.from : state.date);
+      const dateTo = selection?.to ?? (imported ? state.periodEnd : range ? state.to : state.date);
+      const account = selection ? selection.account : state.account;
+      const anchor = selection ? compare.anchor : state.anchor;
+      const params = new URLSearchParams({ dateFrom, dateTo });
+      if (account) params.set('accountId', account);
+      if (anchor) params.set('anchorId', anchor);
+      if (selection && compare.mode === 'same-period') params.set('period', compare.period);
+      const link = document.createElement('a');
+      link.href = `./api/export.csv?${params}`;
+      link.download = '直播场次统计.csv';
+      link.click();
+    }
   } catch (error) {
     if (error.code === 'DASHBOARD_LOCKED') showDashboardUnlock();
     else if (error.status === 401) showAccessForm('访问已过期，请重新验证。');
@@ -600,6 +804,24 @@ document.addEventListener('click', async e => {
   }
 });
 document.addEventListener('change', e => {
+  const compareKey = e.target.dataset.compareFilter;
+  if (compareKey) {
+    const value = e.target.value;
+    if (compareKey === 'from' || compareKey === 'to') {
+      const { from, to, latest } = comparisonSelection();
+      if (value > latest) { render(); return; }
+      compare[compareKey] = value;
+      if (compareKey === 'from' && value > to) compare.to = value;
+      if (compareKey === 'to' && value && value < from) compare.from = value;
+      if (!comparisonSelection().anchors.some(anchor => anchor.id === compare.anchor)) compare.anchor = '';
+    } else {
+      compare[compareKey] = value;
+      if (compareKey === 'account' || compareKey === 'room') compare.anchor = '';
+    }
+    render();
+    $(`[data-compare-filter="${compareKey}"]`)?.focus({ preventScroll: true });
+    return;
+  }
   const key = e.target.dataset.filter;
   if (!key) return;
   const value = e.target.value;
@@ -632,14 +854,18 @@ new MutationObserver(() => {
   actions.append(link, close);
 }).observe(dialog, { attributes: true, attributeFilter: ['open'] });
 setInterval(async () => {
-  if (!state.data || dialog.open || document.visibilityState !== 'visible') return;
-  try { await reload(); }
+  if (!state.data || dialog.open || document.visibilityState !== 'visible' || $('[data-goal-editor]:not([hidden])')) return;
+  try {
+    await reload();
+    window.dispatchEvent(new Event('department-goals-invalidate'));
+  }
   catch (error) {
     if (error.status === 401) showAccessForm('访问已过期，请重新验证。');
     else if (error.code === 'DASHBOARD_LOCKED') showDashboardUnlock();
   }
 }, 30000);
 setupMonthly({ api, toast, refresh: () => render(), dialog, state });
+setupDepartmentGoals(api);
 try { await reload(); }
 catch (error) {
   if (error.code === 'DASHBOARD_LOCKED') showDashboardUnlock();

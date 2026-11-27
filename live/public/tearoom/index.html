@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>茶水间 · 协作中心</title>
-<link rel="stylesheet" href="./styles.css?v=20261127-response">
-<script type="module" src="./app.js?v=20261127-response"></script>
+<link rel="stylesheet" href="./styles.css?v=20261127-wishes">
+<script type="module" src="./app.js?v=20261127-v12"></script>
 </head>
 <body>
 <div class="wrap">
@@ -13,7 +13,7 @@
     <a class="back" href="../">‹ 返回协作中心</a>
     <h1>茶水间</h1>
     <div class="room-meta">
-      <small class="release-version">协作中心 v1.1.0</small>
+      <small class="release-version">协作中心 v1.3.0</small>
       <span id="room-pending" role="status"></span>
     </div>
   </header>
@@ -45,10 +45,15 @@
 
     <div class="search">
       <span class="search-icon" aria-hidden="true">搜</span>
-      <input id="homeSearch" aria-label="搜索话术" type="search" placeholder="搜话术：砍价 / 证书 / 色名 / 英文 / 越南语…">
+      <input id="homeSearch" aria-label="搜索话术、案例和求助" type="search" maxlength="120" placeholder="搜索话术、案例和求助">
       <button class="btn small" id="homeSearchBtn">搜</button>
     </div>
+    <a class="training-link ai-assistant-link" href="./assistant.html">AI 助手 <span>翻译与话术润色</span></a>
     <button class="training-link" type="button" data-go="scripts" data-cat="色名意境">翡翠色名与意境培训 <span aria-hidden="true">›</span></button>
+    <div class="training-topics">
+      <button class="training-link" type="button" data-go="scripts" data-cat="采购沟通">采购沟通练习 <span aria-hidden="true">›</span></button>
+      <button class="training-link" type="button" data-go="scripts" data-cat="缅语">缅语练习 <span aria-hidden="true">›</span></button>
+    </div>
     <div class="notice">发帖请保护客户隐私，尊重同事。</div>
 
     <div class="grid" id="coreGrid">
@@ -61,6 +66,11 @@
       <button type="button" class="cell" data-go="help"><span class="ic">助</span><span class="lb">求助台</span></button>
       <button type="button" class="cell" data-go="suggest"><span class="ic">箱</span><span class="lb">匿名建议箱</span></button>
       <button type="button" class="cell" data-go="market"><span class="ic">集</span><span class="lb">生活集市</span></button>
+    </div>
+    <div class="grid collaboration-grid">
+      <button type="button" class="cell" data-go="gratitude"><span class="ic warm">谢</span><span class="lb">感谢墙</span></button>
+      <button type="button" class="cell" data-go="goals"><span class="ic">协</span><span class="lb">协作目标墙</span></button>
+      <a class="cell wish-link" href="./wishes.html"><span class="ic warm">愿</span><span class="lb">愿望墙</span></a>
     </div>
 
     <section>
@@ -76,6 +86,14 @@
     <section>
       <h2>互助角 · 最新 <button class="more" type="button" data-go="help">求助台 ›</button></h2>
       <div id="homeHelp"></div>
+    </section>
+  </main>
+
+  <main id="view-search" class="hidden">
+    <section>
+      <h2>搜索话术、案例和求助</h2>
+      <div class="search search-compact"><input id="resourceSearch" aria-label="搜索话术、案例和求助" type="search" maxlength="120" placeholder="输入关键词"></div>
+      <div id="resourceResults"></div>
     </section>
   </main>
 
@@ -96,7 +114,7 @@
         <div class="row">
           <select id="scriptCat" aria-label="话术分类">
             <option>砍价</option><option>证书售后</option><option>色名意境</option>
-            <option>活动</option><option>英文</option><option>越南语</option><option>其他</option>
+            <option>活动</option><option>英文</option><option>越南语</option><option>采购沟通</option><option>缅语</option><option>其他</option>
           </select>
         </div>
         <button class="btn" type="submit" disabled>贡献一条话术</button>
@@ -148,13 +166,41 @@
   <main id="view-help" class="hidden">
     <section>
       <h2>求助台</h2>
-      <p class="sub">发帖人可以将已解决的问题标记出来。</p>
+      <p class="sub">同事可以认领求助，发帖人确认解决后可以向认领人发送感谢。</p>
       <form class="pub" id="helpForm">
         <input type="text" id="helpTitle" aria-label="求助问题" maxlength="120" placeholder="问题，如：FB后台这个按钮是干嘛的？" required>
         <textarea id="helpBody" aria-label="补充说明" maxlength="2000" placeholder="补充说明（可留空）"></textarea>
         <button class="btn" type="submit" disabled>发布求助</button>
       </form>
       <div id="helpList"></div>
+    </section>
+  </main>
+
+  <main id="view-gratitude" class="hidden">
+    <section>
+      <h2>感谢墙</h2>
+      <p class="sub">用当前昵称发送感谢，写清楚同事帮了什么忙。</p>
+      <form class="pub" id="gratitudeForm">
+        <input id="gratitudeRecipient" aria-label="感谢的同事" maxlength="40" placeholder="这次想感谢谁？" required>
+        <textarea id="gratitudeBody" aria-label="感谢内容" maxlength="600" placeholder="写下同事帮了你什么忙" required></textarea>
+        <button class="btn warm" type="submit" disabled>发送感谢</button>
+      </form>
+      <div id="gratitudeList"></div>
+    </section>
+  </main>
+
+  <main id="view-goals" class="hidden">
+    <section>
+      <h2>协作目标墙</h2>
+      <p class="sub">在这里跟进共用资料、培训和交接等协作事项。请在看板查看经营数据。</p>
+      <form class="pub" id="goalForm" hidden>
+        <input id="goalTitle" aria-label="协作目标" maxlength="100" placeholder="例如：更新新人开播检查单" required>
+        <textarea id="goalBody" aria-label="协作说明" maxlength="500" placeholder="写清预计交付的成果" required></textarea>
+        <input id="goalOwner" aria-label="负责人" maxlength="40" placeholder="负责人" required>
+        <label class="goal-date">完成日期 <input id="goalDue" type="date"></label>
+        <button class="btn" type="submit" disabled>添加协作目标</button>
+      </form>
+      <div id="goalList"></div>
     </section>
   </main>
 

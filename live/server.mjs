@@ -5,11 +5,17 @@ import { resolve, dirname, extname, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Store, passwordHash, passwordMatches, publicUser } from './lib/store.mjs';
 import { ApiError, keys, text, date, version, countFields, sessionInput, inventoryInput, taskInput, conflict } from './lib/validation.mjs';
-import { ROLES, PUBLIC_ENTRY_USER, isStaff, safeDataset, safeEntrySession, entryDirectory, entryInput, duplicateEntry } from './lib/entry.mjs';
+import { directory, handleDirectory, sessionSlotWrite } from './lib/directory.mjs';
+import { ROLES, PUBLIC_ENTRY_USER, isStaff, safeDataset, entryDirectory, entryInput, duplicateEntry, hasSessionMetrics, fillableSession, fillSession } from './lib/entry.mjs';
 import { chinaDate } from './lib/seed.mjs';
 import { handleMonthly } from './lib/monthly.mjs';
+import { handleAnchorReview } from './lib/review.mjs';
 import { createTearoom } from './lib/tearoom.mjs';
 import { jadeGuideScripts } from './lib/tearoom-jade-guide.mjs';
+import { assistantConfiguration, createAssistant } from './lib/assistant.mjs';
+import { createWishes } from './lib/wishes.mjs';
+import { createDepartmentGoals } from './lib/department-goals.mjs';
+import { PERIODS, resolveShiftPeriod } from './public/shift-periods.js';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
@@ -28,8 +34,8 @@ const tearoomStarterScripts = [
 const dashboardAccountFields = ['id', 'name', 'color'];
 const dashboardAnchorFields = ['id', 'name', 'accountId', 'slotId', 'slotLabel', 'sourceRow', 'activeFrom', 'activeTo'];
 const dashboardSessionFields = [
-  'id', 'date', 'accountId', 'anchorId', 'slotId', 'slotLabel', 'sourceStatus',
-  'status', 'start', 'end', 'scheduleUnknown', 'actualMinutes', 'target', 'orderAmount',
+  'id', 'date', 'accountId', 'anchorId', 'slotId', 'slotLabel', 'period', 'sourceStatus', 'cancelled',
+  'status', 'start', 'end', 'endDayOffset', 'scheduleUnknown', 'actualMinutes', 'target', 'orderAmount',
   'received', 'refunds', 'adSpend', ...countFields
 ];
 const selectFields = (record, fields) => Object.fromEntries(fields.filter(field => Object.hasOwn(record, field)).map(field => [field, record[field]]));
@@ -50,7 +56,7 @@ export function configuration(env = process.env) {
   const port = Number(env.PORT || 4177);
   if (!Number.isInteger(port) || port < 0 || port > 65535) throw new Error('PORT 无效');
   if (production && env.PREVIEW_IMPORT === 'true') throw new Error('真实数据本地预览不可使用生产环境，请移除 PREVIEW_IMPORT。');
-  const bookingUrl = new URL(env.BOOKING_URL || 'http://127.0.0.1:3000/');
+  const bookingUrl = new URL(env.BOOKING_URL || 'http://43.135.1.109:3000/');
   if (!['http:', 'https:'].includes(bookingUrl.protocol) || bookingUrl.username || bookingUrl.password) {
     throw new Error('BOOKING_URL 须为不含登录信息的 HTTP 或 HTTPS 地址。');
   }
@@ -71,9 +77,22 @@ async function body(request) {
 export function createApplication(options = {}) {
   const config = { ...configuration(), ...options };
   const store = new Store(options.dbPath || resolve(config.dataDir, 'command-center.sqlite'), config);
-  const handleTearoom = createTearoom({
+  const tearoom = createTearoom({
     store, cookieSecure: config.cookieSecure, seedScripts: [...tearoomStarterScripts, ...jadeGuideScripts]
   });
+  const wishes = createWishes({ store });
+  const departmentGoals = createDepartmentGoals({ store });
+  let assistantConfig = options.assistantConfig;
+  if (!assistantConfig) {
+    try {
+      assistantConfig = assistantConfiguration();
+    } catch {
+      console.error('AI 助手配置无效，服务已停用。请检查后端环境变量。');
+      assistantConfig = assistantConfiguration({});
+    }
+  }
+  const assistant = createAssistant({ store, config: assistantConfig, fetchImpl: options.assistantFetch });
+  const assistantMode = assistant.available ? (options.assistantFetch ? 'demo' : 'live') : 'off';
   const datasetInfo = () => store.getDataset();
   const demoVisible = () => store.demo && datasetInfo().kind === 'demo';
   const logins = new Map();
@@ -93,7 +112,8 @@ export function createApplication(options = {}) {
     const accounts = store.list('accounts').map(item => selectFields(item, dashboardAccountFields));
     const anchors = store.list('anchors').map(item => selectFields(item, dashboardAnchorFields));
     const sessions = store.list('sessions').map(item => selectFields(item, dashboardSessionFields));
-    return { ...accessPayload(user, session), currency: 'CNY', accounts, anchors, sessions };
+    const slots = directory(store).slots.map(item => selectFields(item, ['id', 'accountId', 'name', 'period']));
+    return { ...accessPayload(user, session), currency: 'CNY', accounts, anchors, slots, sessions };
   }
   function send(response, status, value, headers = {}) {
     response.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store', ...headers });
@@ -170,6 +190,40 @@ export function createApplication(options = {}) {
     publicEntryWrites.set(address, window);
   }
   function admin(user) { if (user.role !== 'admin') throw new ApiError(403, '仅管理员可以管理成员'); }
+  function tearoomScope(request) {
+    const profile = tearoom.session(request);
+    if (!profile) throw new ApiError(401, '请刷新页面继续使用茶水间');
+    return { ...profile, canModerate: readSession(request, ACCOUNT_COOKIE)?.user.role === 'admin' };
+  }
+  function goalProgress(plan, user) {
+    const { month } = plan;
+    const today = chinaDate();
+    const dayMs = 86400000;
+    const start = Date.parse(month + '-01');
+    const end = Date.UTC(Number(month.slice(0, 4)), Number(month.slice(5)), 0);
+    const cutoff = Math.min(end, Date.parse(today) - dayMs);
+    const asOf = cutoff >= start ? new Date(cutoff).toISOString().slice(0, 10) : null;
+    const remainingDays = Math.max(0, (end - Math.max(start, Date.parse(today))) / dayMs + 1);
+    let salesCents = 0;
+    let salesReported = 0;
+    let salesPending = 0;
+    if (asOf) {
+      for (const row of store.list('sessions')) {
+        if (!row.date.startsWith(month + '-') || row.date > asOf || row.sourceStatus === 'stopped' || row.cancelled) continue;
+        if (Number.isFinite(row.orderAmount)) {
+          salesCents += Math.round(row.orderAmount * 100);
+          salesReported++;
+        } else {
+          salesPending++;
+        }
+      }
+    }
+    return {
+      ...plan, asOf, remainingDays, salesReported, salesPending,
+      salesActual: salesReported ? salesCents / 100 : null,
+      canEdit: ['admin', 'manager'].includes(user.role)
+    };
+  }
   function cookie(name, value, maxAge = TTL / 1000) { return `${name}=${value}; HttpOnly; SameSite=Strict; Path=/; Max-Age=${maxAge}${config.cookieSecure ? '; Secure' : ''}`; }
   const server = http.createServer(async (request, response) => {
     response.setHeader('X-Content-Type-Options', 'nosniff');
@@ -225,45 +279,74 @@ export function createApplication(options = {}) {
         return send(response, 200, payload, { 'Set-Cookie': header });
       }
       if (path.startsWith('/api/')) {
-        if (await handleTearoom({
+        if (path === '/api/ai/status' && request.method === 'GET') {
+          return send(response, 200, { mode: assistantMode, canViewUsage: readSession(request, ACCOUNT_COOKIE)?.user.role === 'admin' });
+        }
+        if (path === '/api/ai/chat' && request.method === 'POST') {
+          const { actor } = tearoomScope(request);
+          const input = await body(request);
+          keys(input, ['task', 'text', 'target']);
+          const output = await assistant.run({ action: input.task, text: input.text, target: input.target }, {
+            identity: actor, secondaryIdentity: request.socket.remoteAddress
+          });
+          return send(response, 200, { ...output, mode: assistantMode });
+        }
+        if (path === '/api/ai/usage' && request.method === 'GET') {
+          const { user } = requireSession(request, 'account');
+          if (user.role !== 'admin') throw new ApiError(403, '仅管理员可以查看 AI 用量');
+          return send(response, 200, assistant.usage());
+        }
+        if (path === '/api/tearoom/wishes') {
+          const scope = tearoomScope(request);
+          if (request.method === 'GET') return send(response, 200, wishes.list(scope));
+          if (request.method === 'POST') {
+            const input = await body(request);
+            tearoom.limitWrite(scope.actor);
+            return send(response, 201, wishes.post(input, scope));
+          }
+          throw new ApiError(405, '请求方法不支持');
+        }
+        const wishRoute = /^\/api\/tearoom\/wishes\/([a-z0-9-]{36})\/(contact|status)$/.exec(path);
+        if (wishRoute) {
+          const [, id, action] = wishRoute;
+          const scope = tearoomScope(request);
+          if (action === 'contact' && request.method === 'GET') return send(response, 200, wishes.contact(id, scope));
+          if (action === 'status' && request.method === 'POST') return send(response, 200, wishes.status(id, await body(request), scope));
+          throw new ApiError(405, '请求方法不支持');
+        }
+        if (await tearoom.handle({
           path, request, response, send, body,
           getAdmin: () => readSession(request, ACCOUNT_COOKIE)?.user.role === 'admin'
         })) return;
         if (path === '/api/entry/bootstrap' && request.method === 'GET') {
-          const user = entryUser(request);
-          const selectedDate = date(url.searchParams.get('date') || chinaDate());
-          return send(response, 200, { user, dataset: safeDataset(datasetInfo()), ...entryDirectory(store), sessions: store.list('sessions').filter(item => item.date === selectedDate).map(item => safeEntrySession(item, user)) });
+          return send(response, 200, entryDirectory(directory(store)));
         }
-        const entryMatch = /^\/api\/entry\/sessions(?:\/([\w-]+))?$/.exec(path);
-        if (entryMatch && ['POST', 'PUT'].includes(request.method)) {
+        if (path === '/api/entry/sessions' && request.method === 'POST') {
           const user = entryUser(request);
           entryWritable(user, request);
-          const id = entryMatch[1];
-          if ((request.method === 'POST' && id) || (request.method === 'PUT' && !id)) throw new ApiError(405, '请求方法不支持');
           const input = await body(request);
-          const existing = id ? store.get('sessions', id) : undefined;
-          if (id && !existing) throw new ApiError(404, '记录不存在');
-          if (id) {
-            version(input.version);
-            if (input.version !== existing.version) throw new ApiError(409, '其他成员已更新此记录，请刷新后再保存', { current: safeEntrySession(existing, user) });
+          const known = directory(store);
+          const result = entryInput(input, user, known);
+          if (result.orderAmount >= 100000 && input.confirmAmount !== true) {
+            throw new ApiError(422, '请再次核对填写的业绩金额。确认后可以继续提交。', { code: 'ENTRY_CONFIRM_AMOUNT' });
           }
-          const known = { accounts: store.list('accounts'), anchors: store.list('anchors'), entryAnchors: entryDirectory(store).anchors };
-          const result = entryInput(input, existing, user, known);
-          result.id = id || randomUUID();
-          if (!id) {
-            const duplicate = duplicateEntry(result, store.list('sessions'), known.anchors);
-            if (duplicate) throw new ApiError(409, '该日期、直播间和场次已有记录，请刷新后填写', { current: safeEntrySession(duplicate, user) });
+          const matching = duplicateEntry(result, store.list('sessions'), known.anchors);
+          const blank = matching.length === 1 && fillableSession(matching[0], result) ? matching[0] : null;
+          if (matching.length && !blank) {
+            throw new ApiError(409, '该场次无法重复提交。需要更正时请联系主管。');
           }
-          let saved;
+          const next = blank ? fillSession(blank, result) : { ...result, id: randomUUID() };
           try {
-            saved = store.save('sessions', result, id ? input.version : undefined, user);
+            if (!blank) conflict(next, store.list('sessions'));
+            store.save('sessions', next, blank?.version, user);
           } catch (error) {
-            if (error instanceof ApiError && error.status === 409 && error.details?.current) {
-              throw new ApiError(409, error.message, { current: safeEntrySession(error.details.current, user) });
-            }
-            throw error;
+            if (!(error instanceof ApiError) || error.status !== 409) throw error;
+            throw new ApiError(409, '该场次无法重复提交。需要更正时请联系主管。');
           }
-          return send(response, id ? 200 : 201, { session: safeEntrySession(saved, user) });
+          return send(response, 201, { ok: true });
+        }
+        if (path.startsWith('/api/entry/')) {
+          throw new ApiError(405, '录入入口只接受新场次提交。');
         }
         const { user, session, token, cookieName } = requireSession(request, request.headers['x-command-scope']);
         if (path === '/api/me' && request.method === 'GET') return send(response, 200, accessPayload(user, session));
@@ -271,35 +354,39 @@ export function createApplication(options = {}) {
           logins.delete(token);
           return send(response, 200, { ok: true }, { 'Set-Cookie': cookie(cookieName, '', 0) });
         }
+        if (path === '/api/department-goals') {
+          if (isStaff(user)) throw new ApiError(403, '员工录入账号无法查看部门月度目标');
+          if (!session.dashboardOnly && dashboardHash && !session.dashboardUnlocked) {
+            throw new ApiError(403, '请先解锁业绩看板', { code: 'DASHBOARD_LOCKED' });
+          }
+          if (request.method === 'GET') {
+            const month = url.searchParams.get('month') ?? chinaDate().slice(0, 7);
+            return send(response, 200, goalProgress(departmentGoals.read(month), user));
+          }
+          if (request.method === 'PUT') {
+            if (!['admin', 'manager'].includes(user.role)) throw new ApiError(403, '仅管理员和主管可以维护部门月度目标');
+            const plan = departmentGoals.save(await body(request), user);
+            return send(response, 200, goalProgress(plan, user));
+          }
+          throw new ApiError(405, '请求方法不支持');
+        }
         if (session.dashboardOnly) {
+          if (await handleAnchorReview({ path, url, request, response, user, store, send, body, canWriteNotes: false })) return;
           if (path !== '/api/bootstrap' || request.method !== 'GET') throw new ApiError(403, '业绩看板仅提供数据查看', { code: 'DASHBOARD_READ_ONLY' });
           return send(response, 200, dashboardPayload(user, session));
         }
         if (isStaff(user)) throw new ApiError(403, '员工账号仅可使用基础数据录入入口');
         if (dashboardHash && !session.dashboardUnlocked) throw new ApiError(403, '请先解锁业绩看板', { code: 'DASHBOARD_LOCKED' });
+        if (path === '/api/anchor-review' || path.startsWith('/api/anchor-review/')) {
+          if (!['admin', 'manager'].includes(user.role)) throw new ApiError(403, '仅负责人和主管可使用主播复盘');
+          if (await handleAnchorReview({ path, url, request, response, user, store, send, body, canWriteNotes: true })) return;
+        }
         if (await handleMonthly({ path, url, request, response, user, store, send, body })) return;
         if (path === '/api/bootstrap' && request.method === 'GET') {
-          return send(response, 200, { user, demo: demoVisible(), dataset: datasetInfo(), currency: 'CNY', accounts: store.list('accounts'), anchors: store.list('anchors'), sessions: store.list('sessions'), inventory: store.list('inventory'), tasks: store.list('tasks'), ...(user.role === 'admin' ? { users: store.users() } : {}) });
+          return send(response, 200, { user, demo: demoVisible(), dataset: datasetInfo(), currency: 'CNY', ...directory(store), sessions: store.list('sessions'), inventory: store.list('inventory'), tasks: store.list('tasks'), ...(user.role === 'admin' ? { users: store.users() } : {}) });
         }
         if (path === '/api/audit' && request.method === 'GET') return send(response, 200, { audit: store.audit() });
-        const directoryMatch = /^\/api\/(accounts|anchors)\/([\w-]+)$/.exec(path);
-        if (directoryMatch && request.method === 'PUT') {
-          admin(user);
-          const [, kind, id] = directoryMatch;
-          const existing = store.get(kind, id);
-          if (!existing) throw new ApiError(404, '记录不存在');
-          const input = await body(request);
-          keys(input, kind === 'accounts' ? ['name', 'page', 'color', 'version'] : ['name', 'version']);
-          version(input.version);
-          const next = { ...existing, name: text(input.name ?? existing.name, '名称', 120, true) };
-          if (kind === 'accounts') {
-            next.page = text(input.page ?? existing.page, 'Facebook 页面', 300);
-            next.color = input.color ?? existing.color;
-            if (!/^#[0-9a-fA-F]{6}$/.test(next.color)) throw new ApiError(400, '账号颜色须为六位十六进制色值');
-          }
-          if (store.list(kind).some(item => item.id !== id && item.name === next.name)) throw new ApiError(409, '名称已存在');
-          return send(response, 200, { [kind === 'accounts' ? 'account' : 'anchor']: store.save(kind, next, input.version, user) });
-        }
+        if (await handleDirectory({ path, url, request, response, user, store, send, body })) return;
         if (path === '/api/users') {
           admin(user);
           if (request.method === 'GET') return send(response, 200, { users: store.users() });
@@ -324,9 +411,12 @@ export function createApplication(options = {}) {
           const accountId = url.searchParams.get('accountId') || '';
           const anchorId = url.searchParams.get('anchorId') || '';
           const status = url.searchParams.get('status') || '';
+          const period = url.searchParams.get('period') || '';
           if (accountId && !accounts.has(accountId)) throw new ApiError(400, '账号筛选无效');
           if (anchorId && !anchors.has(anchorId)) throw new ApiError(400, '主播筛选无效');
           if (status && !['planned', 'live', 'completed'].includes(status)) throw new ApiError(400, '状态筛选无效');
+          if (period && !PERIODS.some(item => item.id === period)) throw new ApiError(400, '场次筛选无效');
+          const slots = period ? directory(store).slots : [];
           const header = [
             '场次ID', '日期', '账号', '主播', '开始', '结束', '排期时长(小时)', '实际直播时长(分钟)', '状态', '目标成交额(CNY)',
             '触达人数(本场)', '浏览量(次数)', '浏览人数(本场;跨场汇总为人次)', '曝光次数', '峰值在线人数', '平均观看时长(秒)',
@@ -343,9 +433,11 @@ export function createApplication(options = {}) {
           const rounded = value => Number.isFinite(value) ? +value.toFixed(4) : '';
           const ratio = (numerator, denominator) => Number.isFinite(numerator) && Number.isFinite(denominator) && denominator > 0 ? rounded(numerator / denominator) : '';
           const complete = values => values.every(Number.isFinite);
-          const hours = item => item.scheduleUnknown ? null : (Number(item.end.slice(0, 2)) * 60 + Number(item.end.slice(3)) - Number(item.start.slice(0, 2)) * 60 - Number(item.start.slice(3))) / 60;
+          const minutes = time => Number(time.slice(0, 2)) * 60 + Number(time.slice(3));
+          const hours = item => item.scheduleUnknown ? null : (minutes(item.end) - minutes(item.start)) / 60 + (item.endDayOffset || 0) * 24;
           const rows = store.list('sessions')
             .filter(item => item.date >= from && item.date <= to && (!accountId || item.accountId === accountId) && (!anchorId || item.anchorId === anchorId) && (!status || item.status === status))
+            .filter(item => !period || resolveShiftPeriod(item, slots) === period)
             .map(item => {
               const net = complete([item.received, item.refunds]) ? item.received - item.refunds : null;
               const costParts = [item.cogs, item.adSpend, item.shipping, item.fees, item.otherCost];
@@ -370,6 +462,20 @@ export function createApplication(options = {}) {
           return response.end('\ufeff' + [header, ...rows].map(row => row.map(csvCell).join(',')).join('\r\n'));
         }
         const match = /^\/api\/(sessions|inventory|tasks)(?:\/([\w-]+))?$/.exec(path);
+        if (match?.[1] === 'sessions' && match[2] && request.method === 'DELETE') {
+          if (user.role !== 'admin') throw new ApiError(403, '仅管理员可以取消直播排期');
+          const input = await body(request);
+          keys(input, ['version']);
+          version(input.version);
+          const existing = store.get('sessions', match[2]);
+          if (!existing) throw new ApiError(404, '记录不存在');
+          if (existing.version !== input.version) throw new ApiError(409, '记录已更新，请重新载入场次');
+          if (existing.status !== 'planned' || existing.sourceStatus === 'stopped' || hasSessionMetrics(existing)) {
+            throw new ApiError(409, '仅可取消尚未播出且未录入指标的排期');
+          }
+          const session = store.save('sessions', { ...existing, status: 'completed', sourceStatus: 'stopped', cancelled: true }, input.version, user);
+          return send(response, 200, { session });
+        }
         if (match && ['POST', 'PUT'].includes(request.method)) {
           writable(user);
           const [, kind, id] = match;
@@ -381,11 +487,20 @@ export function createApplication(options = {}) {
           else if (Object.hasOwn(input, 'version')) throw new ApiError(400, '新建记录不能指定 version');
           const sessions = store.list('sessions');
           let result;
-          if (kind === 'sessions') result = sessionInput(input, existing, { accounts: store.list('accounts'), anchors: store.list('anchors') });
+          const recordId = id || randomUUID();
+          if (kind === 'sessions') {
+            const { slotId, ...sessionData } = input;
+            const roster = directory(store);
+            const { timing, ...assignment } = sessionSlotWrite(input, existing, roster);
+            result = sessionInput({ ...sessionData, ...timing }, existing, roster);
+            result.id = recordId;
+            Object.assign(result, assignment);
+            conflict(result, sessions);
+            if (!existing) result.managedSchedule = true;
+          }
           if (kind === 'inventory') result = inventoryInput(input, existing, sessions);
           if (kind === 'tasks') result = taskInput(input, existing, sessions);
-          result.id = id || randomUUID();
-          if (kind === 'sessions') conflict(result, sessions);
+          result.id = recordId;
           if (kind === 'inventory' && store.list(kind).some(item => item.id !== result.id && item.sku.toLowerCase() === result.sku.toLowerCase())) throw new ApiError(409, '货号已存在，每件手镯须使用唯一货号');
           const saved = store.save(kind, result, id ? input.version : undefined, user);
           return send(response, id ? 200 : 201, { [kind === 'sessions' ? 'session' : kind === 'inventory' ? 'item' : 'task']: saved });
@@ -416,8 +531,8 @@ export function createApplication(options = {}) {
       try { metadata = await stat(target); } catch { throw new ApiError(404, '文件不存在'); }
       if (!metadata.isFile()) throw new ApiError(404, '文件不存在');
       const content = await readFile(target);
-      const versionedTearoomAsset = ['/tearoom/app.js', '/tearoom/styles.css'].includes(path)
-        && url.searchParams.get('v') === '20261127-response';
+      const versionedTearoomAsset = /^\/tearoom\/[a-z-]+\.(js|css)$/.test(path)
+        && /^[0-9]{8}-[a-z0-9-]+$/.test(url.searchParams.get('v') || '');
       response.writeHead(200, {
         'Content-Type': MIME[extname(target)] || 'application/octet-stream',
         'Cache-Control': versionedTearoomAsset ? 'public, max-age=86400' : 'no-cache'
@@ -427,6 +542,9 @@ export function createApplication(options = {}) {
       if (response.headersSent) return response.end();
       const status = error instanceof ApiError ? error.status : 500;
       if (status === 500) console.error(error);
+      if (request.url?.startsWith('/api/entry/')) {
+        return send(response, status, { error: status === 500 ? '服务处理失败，请稍后再试' : error.message, ...error.details });
+      }
       const safeErrorDataset = safeDataset(datasetInfo());
       send(response, status, { error: status === 500 ? '服务处理失败，请稍后再试' : error.message, ...(error.details || {}), demo: demoVisible(), dataset: safeErrorDataset });
     }

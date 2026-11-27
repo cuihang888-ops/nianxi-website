@@ -550,7 +550,7 @@ test('一部全部五组取消早场，中晚场可排，其他部门原班次�
   const firstDepartment = config.departments.find(item => item.id === 'd1');
   assert.deepEqual(firstDepartment.slots, ['afternoon', 'evening']);
   assert.deepEqual(firstDepartment.retiredSlots, ['morning']);
-  assert.equal(config.release.version, '1.2.3');
+  assert.equal(config.release.version, '1.2.4');
   const filename = path.join(app.dataDir, 'sellers.json');
   const originalBytes = fs.readFileSync(filename);
   for (const group of firstDepartment.groups) {
@@ -596,7 +596,7 @@ test('管理员可开放式增加或删减组别场次，配置持久化且不�
   const current = await app.request('GET', '/api/config');
   const d2 = current.json.departments.find(item => item.id === 'd2');
   assert.deepEqual(d2.groupSlots['一组'], ['morning']);
-  assert.equal(current.json.release.version, '1.2.3');
+  assert.equal(current.json.release.version, '1.2.4');
   const rejected = await app.request('POST', '/api/schedules', assignment(first.id, {
     department: 'd2', group: '一组', slot: 'afternoon', days: 1
   }), owner);
@@ -759,7 +759,7 @@ test('四部各组中场支持连续三天、重启读取和单日调整，原�
   const fourthDepartment = publicConfig.departments.find(item => item.id === 'd4');
   assert.deepEqual(fourthDepartment.slots, ['morning', 'afternoon', 'evening']);
   assert.equal(fourthDepartment.groupSlots, undefined);
-  assert.equal(publicConfig.release.version, '1.2.3');
+  assert.equal(publicConfig.release.version, '1.2.4');
   for (const [day, group, slot] of [['23', '一组', 'morning'], ['23', '二组', 'evening'], ['24', '三组', 'morning'], ['24', '四组', 'evening']]) {
     const oldShift = await app.request('POST', '/api/schedules', assignment(first.id, {
       department: 'd4', group, slot, startDate: `2026-10-${day}`, days: 1
@@ -864,7 +864,7 @@ test('停用卖手的原排班可单日改业务，但不能新排或替换其�
 test('原日期→房间→时段预约结构可读取，新增预约不会丢失原预约', async t => {
   const legacy = JSON.stringify({
     '2026-10-20': {
-      '直播间 A': { morning: { department: '老部门', bookerName: '老预约人', updatedAt: '2026/10/12 08:00:00' } }
+      '一期五号直播间': { morning: { department: '老部门', bookerName: '老预约人', updatedAt: '2026/10/12 08:00:00' } }
     }
   });
   const app = await fixture(t, { legacy });
@@ -875,7 +875,7 @@ test('原日期→房间→时段预约结构可读取，新增预约不会丢�
   assert.equal(old.json.bookings[0].department, '老部门');
   assert.equal(fs.readFileSync(app.legacyFile, 'utf8'), legacy, 'Read-only access never rewrites source data');
   const created = await app.request('POST', '/api/book', {
-    date: '2026-10-20', room: '直播间 A', slot: 'evening',
+    date: '2026-10-20', room: '一期五号直播间', slot: 'evening',
     department: '新部门', bookerName: '新预约人', clientId: 'test-client-one'
   }, owner);
   assert.equal(created.status, 201, JSON.stringify(created.json));
@@ -888,7 +888,7 @@ test('原日期→房间→时段预约结构可读取，新增预约不会丢�
   assert.equal(backups.length, 1);
   assert.equal(fs.readFileSync(path.join(backupDir, backups[0]), 'utf8'), legacy);
   const duplicate = await app.request('POST', '/api/book', {
-    date: '2026-10-20', room: '直播间 A', slot: 'morning',
+    date: '2026-10-20', room: '一期五号直播间', slot: 'morning',
     department: '重复部门', bookerName: '重复预约人', clientId: 'test-client-two'
   }, owner);
   assert.equal(duplicate.status, 409);
@@ -912,7 +912,7 @@ test('损坏的房间预约文件不能被新预约覆盖', async t => {
   const broken = '{"2026-10-20": broken';
   fs.writeFileSync(app.legacyFile, broken, 'utf8');
   const result = await app.request('POST', '/api/book', {
-    date: '2026-10-20', room: '直播间 A', slot: 'morning',
+    date: '2026-10-20', room: '一期五号直播间', slot: 'morning',
     department: '测试', bookerName: '测试', clientId: 'test-client'
   }, owner);
   assert.equal(result.status, 500, JSON.stringify(result.json));
@@ -959,4 +959,92 @@ test('按 ID 存储的旧预约保留 ID，取消仅管理员可操作，未知�
   assert.equal((await app.request('POST', '/api/cancel', { id: booking.id, clientId: booking.clientId })).status, 401);
   assert.equal((await app.request('POST', '/api/cancel', { id: booking.id }, owner)).status, 200);
   assert.equal((await app.request('GET', '/api/bookings?date=2026-10-20')).json.bookings.length, 0);
+});
+
+test('场地管理保持历史预约和稳定ID，停用后拒绝新预约且能够恢复', async t => {
+  const booking = {
+    id: 'legacy-room-booking', date: '2026-10-20', room: '现有定制场地', slot: 'morning',
+    department: '原部门', bookerName: '原预约人', note: '历史备注'
+  };
+  const legacy = JSON.stringify({ version: 2, bookings: [booking] });
+  const app = await fixture(t, { legacy });
+  const request = app.request;
+  const route = '/api/rooms';
+  const configFile = path.join(app.dataDir, 'room-directory.json');
+  const initial = await request('GET', route);
+  const original = initial.json.roomDirectory.find(room => room.name === booking.room);
+  assert.ok(original.id);
+  assert.equal(fs.existsSync(configFile), false);
+  const admin = await app.login('staff', STAFF_PASSWORD);
+  const endpoint = route + '/' + original.id;
+  const place = (slot, roomFields) => request('POST', '/api/book', {
+    date: booking.date, slot, department: '新部门', bookerName: '新预约人', clientId: 'room-test', ...roomFields
+  }, admin);
+  assert.equal((await request('POST', route, { name: '新建场地' })).status, 401);
+  assert.equal((await request('PATCH', endpoint, { name: '改名场地' }, { cookie: admin.cookie })).status, 403);
+  assert.equal((await request('POST', route, { name: '新建场地' }, admin)).status, 201);
+  const renamed = await request('PATCH', endpoint, { name: '改名场地' }, admin);
+  assert.equal(renamed.status, 200);
+  assert.equal(renamed.json.room.id, original.id);
+  assert.equal((await request('POST', route, { name: booking.room }, admin)).status, 409);
+  assert.equal((await place('morning', { roomId: original.id })).status, 409);
+  assert.equal((await place('morning', { room: booking.room })).status, 409);
+  const stopped = await request('PATCH', endpoint, { active: false }, admin);
+  assert.deepEqual(stopped.json.room, { ...original, name: '改名场地', active: false });
+  assert.equal(stopped.json.rooms.includes('改名场地'), false);
+  assert.equal((await place('afternoon', { roomId: original.id })).status, 400);
+  const archived = await request('DELETE', endpoint, undefined, admin);
+  assert.equal(archived.status, 200);
+  assert.equal(archived.json.room.archived, true);
+  assert.equal((await request('PATCH', endpoint, { active: true }, admin)).status, 409);
+  assert.equal(fs.readFileSync(app.legacyFile, 'utf8'), legacy);
+  await app.restart();
+  const history = await request('GET', '/api/bookings?date=' + booking.date);
+  assert.equal(history.json.bookings[0].id, booking.id);
+  assert.equal(history.json.bookings[0].room, booking.room);
+  assert.equal(history.json.bookings[0].roomId, original.id);
+  Object.assign(admin, await app.login('staff', STAFF_PASSWORD));
+  const restored = await request('POST', endpoint + '/restore', undefined, admin);
+  assert.equal(restored.status, 200);
+  assert.equal(restored.json.room.active, true);
+  const created = await place('evening', { roomId: original.id });
+  assert.equal(created.status, 201);
+  assert.equal(created.json.booking.room, '改名场地');
+  assert.equal(created.json.booking.roomId, original.id);
+  assert.equal((await request('GET', '/api/bookings?date=' + booking.date)).json.bookings.length, 2);
+  assert.equal((await request('DELETE', endpoint, undefined, admin)).status, 200);
+  assert.equal((await request('POST', '/api/cancel', { id: created.json.booking.id }, admin)).status, 200);
+});
+
+test('归档卖手与直播间部门维持剧情和历史排班，恢复后重新开放排班', async t => {
+  const app = await fixture(t);
+  const owner = await app.login();
+  const seller = await app.talent(owner, '0001', '归档测试');
+  const route = '/api/talents/' + seller.id;
+  const createdStory = await app.request('POST', route + '/stories', { title: '历史剧情', date: '2026-10-13', content: '排班历史仍可查看' }, owner);
+  assert.equal(createdStory.status, 201);
+  const createdSchedule = await app.request('POST', '/api/schedules', assignment(seller.id, { days: 1 }), owner);
+  assert.equal(createdSchedule.status, 201);
+  const sellerFile = path.join(app.dataDir, 'sellers.json');
+  const prevSchedules = JSON.parse(fs.readFileSync(sellerFile, 'utf8')).schedules;
+  assert.equal((await app.request('DELETE', route)).status, 401);
+  assert.equal((await app.request('DELETE', route, undefined, { cookie: owner.cookie })).status, 403);
+  const archive = await app.request('DELETE', route, undefined, owner);
+  assert.equal(archive.status, 200);
+  assert.equal(archive.json.talent.active, false);
+  assert.equal(archive.json.talent.archived, true);
+  assert.equal((await app.request('PATCH', route, { active: true }, owner)).status, 409);
+  assert.equal((await app.request('POST', '/api/schedules', assignment(seller.id, { startDate: '2026-10-24' }), owner)).status, 400);
+  assert.equal((await app.request('GET', route + '/stories')).json.stories[0].id, createdStory.json.story.id);
+  assert.equal((await app.request('DELETE', '/api/departments/d2', undefined, owner)).status, 200);
+  const restored = await app.request('POST', '/api/departments/d2/restore', undefined, owner);
+  assert.equal(restored.status, 200);
+  assert.equal(restored.json.department.id, 'd2');
+  assert.ok(restored.json.department.groups.includes('一组'));
+  assert.deepEqual(JSON.parse(fs.readFileSync(sellerFile, 'utf8')).schedules, prevSchedules);
+  const reactivated = await app.request('POST', route + '/restore', undefined, owner);
+  assert.equal(reactivated.status, 200);
+  assert.equal(reactivated.json.talent.active, true);
+  assert.equal(reactivated.json.talent.archived, false);
+  assert.equal((await app.request('POST', '/api/schedules', assignment(seller.id, { startDate: '2026-10-24' }), owner)).status, 201);
 });

@@ -1,4 +1,7 @@
 .demo-data/
+.preview-data/
 tmp/
 .env
+.env.*
+!.env.example
 *.sqlite*

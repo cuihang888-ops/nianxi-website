@@ -1,9 +1,9 @@
 'use strict';
 
 const rooms = [
-  '直播间 A', '直播间 B', '直播间 C', '办公室 A',
-  '共享工作间 A', '共享工作间 B', '共享工作间 C', '直播间 D',
-  '直播间 E', '会议室 A', '休息室 A', '器材室 A'
+  '一期五号直播间', '一期六号直播间', '一期八号直播间', '一期总监办公室',
+  '玻璃房左边房间', '玻璃房右边房间', '玻璃房里面房间', '三期椿兮直播间',
+  '三期茶伍直播间', '三期会议室', '四期茶室', '三期仓库'
 ];
 const slots = [
   { id: 'morning', name: '早场', start: '08:00', end: '13:30' },
@@ -18,14 +18,24 @@ const departments = [
   { id: 'd5', name: '五部', groups: ['一组'], slots: ['morning', 'afternoon', 'evening'] }
 ];
 const release = {
-  version: '1.2.3',
-  date: '2026-10-26',
+  version: '1.2.4',
+  date: '2026-11-27',
   policy: {
     minimumChanges: 6,
     importantFeatureCanRelease: true,
     description: '累计超过5项变动（至少6项），或新增重要功能时，才升级系统版本；零散修复先累计记录。'
   },
   history: [
+    {
+      version: '1.2.4',
+      date: '2026-11-27',
+      title: '场地、卖手与排班设置',
+      changes: [
+        '管理员可新增、改名、停用、归档和恢复场地，原有预约继续可查看。',
+        '管理员可停用、归档和恢复卖手，已排班次及剧情仍可查询。',
+        '已归档直播间部门可恢复，沿用原有组别和场次配置。'
+      ]
+    },
     {
       version: '1.2.3',
       date: '2026-10-26',

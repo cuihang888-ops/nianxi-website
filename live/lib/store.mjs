@@ -99,13 +99,15 @@ export class Store {
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     return additions.length;
   }
-  save(kind, item, expectedVersion, actor) {
+  save(kind, item, expectedVersion, actor, { defaultRecord, preserveSlot } = {}) {
     this.db.exec('BEGIN IMMEDIATE');
     try {
-      const before = this.get(kind, item.id);
+      const stored = this.get(kind, item.id);
+      const before = stored ?? defaultRecord;
       if (expectedVersion !== undefined && (!before || before.version !== expectedVersion)) throw new ApiError(409, '其他成员已更新此记录，请刷新后再保存', { current: before });
       const saved = { ...item, version: before ? before.version + 1 : 1, updatedAt: new Date().toISOString(), updatedBy: actor.name };
-      if (before) this.db.prepare('UPDATE entities SET version=?,data=? WHERE kind=? AND id=?').run(saved.version, JSON.stringify(saved), kind, saved.id);
+      if (preserveSlot && !this.get('slots', preserveSlot.id)) this.insert('slots', preserveSlot);
+      if (stored) this.db.prepare('UPDATE entities SET version=?,data=? WHERE kind=? AND id=?').run(saved.version, JSON.stringify(saved), kind, saved.id);
       else this.insert(kind, saved);
       this.recordAudit(actor, before ? 'update' : 'create', kind, saved.id, before, saved);
       this.db.exec('COMMIT');

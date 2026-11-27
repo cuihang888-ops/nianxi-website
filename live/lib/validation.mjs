@@ -5,7 +5,7 @@ export class ApiError extends Error {
 const fail = message => { throw new ApiError(400, message); };
 export const moneyFields = ['target', 'orderAmount', 'received', 'refunds', 'cogs', 'adSpend', 'shipping', 'fees', 'otherCost'];
 export const countFields = ['reach', 'views', 'viewers', 'impressions', 'peak', 'watchSeconds', 'interactions', 'reactions', 'comments', 'shares', 'linkClicks', 'newFollowers', 'messages', 'qualified', 'orders', 'paidOrders', 'refundOrders', 'units'];
-const sessionFields = ['date', 'accountId', 'anchorId', 'start', 'end', 'status', 'scheduleUnknown', 'actualMinutes', 'actualStart', 'actualEnd', ...moneyFields, ...countFields, 'notes'];
+const sessionFields = ['date', 'accountId', 'anchorId', 'start', 'end', 'endDayOffset', 'status', 'scheduleUnknown', 'actualMinutes', 'actualStart', 'actualEnd', ...moneyFields, ...countFields, 'notes'];
 const inventoryFields = ['sku', 'name', 'size', 'supplier', 'purchaseDate', 'cost', 'askingPrice', 'state', 'sessionId', 'notes'];
 const taskFields = ['title', 'sessionId', 'owner', 'due', 'status', 'evidence', 'action', 'acceptance'];
 
@@ -37,6 +37,11 @@ function time(value, label) {
   if (typeof value !== 'string' || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(value)) fail(`${label}格式须为 HH:mm`);
   return value;
 }
+function scheduledRange(item) {
+  const day = Date.parse(item.date + 'T00:00:00Z') / 60000;
+  const minutes = value => Number(value.slice(0, 2)) * 60 + Number(value.slice(3));
+  return { start: day + minutes(item.start), end: day + minutes(item.end) + (item.endDayOffset ?? 0) * 1440 };
+}
 function oneOf(value, values, label) {
   if (!values.includes(value)) fail(`${label}无效`);
   return value;
@@ -56,6 +61,7 @@ export function sessionInput(input, existing, known) {
       if (typeof input[key] !== 'boolean') fail('时段待补标记须为布尔值');
       item[key] = input[key];
     }
+    else if (key === 'endDayOffset') item[key] = oneOf(input[key], [0, 1], '结束日期偏移');
     else if (key === 'actualStart' || key === 'actualEnd') item[key] = input[key] === null ? null : text(input[key], key, 16);
     else if (key === 'actualMinutes') item[key] = input[key] === null ? null : numeric(input[key], '实际直播时长');
     else if (moneyFields.includes(key)) item[key] = input[key] === null ? null : numeric(input[key], key);
@@ -82,7 +88,10 @@ export function sessionInput(input, existing, known) {
     }
   }
   time(item.start, '开始时间'); time(item.end, '结束时间');
-  if (!item.scheduleUnknown && item.start >= item.end) fail('结束时间须晚于开始时间，跨日直播请拆分为两场');
+  if (!item.scheduleUnknown) {
+    const range = scheduledRange(item);
+    if (range.end <= range.start || range.end - range.start > 1440) fail('结束时间须晚于开始时间，单场排期最长 24 小时');
+  }
   if (!known.accounts.some(account => account.id === item.accountId)) fail('请选择有效账号');
   if (!known.anchors.some(anchor => anchor.id === item.anchorId)) fail('请选择有效主播');
   oneOf(item.status, ['planned', 'live', 'completed'], '场次状态');
@@ -123,7 +132,13 @@ export function taskInput(input, existing, sessions) {
 }
 
 export function conflict(item, sessions) {
-  if (item.scheduleUnknown) return;
-  const collision = sessions.find(other => !other.scheduleUnknown && other.id !== item.id && other.date === item.date && other.start < item.end && item.start < other.end && (other.accountId === item.accountId || other.anchorId === item.anchorId));
+  if (item.scheduleUnknown || item.cancelled) return;
+  const range = scheduledRange(item);
+  const collision = sessions.find(other => {
+    if (other.cancelled || other.scheduleUnknown || other.id === item.id ||
+      (other.accountId !== item.accountId && other.anchorId !== item.anchorId)) return false;
+    const otherRange = scheduledRange(other);
+    return otherRange.start < range.end && range.start < otherRange.end;
+  });
   if (collision) throw new ApiError(409, collision.accountId === item.accountId ? '该账号在此时段已有排期' : '该主播在此时段已有排期', { conflictId: collision.id });
 }

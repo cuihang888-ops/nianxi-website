@@ -103,6 +103,7 @@ function loadSellers(filename, scheduleConfig) {
   if (!object(data) || data.version !== 1 || !Array.isArray(data.talents) || !Array.isArray(data.schedules)) badSchema(filename);
   for (const talent of data.talents) {
     if (!object(talent) || !isString(talent.id) || !isString(talent.number, 24) || !isString(talent.name, 40) || typeof talent.active !== 'boolean' || typeof talent.avatar !== 'string') badSchema(filename);
+    if (talent.archived !== undefined && (typeof talent.archived !== 'boolean' || (talent.archived && talent.active))) badSchema(filename);
     // Existing records need no migration or write just to expose an empty bio.
     const introduction = Object.hasOwn(talent, 'introduction') ? normalizeIntroduction(talent.introduction) : '';
     if (introduction === null) badSchema(filename);
@@ -130,7 +131,9 @@ function loadSellers(filename, scheduleConfig) {
   return data;
 }
 function validRoomBooking(item) {
-  return object(item) && isString(item.id) && validDate(item.date) && isString(item.room, 80) && config.slots.some(s => s.id === item.slot) && isString(item.department, 80) && isString(item.bookerName, 80) && (item.clientId === undefined || typeof item.clientId === 'string');
+  return object(item) && isString(item.id) && validDate(item.date) && isString(item.room, 80) &&
+    (item.roomId === undefined || validRoomId(item.roomId)) && config.slots.some(s => s.id === item.slot) &&
+    isString(item.department, 80) && isString(item.bookerName, 80) && (item.clientId === undefined || typeof item.clientId === 'string');
 }
 function loadRooms(filename) {
   const data = readJson(filename, () => ({}));
@@ -161,7 +164,7 @@ function loadRooms(filename) {
   } else badSchema(filename);
   if (!bookings.every(validRoomBooking)) badSchema(filename);
   ensureUnique(bookings, b => b.id, filename);
-  ensureUnique(bookings, b => `${b.date}|${b.room}|${b.slot}`, filename);
+  ensureUnique(bookings, b => JSON.stringify([b.date, b.roomId || b.room, b.slot]), filename);
   return { version: 2, bookings, migration };
 }
 function saveRooms(filename, state) {
@@ -174,4 +177,41 @@ function saveRooms(filename, state) {
   }
   atomicWrite(filename, { version: 2, bookings: state.bookings });
 }
-module.exports = { readJson, atomicWrite, loadSellers, loadRooms, saveRooms, badSchema, normalizeIntroduction, normalizeMultiline, loadStories, deriveAvatar, loadScheduleConfig, sellerScheduleContext };
+function validRoomId(value) {
+  return typeof value === 'string' && /^room-[a-f0-9]{32}$/.test(value);
+}
+function initialRoom(name) {
+  return { id: 'room-' + crypto.createHash('sha256').update(name).digest('hex').slice(0, 32),
+    name, active: true, archived: false, aliases: [] };
+}
+function loadRoomDirectory(filename, bookings) {
+  const data = readJson(filename, () => ({ version: 1, rooms: config.rooms.map(initialRoom) }));
+  if (!object(data) || data.version !== 1 || !Array.isArray(data.rooms)) badSchema(filename);
+  const identifiers = new Set(), names = new Map();
+  for (const room of data.rooms) {
+    if (!object(room) || !validRoomId(room.id) || !isString(room.name, 80) ||
+        typeof room.active !== 'boolean' || typeof room.archived !== 'boolean' || (room.archived && room.active) ||
+        !Array.isArray(room.aliases) || room.aliases.some(name => !isString(name, 80)) || identifiers.has(room.id)) badSchema(filename);
+    identifiers.add(room.id);
+    for (const name of [room.name, ...room.aliases]) {
+      if (names.has(name)) badSchema(filename);
+      names.set(name, room.id);
+    }
+  }
+  // Some older booking files contain custom rooms that never appeared in config.
+  for (const booking of bookings) {
+    const owner = names.get(booking.room);
+    if (owner) {
+      if (booking.roomId && owner !== booking.roomId) badSchema(filename);
+      continue;
+    }
+    const room = initialRoom(booking.room);
+    if (identifiers.has(room.id) || (booking.roomId && booking.roomId !== room.id)) badSchema(filename);
+    data.rooms.push(room);
+    identifiers.add(room.id);
+    names.set(room.name, room.id);
+  }
+  ensureUnique(bookings, item => JSON.stringify([item.date, names.get(item.room), item.slot]), filename);
+  return data;
+}
+module.exports = { readJson, atomicWrite, loadSellers, loadRooms, saveRooms, loadRoomDirectory, badSchema, normalizeIntroduction, normalizeMultiline, loadStories, deriveAvatar, loadScheduleConfig, sellerScheduleContext };

@@ -61,7 +61,7 @@ async function fixture(t, { legacyPolicy = false } = {}) {
   const owner = await login(OWNER), staff = await login(STAFF);
   return { dataDir, legacyFile, request, owner, staff, restart: async () => { await stop(); await start(); }, login };
 }
-const booking = { date: '2026-10-16', room: '直播间 A', slot: 'morning', department: '直播一部', bookerName: '张三', clientId: 'isolated-device' };
+const booking = { date: '2026-10-16', room: '一期五号直播间', slot: 'morning', department: '直播一部', bookerName: '张三', clientId: 'isolated-device' };
 test('所有人可直接查看，无策略或遗留公司口令均不限制公开读取，重启后保持', async t => {
   for (const legacyPolicy of [false, true]) {
     const app = await fixture(t, { legacyPolicy });

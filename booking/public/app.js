@@ -55,6 +55,7 @@ if (requestedModule === 'schedule') {
 const roles={venue:'查看模式',host:'查看模式',manager:'管理员'};
 let modalContext=null,refreshNumber=0,toastTimer;
 state.dataReady=false;state.loading=false;
+state.showRetiredRoomBookings=false;
 const publicReadCache=new Map();
 const pageHistory=[];
 function navigationSnapshot(){
@@ -69,12 +70,12 @@ function navigate(update){
 }
 function goHome(){
   if(modalContext?.busy)return;
-  closeModal(true);pageHistory.length=0;state.role=null;render();window.scrollTo(0,0);
+  location.assign('../');
 }
 function goBack(){
   if($('#modal').open)return closeModal();
   const previous=pageHistory.pop();
-  if(previous){const position=previous.scrollY,changed=state.month!==previous.month||state.date!==previous.date;delete previous.scrollY;Object.assign(state,previous);if(changed){state.schedules=[];state.bookings=[];state.connected=false;}render();window.scrollTo(0,position);recordView();if(changed)refresh();}
+  if(previous?.role){const position=previous.scrollY,changed=state.month!==previous.month||state.date!==previous.date;delete previous.scrollY;Object.assign(state,previous);if(changed){state.schedules=[];state.bookings=[];state.connected=false;}render();window.scrollTo(0,position);recordView();if(changed)refresh();}
   else goHome();
 }
 function recordView(kind=state.page,extra={}){
@@ -91,11 +92,11 @@ async function api(url, options={}){
   if(state.csrfToken) headers['X-CSRF-Token']=state.csrfToken;
   const controller=new AbortController(), timer=setTimeout(()=>controller.abort(),12000);
   try{
-    let res=await fetch(url,{...options,headers,credentials:'same-origin',cache:'no-store',signal:controller.signal});
+    let res=await fetch(url.replace(/^\//,"./"),{...options,headers,credentials:'same-origin',cache:'no-store',signal:controller.signal});
     if(res.status===304){
       if(cached)return cached.data;
       delete headers['If-None-Match'];
-      res=await fetch(url,{...options,headers,credentials:'same-origin',cache:'no-store',signal:controller.signal});
+      res=await fetch(url.replace(/^\//,"./"),{...options,headers,credentials:'same-origin',cache:'no-store',signal:controller.signal});
     }
     const data=await res.json();
     if(!res.ok){const e=new Error(data.message||'操作未完成，请重试');e.status=res.status;e.data=data;throw e;}
@@ -135,7 +136,7 @@ function slotName(slot){return state.config.slots.find(s=>s.id===slot)?.name||sl
 function slotTime(slot){const s=state.config.slots.find(s=>s.id===slot);return s?`${s.start}–${s.endDayOffset?'次日':''}${s.end}`:'';}
 function slotTimeLines(slot){const s=state.config.slots.find(s=>s.id===slot);return s?`${s.start}<br>–${s.endDayOffset?'次日':''}${s.end}`:'';}
 function safeAvatar(url){return typeof url==='string' && (/^data:image\/(?:png|jpeg|webp);base64,[A-Za-z0-9+/=]+$/.test(url)||/^\/api\/talents\/[A-Za-z0-9-]+\/avatar\?v=[a-f0-9]{64}$/.test(url));}
-function avatar(person,size=''){return `<span class="avatar ${size}">${safeAvatar(person?.avatar)?`<img src="${esc(person.avatar)}" loading="lazy" decoding="async" alt="${esc(person.name)}的头像">`:esc((person?.name||'待').slice(0,1))}</span>`;}
+function avatar(person,size=''){return `<span class="avatar ${size}">${safeAvatar(person?.avatar)?`<img src="${esc(person.avatar.startsWith("/")?"."+person.avatar:person.avatar)}" loading="lazy" decoding="async" alt="${esc(person.name)}的头像">`:esc((person?.name||'待').slice(0,1))}</span>`;}
 function talentProfileButton(person,extraClass=''){return `<span class="talent-content-actions ${extraClass}"><button type="button" class="talent-profile-button" data-action="talent-profile" data-id="${esc(person.id)}" aria-label="查看${esc(person.name)}的身份简介">身份简介</button><button type="button" class="talent-profile-button talent-stories-button" data-action="talent-stories" data-id="${esc(person.id)}" aria-label="查看${esc(person.name)}的最近剧情">最近剧情</button></span>`;}
 function businessClass(b){return b==='虾皮'?'business-shopee':b==='国内'?'business-domestic':'';}
 function stat(label,value,unit,ico){return `<div class="stat"><div><span>${label}</span><strong>${value}</strong><small>${unit}</small></div>${icon(ico)}</div>`;}
@@ -155,6 +156,10 @@ function managerFooter(){
   return `<footer class="manager-footer"><strong>${state.user?`管理员：${esc(state.user.displayName)}`:'管理员入口'}</strong>${actions}</footer>`;
 }
 function renderEntry(){
+  if(requestedModule==='admin'){
+    $('#app').innerHTML='<main class="simple-entry"><h1>管理员登录</h1></main>';
+    return;
+  }
   $('#app').innerHTML=`<main class="simple-entry"><section class="simple-entry-card"><div class="simple-entry-title"><span class="brand-mark">同</span><h1>预约工作台</h1>${systemVersionButton()}</div><div class="simple-entry-actions"><button class="simple-entry-action" data-action="choose-role" data-role="venue">${icon('room')}<span>看场地</span>${icon('arrow')}</button><button class="simple-entry-action" data-action="choose-role" data-role="host">${icon('people')}<span>看卖手</span>${icon('arrow')}</button><button class="simple-entry-action admin" data-action="login">${icon('shield')}<span>${state.user?'管理后台':'管理员登录'}</span>${icon('arrow')}</button></div></section></main>`;
 }
 function render(){
@@ -164,7 +169,7 @@ function render(){
   if(state.page==='audit'&&state.user?.username!=='owner')state.page='rooms';
   const titles={rooms:'场地预约',schedule:'卖手预约',talents:'人才总库',audit:'安全日志','slot-config':'部门与场次'};
   const nav=navItems().map(([page,ico])=>`<button data-action="page" data-page="${page}" class="${state.page===page?'active':''}" ${state.page===page?'aria-current="page"':''}>${icon(ico)}${titles[page]}${page==='talents'?`<small>${state.talents.filter(t=>t.active).length}</small>`:''}</button>`).join('');
-  const identity=state.user?`<div class="identity-card"><strong>管理员 · ${esc(state.user.displayName)}</strong><div class="identity-actions"><button class="text-button" data-action="logout">返回首页</button></div></div>`:`<div class="identity-card"><strong>${esc(roles[state.role])}</strong><div class="identity-actions"><button class="text-button" data-action="switch-role">返回首页</button><button class="text-button" data-action="login">管理员登录</button></div></div>`;
+  const identity=state.user?`<div class="identity-card"><strong>管理员 · ${esc(state.user.displayName)}</strong><div class="identity-actions"><button class="text-button" data-action="home">返回首页</button></div></div>`:`<div class="identity-card"><strong>${esc(roles[state.role])}</strong><div class="identity-actions"><button class="text-button" data-action="home">返回首页</button><button class="text-button" data-action="login">管理员登录</button></div></div>`;
   if(!state.dataReady){
     $('#app').innerHTML=`<main class="initial-data-loading"><div class="navigation-controls"><button class="text-button" data-action="go-back">返回</button><button class="text-button" data-action="home">首页</button></div><section class="panel" role="status"><p>${state.error?esc(state.error):'正在读取最新安排…'}</p>${state.error?'<button class="button secondary" data-action="refresh">重新读取</button>':''}</section></main>`;
     return;
@@ -172,13 +177,70 @@ function render(){
   $('#app').innerHTML=`<div class="shell ${state.page==='rooms'?'rooms-page':''} ${state.page==='schedule'?'schedule-page':''} ${state.page==='schedule'&&state.schedulePicked&&!state.schedulePickerEditing?'schedule-selected':''} ${state.user?'is-admin':''}"><aside class="sidebar"><div class="navigation-controls" aria-label="页面返回"><button class="text-button" data-action="go-back" aria-label="返回上一层">${icon('left')}返回</button><button class="text-button" data-action="home" aria-label="回到主页面">首页</button></div><nav class="nav" aria-label="主导航">${nav}</nav><div class="sidebar-bottom">${identity}</div></aside><div class="workspace"><header class="topbar"><h1>${titles[state.page]}</h1><div class="top-right"><span class="status ${state.connected?'':'offline'}" id="sync-state">${syncText()}</span><span class="mobile-brand"><button class="text-button" data-action="home">首页</button></span>${state.user?`<span class="admin-badge">${esc(state.user.displayName)}</span><button class="text-button mobile-brand" data-action="logout">退出登录</button>`:`<button class="button outline small" data-action="login">管理员登录</button>`}</div></header><main class="content">${state.error?`<div class="banner-error"><span>${esc(state.error)}</span><button class="button secondary small" data-action="refresh">重试</button></div>`:''}${state.page==='rooms'?renderRooms():state.page==='schedule'?renderScheduleV2():state.page==='audit'?renderAudit():state.page==='slot-config'?renderSlotConfig():renderTalents()}</main>${managerFooter()}</div></div>`;
 }
 function syncText(){return state.loading?'正在同步…':state.connected?`已同步 ${state.syncAt||''}`:'连接中断';}
+function roomDirectory(){
+  return state.config.roomDirectory || state.config.rooms.map(name=>({id:'',name,active:true,archived:false}));
+}
+
+function roomBookingMatches(booking,room){
+  return booking.roomId&&room.id ? booking.roomId===room.id : booking.room===room.name;
+}
+
+function roomManagementContent(){
+  const rooms=roomDirectory();
+  return `<div class="directory-management">
+    <button type="button" class="button small" data-action="new-room">${icon('plus')}新增房间</button>
+    <ul class="directory-list">${rooms.map(room=>{
+      const status=room.archived?'已归档':room.active?'启用中':'已停用';
+      const id=esc(room.id);
+      return `<li><div><strong>${esc(room.name)}</strong><span class="muted">${status}</span></div>
+        <div class="directory-actions">${!room.id?'':room.archived
+          ?`<button type="button" class="text-button" data-action="restore-room" data-id="${id}">恢复房间</button>`
+          :`<button type="button" class="text-button" data-action="edit-room" data-id="${id}">改名</button>
+             <button type="button" class="text-button" data-action="toggle-room" data-id="${id}">${room.active?'停用':'启用'}</button>
+             <button type="button" class="text-button department-delete" data-action="delete-room" data-id="${id}">删除</button>`}</div></li>`;
+    }).join('')}</ul>
+  </div>`;
+}
+
+function openRoomManagement(){
+  if(!state.user)return openLogin();
+  openModal('房间管理','',roomManagementContent(),{kind:'room-management'});
+}
+
+function openRoomEditor(action,id){
+  if(!state.user)return openLogin();
+  const room=roomDirectory().find(item=>item.id===id);
+  if(action!=='new-room'&&!room)return toast('该房间已更新，请刷新后再操作');
+  const title={
+    'new-room':'新增房间','edit-room':'房间改名','toggle-room':room?.active?'停用房间':'启用房间',
+    'delete-room':'删除房间','restore-room':'恢复房间'
+  }[action];
+  const changesName=action==='new-room'||action==='edit-room';
+  const formBody=changesName
+    ?`<label>房间名称<input name="name" maxlength="80" value="${esc(room?.name)}" required></label>`
+    :`<p class="help-text">确认${title.slice(0,2)}「${esc(room.name)}」？</p>`;
+  openModal(title,'',`<form id="room-directory-form">${formBody}
+    ${action==='delete-room'||(action==='toggle-room'&&room?.active)?'<p class="form-notice">已有预约会保留，房间停止接受新预约。</p>':''}
+    <div class="form-error" id="form-error"></div>
+    <div class="modal-actions"><button type="button" class="button secondary" data-action="close-modal">取消</button>
+    <button type="submit" class="button ${action==='delete-room'?'danger':''}">${changesName?'保存名称':title}</button></div></form>`,
+    {kind:'room-directory-editor',action,id,active:room?.active});
+}
+
 function renderRooms(){
   const dayCount=roomViewDays();
   const viewDates=Array.from({length:dayCount},(_,i)=>addDays(state.date,i));
   const viewBookings=state.bookings.filter(b=>viewDates.includes(b.date));
-  const totalSlots=state.config.rooms.length*state.config.slots.length*viewDates.length;
+  const directory=roomDirectory();
+  const activeRooms=directory.filter(room=>room.active&&!room.archived);
+  const retiredRooms=directory.filter(room=>!room.active||room.archived);
+  const visibleRooms=state.showRetiredRoomBookings
+    ? activeRooms.concat(retiredRooms.filter(room=>viewBookings.some(booking=>roomBookingMatches(booking,room))))
+    : activeRooms;
+  const totalSlots=activeRooms.length*state.config.slots.length*viewDates.length;
+  const activeBookings=viewBookings.filter(booking=>activeRooms.some(room=>roomBookingMatches(booking,room)));
   const rangeLabel=dayCount===1?`${dateLabel(state.date)} · 周${weekLabel(state.date)}`:`${dateLabel(viewDates[0])} 至 ${dateLabel(viewDates.at(-1))}`;
-  return `<div class="page-heading compact-heading"><h2>${rangeLabel}</h2><span class="pill">${state.config.rooms.length} 间场地 · ${totalSlots-viewBookings.length} 个空闲</span></div>
+  return `<div class="page-heading compact-heading"><h2>${rangeLabel}</h2><span class="pill">${activeRooms.length} 间场地 · ${totalSlots-activeBookings.length} 个空闲</span></div>
     <section class="panel room-board-panel">
       <div class="panel-head room-board-head">
         <div class="room-board-description"><h2>场地时段</h2><p>${state.user?'点击空闲格预约，点击已预约格查看详情。':'点击查看时段详情，仅管理员可预约。'}</p></div>
@@ -189,18 +251,24 @@ function renderRooms(){
           <button class="button secondary small" data-action="room-today">今天</button>
         </div>
       </div>
-      <div class="room-board-scroll"><div class="room-board" style="--room-count:${state.config.rooms.length}">
+      ${state.user||retiredRooms.length?`<div class="room-management-bar">
+        ${retiredRooms.length?`<button class="button secondary small" type="button" data-action="toggle-retired-room-bookings" aria-pressed="${state.showRetiredRoomBookings}">${state.showRetiredRoomBookings?'隐藏停用房间预约':'查看停用房间预约'}</button>`:''}
+        ${state.user?'<button class="button secondary small" type="button" data-action="manage-rooms">房间管理</button>':''}
+        </div>`:''}
+      ${!visibleRooms.length?'<p class="room-directory-empty">暂无可显示的场地。</p>':`<div class="room-board-scroll"><div class="room-board" style="--room-count:${visibleRooms.length}">
         <div class="room-board-dates"><div class="corner-cell">直播间</div>${viewDates.map(d=>`<div class="board-date" style="grid-column:span ${state.config.slots.length}"><b>${dateLabel(d)}</b><small>${d===today()?'今天':'周'+weekLabel(d)}</small></div>`).join('')}</div>
         <div class="room-board-slots"><div class="corner-cell muted">房间</div>${viewDates.map(()=>state.config.slots.map(slot=>`<div><b>${esc(slot.name)}</b><small>${slotTime(slot.id)}</small></div>`).join('')).join('')}</div>
-        ${state.config.rooms.map((room,index)=>`<div class="room-board-row">
-          <div class="board-room"><strong>${esc(room)}</strong><small>${pad(index+1)}</small></div>
+        ${visibleRooms.map((room,index)=>`<div class="room-board-row">
+          <div class="board-room"><strong>${esc(room.name)}</strong><small>${room.archived?'已归档':room.active?pad(index+1):'已停用'}</small></div>
           ${viewDates.map(date=>state.config.slots.map(slot=>{
-            const b=viewBookings.find(b=>b.date===date&&b.room===room&&b.slot===slot.id),past=date<today();
-            return `<button class="board-slot ${b?'booked':''}" data-action="room-slot" data-date="${date}" data-room="${esc(room)}" data-slot="${slot.id}" ${(!state.connected||(!b&&past))?'disabled':''} aria-label="${esc(room)} ${date} ${slot.name} ${b?'已预约':'空闲'}"><b>${b?esc(b.department):past?'已结束':'空闲'}</b><small>${b?esc(b.bookerName):slotTime(slot.id)}</small></button>`;
+            const booking=viewBookings.find(item=>item.date===date&&roomBookingMatches(item,room)&&item.slot===slot.id);
+            const past=date<today();
+            const status=booking?'已预约':!room.active||room.archived?'已停用':past?'已结束':'空闲';
+            return `<button class="board-slot ${booking?'booked':''}" data-action="room-slot" data-date="${date}" data-room-id="${esc(room.id)}" data-room="${esc(room.name)}" data-slot="${slot.id}" ${(!state.connected||(!booking&&(past||!room.active||room.archived)))?'disabled':''} aria-label="${esc(room.name)} ${date} ${slot.name} ${status}"><b>${booking?esc(booking.department):status}</b><small>${booking?esc(booking.bookerName):slotTime(slot.id)}</small></button>`;
           }).join('')).join('')}
         </div>`).join('')}
       </div></div>
-      <div class="calendar-footer"><div class="legend"><span><i class="dot"></i>空闲</span><span><i class="dot booked"></i>已预约</span></div><span class="room-board-hint">${dayCount===1?`${state.config.rooms.length} 间 · 周${weekLabel(state.date)}`:'左右滑动查看日期'}</span></div>
+      <div class="calendar-footer"><div class="legend"><span><i class="dot"></i>空闲</span><span><i class="dot booked"></i>已预约</span></div><span class="room-board-hint">${dayCount===1?`${visibleRooms.length} 间 · 周${weekLabel(state.date)}`:'左右滑动查看日期'}</span></div>`}
     </section>`;
 }
 function renderSchedulePicker(){
@@ -224,7 +292,7 @@ function scheduleSegments(viewDates,schedules,slot){
 }
 function posterPerson(person,index){
   if(!person)return `<div class="poster-person poster-person-vacant"><span class="poster-photo poster-photo-empty">${icon('person')}<em>第${index+1}位</em></span><strong>待安排</strong><small>尚未安排卖手</small></div>`;
-  const portrait=safeAvatar(person.avatar)?`<img src="${esc(person.avatar)}" decoding="async" alt="${esc(person.name)}的头像">`:`<span class="poster-avatar-fallback">${esc(person.name.slice(0,1))}<small>未上传头像</small></span>`;
+  const portrait=safeAvatar(person.avatar)?`<img src="${esc(person.avatar.startsWith("/")?"."+person.avatar:person.avatar)}" decoding="async" alt="${esc(person.name)}的头像">`:`<span class="poster-avatar-fallback">${esc(person.name.slice(0,1))}<small>未上传头像</small></span>`;
   return `<div class="poster-person"><button type="button" class="poster-photo" data-action="talent-photo" data-id="${esc(person.id)}" aria-label="放大查看${esc(person.name)}的完整照片">${portrait}<b class="poster-number">${esc(person.number)}</b></button><div class="poster-person-caption"><span><strong>${esc(person.name)}</strong><small>${esc(person.number)}</small></span>${talentProfileButton(person)}</div></div>`;
 }
 function posterPeople(schedule){
@@ -264,8 +332,28 @@ function renderScheduleV2(){
   return controls+`<section class="panel seller-board-panel">${content}<div class="calendar-footer"><span>常规安排2位 · 特殊场次可加第3位 · 身份简介、最近剧情可分别点开</span></div></section>`;
 }
 function renderTalents(){
-  const q=state.search.toLocaleLowerCase(),people=state.talents.filter(t=>(state.talentStatus==='all'||(state.talentStatus==='active'?t.active:!t.active))&&`${t.number} ${t.name}`.toLocaleLowerCase().includes(q));
-  return `<div class="page-heading compact-heading"><h2>卖手维护</h2>${state.user?`<button class="button" data-action="new-talent">${icon('plus')}录入卖手</button>`:'<span class="pill">仅管理员可编辑</span>'}</div><div class="talent-tools"><div class="search">${icon('search')}<input id="talent-search" type="search" value="${esc(state.search)}" placeholder="搜索名字或编号" aria-label="搜索卖手"></div><select id="talent-status" aria-label="人员状态">${selectOptions([{v:'active',l:'可排班人员'},{v:'inactive',l:'暂停排班'},{v:'all',l:'全部人员'}],state.talentStatus,v=>v.l,v=>v.v)}</select><span class="muted" style="font-size:11px">共 ${people.length} 位</span></div><div class="talents-grid">${people.length?people.map(p=>`<article class="talent-card"><div class="talent-info">${avatar(p,'large')}<div><h3>${esc(p.name)}</h3><p>编号 ${esc(p.number)}</p></div></div><div class="talent-card-foot"><span>${p.active?'● 可排班':'○ 已暂停'}</span><div class="talent-card-actions">${talentProfileButton(p)}${state.user?`<button class="text-button" data-action="edit-talent" data-id="${esc(p.id)}">编辑资料</button>`:`<span>本月 ${state.schedules.filter(s=>scheduleTalentIds(s).includes(p.id)).length} 场</span>`}</div></div></article>`).join(''):`<div class="empty">${icon('people')}<h3>${state.talents.length?'没有找到符合条件的卖手':'暂无卖手'}</h3><p>${state.user?'录入头像、姓名和编号后即可排班。':'请联系管理员录入人员。'}</p>${state.user?'<button class="button" data-action="new-talent">录入卖手</button>':''}</div>`}</div>`;
+  const q=state.search.toLocaleLowerCase();
+  const statuses={active:'可排班',inactive:'已停用',archived:'已归档',all:'全部人员'};
+  const people=state.talents.filter(person=>{
+    const status=person.archived?'archived':person.active?'active':'inactive';
+    return (state.talentStatus==='all'||state.talentStatus===status)
+      && `${person.number} ${person.name}`.toLocaleLowerCase().includes(q);
+  });
+  return `<div class="page-heading compact-heading"><h2>卖手维护</h2>
+    <button class="button" type="button" data-action="new-talent">${icon('plus')}录入卖手</button></div>
+    <div class="talent-tools"><div class="search">${icon('search')}<input id="talent-search" type="search" value="${esc(state.search)}" placeholder="搜索名字或编号" aria-label="搜索卖手"></div>
+    <select id="talent-status" aria-label="人员状态">${selectOptions(Object.keys(statuses),state.talentStatus,key=>statuses[key])}</select><span class="muted">共 ${people.length} 位</span></div>
+    <div class="talents-grid">${people.map(person=>{
+      const id=esc(person.id);
+      const status=person.archived?'archived':person.active?'active':'inactive';
+      return `<article class="talent-card"><div class="talent-info">${avatar(person,'large')}<div><h3>${esc(person.name)}</h3><p>编号 ${esc(person.number)}</p></div></div>
+        <div class="talent-card-foot"><span>${statuses[status]}</span><div class="talent-card-actions">
+        ${talentProfileButton(person)}
+        ${person.archived?`<button class="text-button" data-action="restore-talent" data-id="${id}">恢复卖手</button>`:
+          `<button class="text-button" data-action="edit-talent" data-id="${id}">编辑资料</button>
+          <button class="text-button" data-action="toggle-talent" data-id="${id}">${person.active?'停用':'启用'}</button>
+          <button class="text-button department-delete" data-action="delete-talent" data-id="${id}">删除</button>`}</div></div></article>`;
+    }).join('')||'<div class="empty"><h3>没有找到符合条件的卖手</h3></div>'}</div>`;
 }
 function renderSlotConfig(){
   const departments=state.config?.departments||[];
@@ -278,7 +366,16 @@ function renderSlotConfig(){
   const slots=state.config?.slots||[];
   const orphanedDraft=draft&&!activeDepartment(draft.department)?.groups.includes(draft.group);
   const heading=`<div class="page-heading compact-heading department-management-heading"><div><h2>部门与场次</h2><p>管理员可新增、改名、删除部门与组别，并设置早、中、晚场。</p></div><button class="button" data-action="new-department">${icon('plus')}新增部门</button></div>${orphanedDraft?`<div class="banner-error department-orphaned-draft" role="alert"><strong>刚才编辑的部门或组别已停用，场次草稿尚未保存。</strong><span>${esc(departmentById(draft.department)?.name||'原部门')} · ${esc(draft.group)}：${draft.slots.length?draft.slots.map(slotName).map(esc).join(' / '):'未勾选场次'}</span><span>重新选择部门或组别，或点“恢复当前设置”后再编辑。</span></div>`:''}`;
-  if(!selectedDepartment)return heading+`<section class="panel department-empty"><h2>暂无部门</h2><p>新增一个部门和组别后，即可安排卖手。已有排班仍可从卖手搜索查看。</p><button class="button" data-action="new-department">新增第一个部门</button></section>`;
+  const archived=state.config.archivedDepartments||[];
+  const retiredGroups=selectedDepartment?.archivedGroups||[];
+  const recovery=(archived.length||retiredGroups.length)?`<section class="panel directory-recovery">
+    <h2>恢复已归档部门和组别</h2>
+    <ul class="directory-list">
+      ${archived.map(department=>`<li><strong>${esc(department.name)}</strong><button type="button" class="text-button" data-action="restore-department" data-id="${esc(department.id)}">恢复部门</button></li>`).join('')}
+      ${retiredGroups.map(name=>`<li><strong>${esc(selectedDepartment.name)} · ${esc(name)}</strong><button type="button" class="text-button" data-action="restore-department-group" data-group="${esc(name)}">恢复组别</button></li>`).join('')}
+    </ul>
+  </section>`:'';
+  if(!selectedDepartment)return heading+`<section class="panel department-empty"><h2>暂无部门</h2><p>新增一个部门和组别后，即可安排卖手。已有排班仍可从卖手搜索查看。</p><button class="button" data-action="new-department">新增第一个部门</button></section>`+recovery;
   return heading+`
     <section class="panel slot-config-panel">
       <div class="panel-head"><div><h2>${esc(selectedDepartment.name)}</h2><p>${selectedDepartment.groups.length} 个组 · 仅管理员可编辑</p></div><div class="department-manage-actions"><button type="button" class="button secondary small" data-action="rename-department">改名</button><button type="button" class="text-button department-delete" data-action="delete-department">删除部门</button></div></div>
@@ -294,15 +391,24 @@ function renderSlotConfig(){
         <div class="form-error" id="slot-config-error"></div>
         <div class="modal-actions"><button class="button secondary" type="button" data-action="slot-config-reset">恢复当前设置</button><button class="button" type="submit" ${orphanedDraft?'disabled':''}>保存场次设置</button></div>
       </form>
-    </section>`;
+    </section>`+recovery;
 }
 function departmentSlotFields(selected=state.config.slotIds||state.config.slots.map(slot=>slot.id)){
   return `<fieldset class="slot-config-options"><legend>启用场次</legend><div class="slot-config-grid">${state.config.slots.map(slot=>`<label class="slot-config-option ${selected.includes(slot.id)?'is-active':''}"><input type="checkbox" name="slot" value="${esc(slot.id)}" ${selected.includes(slot.id)?'checked':''}><span><strong>${esc(slot.name)}</strong><small>${esc(slotTime(slot.id))}</small></span></label>`).join('')}</div></fieldset>`;
 }
-function openDepartmentEditor(action){
+function openDepartmentEditor(action,id,archivedGroup){
   if(!state.user)return openLogin();
   const selected=activeDepartment(state.slotConfigDepartment),group=state.slotConfigGroup;
+  if(action==='restore-department'){
+    const target=state.config.archivedDepartments?.find(item=>item.id===id);
+    if(!target)return toast('该部门已更新，请刷新后再操作');
+    return openModal('恢复部门',esc(target.name),`<form id="restore-department-form"><p class="help-text">恢复后，可在该部门现有组别继续新增排班。</p><div class="form-error" id="form-error"></div><div class="modal-actions"><button type="button" class="button secondary" data-action="close-modal">取消</button><button type="submit" class="button">恢复部门</button></div></form>`,{kind:'department-restore',department:id});
+  }
   if(action!=='new-department'&&!selected)return toast('该部门已删除，请重新选择');
+  if(action==='restore-department-group'){
+    if(!selected.archivedGroups?.includes(archivedGroup))return toast('该组别已更新，请刷新后再操作');
+    return openModal('恢复组别',`${esc(selected.name)} · ${esc(archivedGroup)}`,`<form id="restore-department-group-form">${departmentSlotFields(selected.groupSlots?.[archivedGroup]||selected.slots)}<div class="form-error" id="form-error"></div><div class="modal-actions"><button type="button" class="button secondary" data-action="close-modal">取消</button><button type="submit" class="button">恢复组别</button></div></form>`,{kind:'department-restore',department:selected.id,group:archivedGroup});
+  }
   if(action==='new-department')return openModal('新增部门','',`<form id="department-form"><label>部门名称<input name="name" required maxlength="40" placeholder="例如：六部"></label><label>初始组别<textarea name="groups" required rows="3" maxlength="1000" placeholder="每行填写一个组别">一组</textarea><small>每行一个组别，每个名称最多20字。</small></label>${departmentSlotFields()}<div class="form-error" id="form-error"></div><div class="modal-actions"><button type="button" class="button secondary" data-action="close-modal">取消</button><button type="submit" class="button">新增部门</button></div></form>`,{kind:'department-editor'});
   if(action==='rename-department')return openModal('部门改名','',`<form id="rename-department-form"><label>部门名称<input name="name" required maxlength="40" value="${esc(selected.name)}"></label><p class="help-text">改名后，原组别和已有排班继续保留。</p><div class="form-error" id="form-error"></div><div class="modal-actions"><button type="button" class="button secondary" data-action="close-modal">取消</button><button type="submit" class="button">保存名称</button></div></form>`,{kind:'department-editor',department:selected.id});
   if(action==='new-department-group')return openModal('新增组别',esc(selected.name),`<form id="department-group-form"><label>组别名称<input name="name" required maxlength="20" placeholder="例如：五组"><small>最多20字。</small></label>${departmentSlotFields()}<div class="form-error" id="form-error"></div><div class="modal-actions"><button type="button" class="button secondary" data-action="close-modal">取消</button><button type="submit" class="button">新增组别</button></div></form>`,{kind:'department-editor',department:selected.id});
@@ -428,7 +534,8 @@ function openModal(title,subtitle,body,context={}){
     while(modal.firstChild)content.appendChild(modal.firstChild);
   }
   modalContext={...context,returnView};
-  modal.innerHTML=`<div class="modal-head"><div><h2 id="modal-title">${title}</h2>${subtitle?`<small>${subtitle}</small>`:''}</div><button class="icon-button" data-action="close-modal" aria-label="关闭弹窗">${icon('close')}</button><div class="modal-navigation"><button type="button" class="text-button" data-action="go-back">${icon('left')}返回上一层</button><button type="button" class="text-button" data-action="home">回到主页面</button></div></div><div class="modal-body">${body}</div>`;
+  const directAdminLogin=context.kind==='login'&&requestedModule==='admin'&&!state.role;
+  modal.innerHTML=`<div class="modal-head"><div><h2 id="modal-title">${title}</h2>${subtitle?`<small>${subtitle}</small>`:''}</div><button class="icon-button" data-action="close-modal" aria-label="关闭弹窗">${icon('close')}</button><div class="modal-navigation">${directAdminLogin ? '' : `<button type="button" class="text-button" data-action="go-back">${icon('left')}返回上一层</button>`}<a class="cooperation-modal-return" href="../">返回协作中心</a></div></div><div class="modal-body">${body}</div>`;
   modal.dataset.kind=context.kind||'';
   prepareModalForm();syncModalViewport();
   window.TalentPicker?.enhanceAll(modal,state.talents,person=>avatar(person,'large'));
@@ -437,6 +544,10 @@ function openModal(title,subtitle,body,context={}){
 }
 function closeModal(all=false){
   if(modalContext?.busy)return;
+  if(!all&&modalContext?.kind==='login'&&requestedModule==='admin'&&!state.role){
+    location.replace('../');
+    return;
+  }
   const modal=$('#modal'),returnView=modalContext?.returnView;
   if(modalContext?.kind==='talent-search'){clearTimeout(modalContext.searchTimer);modalContext.loadRun=(modalContext.loadRun||0)+1;}
   if(returnView&&!all){
@@ -526,7 +637,7 @@ async function openSearchSchedule(id){
 }
 function openTalentPhoto(id){
   const person=talent(id);if(!person)return toast('卖手资料已更新，请刷新后查看');
-  openModal('卖手照片',`${esc(person.name)} · 编号 ${esc(person.number)}`,`${safeAvatar(person.avatar)?`<div class="full-talent-photo"><img src="${esc(person.avatar)}" alt="${esc(person.name)}的完整照片" decoding="async"></div>`:'<p class="help-text">尚未上传照片</p>'}<div class="modal-actions"><button type="button" class="button secondary" data-action="talent-profile" data-id="${esc(id)}">身份简介</button><button type="button" class="button secondary" data-action="close-modal">返回排班</button></div>`,{kind:'talent-photo',id});
+  openModal('卖手照片',`${esc(person.name)} · 编号 ${esc(person.number)}`,`${safeAvatar(person.avatar)?`<div class="full-talent-photo"><img src="${esc(person.avatar.startsWith("/")?"."+person.avatar:person.avatar)}" alt="${esc(person.name)}的完整照片" decoding="async"></div>`:'<p class="help-text">尚未上传照片</p>'}<div class="modal-actions"><button type="button" class="button secondary" data-action="talent-profile" data-id="${esc(id)}">身份简介</button><button type="button" class="button secondary" data-action="close-modal">返回排班</button></div>`,{kind:'talent-photo',id});
 }
 function openTalentProfile(id,trigger){
   const person=talent(id);if(!person)return toast('卖手资料已更新，请刷新后查看');
@@ -572,6 +683,20 @@ function openLogin(){
 function openTalent(id){
   if(!state.user)return openLogin();const p=id?talent(id):null;
   openModal(p?'编辑卖手资料':'录入新卖手','',`<form id="talent-form" style="display:grid;gap:18px"><div class="upload-row"><div id="avatar-preview">${avatar(p,'large')}</div><label>图片头像<input type="file" id="avatar-file" accept="image/jpeg,image/png,image/webp"><small>JPG、PNG、WebP</small></label></div><div class="form-grid"><label>卖手姓名<input name="name" required maxlength="40" value="${esc(p?.name||'')}" placeholder="填写姓名"></label><label>人员编号<input name="number" required maxlength="20" value="${esc(p?.number||'')}" placeholder="例如：0001"></label></div><label>卖手简介 <small>选填</small><textarea name="introduction" rows="4" maxlength="2000" placeholder="填写身份、人设及合作特点">${esc(p?.introduction||'')}</textarea><small>对查看排班的人公开，最多2000字。</small></label>${p?`<label>排班状态<select name="active">${selectOptions([{v:'true',l:'可排班'},{v:'false',l:'暂停新排班（保留已有安排）'}],String(p.active),v=>v.l,v=>v.v)}</select></label>`:''}<div class="form-error" id="form-error"></div><div class="modal-actions"><button type="button" class="button secondary" data-action="close-modal">取消</button><button class="button" type="submit">${p?'保存资料':'录入人才总库'}</button></div></form>`,{kind:'talent',id:p?.id,avatar:p?.avatar||''});
+}
+function openTalentLifecycle(action,id){
+  if(!state.user)return openLogin();
+  const person=talent(id);
+  if(!person)return toast('该卖手已更新，请刷新后再操作');
+  const title=action==='restore-talent'?'恢复卖手':action==='delete-talent'?'删除卖手':person.active?'停用卖手':'启用卖手';
+  const retires=action==='delete-talent'||(action==='toggle-talent'&&person.active);
+  openModal(title,esc(person.name),`<form id="talent-directory-form">
+    <p class="help-text">确认${title.slice(0,2)}「${esc(person.name)}」？</p>
+    ${retires?'<p class="form-notice">已有排班、资料和剧情会保留，此卖手停止参与新增排班。</p>':''}
+    <div class="form-error" id="form-error"></div><div class="modal-actions">
+      <button type="button" class="button secondary" data-action="close-modal">取消</button>
+      <button type="submit" class="button ${action==='delete-talent'?'danger':''}">${title}</button></div></form>`,
+    {kind:'talent-directory',action,id,active:person.active});
 }
 async function readAvatar(file){
   if(!file)return '';if(!['image/jpeg','image/png','image/webp'].includes(file.type))throw new Error('请选择 JPG、PNG 或 WebP 图片');if(file.size>10*1024*1024)throw new Error('请选择 10 MB 以内的图片');
@@ -726,12 +851,14 @@ function confirmDeleteSchedule(id){
   const names=schedulePeople(s).map(p=>p.name).join('、')||'当前卖手';
   openModal('取消这一天的排班',`${s.date} · ${slotName(s.slot)}`,`<p class="help-text">${esc(names)}在这一天的安排将被移除；其他日期的安排不变。</p><div class="form-error" id="form-error"></div><form id="delete-schedule-form"><div class="modal-actions"><button type="button" class="button secondary" data-action="close-modal">保留安排</button><button type="submit" class="button danger">确认取消当天</button></div></form>`,{kind:'delete-schedule',id});
 }
-function openRoom(room,slot,date=state.date){
-  const b=state.bookings.find(b=>b.date===date&&b.room===room&&b.slot===slot);
+function openRoom(room,slot,date=state.date,roomId){
+  const record=roomDirectory().find(item=>roomId?item.id===roomId:item.name===room);
+  const b=state.bookings.find(b=>b.date===date&&roomBookingMatches(b,{id:roomId,name:room})&&b.slot===slot);
   if(b){openModal('场地预约详情',`${date} · ${esc(room)} · ${slotName(slot)}`,`<dl class="detail-list"><div><dt>预约部门</dt><dd>${esc(b.department)}</dd></div><div><dt>预约人</dt><dd>${esc(b.bookerName)}</dd></div><div><dt>时间</dt><dd>${slotTime(slot)}</dd></div>${b.note?`<div><dt>备注</dt><dd>${esc(b.note)}</dd></div>`:''}</dl><div class="form-notice">该时段已经预约，其他人员无法重复预约。</div><div class="modal-actions">${state.user&&date>=today()?`<button class="button danger" data-action="confirm-cancel-room" data-id="${esc(b.id)}">释放时段</button>`:''}<button class="button secondary" data-action="close-modal">关闭</button></div>`,{kind:'room-detail',id:b.id});return;}
   if(date<today())return toast('过去的日期只可查看');
+  if(!record?.active||record.archived)return toast('该房间已停用，请重新选择');
   if(!state.user){openModal('场地时段详情',`${date} · ${esc(room)} · ${slotName(slot)}`,`<dl class="detail-list"><div><dt>状态</dt><dd>空闲</dd></div><div><dt>时间</dt><dd>${slotTime(slot)}</dd></div></dl><div class="form-notice">仅管理员可以预约或释放场地。</div><div class="modal-actions"><button class="button secondary" data-action="close-modal">返回</button></div>`,{kind:'room-detail'});return;}
-  openModal('预约场地',`${date} · ${esc(room)} · ${slotName(slot)} ${slotTime(slot)}`,`<form id="room-form" style="display:grid;gap:18px"><div class="form-grid"><label>预约部门<input name="department" value="${esc(recall('tongchang-department'))}" maxlength="60" required placeholder="例如：直播一部"></label><label>预约人<input name="bookerName" value="${esc(recall('tongchang-booker'))}" maxlength="40" required placeholder="填写姓名"></label></div><label>备注 <small>选填</small><textarea name="note" maxlength="300" placeholder="填写用途或需要说明的事项"></textarea></label><div class="form-notice">保存后，同一日期与时段将对所有人员显示为已预约。</div><div class="form-error" id="form-error"></div><div class="modal-actions"><button class="button secondary" type="button" data-action="close-modal">取消</button><button class="button" type="submit">确认预约</button></div></form>`,{kind:'book-room',date,room,slot});
+  openModal('预约场地',`${date} · ${esc(room)} · ${slotName(slot)} ${slotTime(slot)}`,`<form id="room-form" style="display:grid;gap:18px"><div class="form-grid"><label>预约部门<input name="department" value="${esc(recall('tongchang-department'))}" maxlength="60" required placeholder="例如：直播一部"></label><label>预约人<input name="bookerName" value="${esc(recall('tongchang-booker'))}" maxlength="40" required placeholder="填写姓名"></label></div><label>备注 <small>选填</small><textarea name="note" maxlength="300" placeholder="填写用途或需要说明的事项"></textarea></label><div class="form-notice">保存后，同一日期与时段将对所有人员显示为已预约。</div><div class="form-error" id="form-error"></div><div class="modal-actions"><button class="button secondary" type="button" data-action="close-modal">取消</button><button class="button" type="submit">确认预约</button></div></form>`,{kind:'book-room',date,room,roomId,slot});
 }
 function confirmCancelRoom(id){
   if(!state.user)return toast('仅管理员可以释放场地');
@@ -775,11 +902,12 @@ document.addEventListener('click',async e=>{
     if(a==='schedule-group'||a==='pick-schedule-room'){const id=el.dataset.dept||el.dataset.id;if(!activeDepartment(id)?.groups.includes(el.dataset.group))return toast('该直播间已停用，请重新选择');navigate({department:id,group:el.dataset.group,scheduleOpenDept:id,schedulePicked:true,schedulePickerEditing:false});rememberScheduleRoom();if(el.closest('.saved-room-shortcut')&&state.date!==today())await setRoomStart(today());return;}
     if(a==='toggle-favorite-room'){const already=isFavoriteRoom();remember('tongchang-favorite-room',already?'':JSON.stringify({department:state.department,group:state.group}));render();toast(already?'已取消常看直播间':'已设为常看，下次进入可直接查看');return;}
     if(a==='slot-config-reset'){state.slotConfigDraft=null;return render();}
-    if(['new-department','rename-department','delete-department','new-department-group','delete-department-group'].includes(a))return openDepartmentEditor(a);
+    if(['new-department','rename-department','delete-department','new-department-group','delete-department-group','restore-department','restore-department-group'].includes(a))return openDepartmentEditor(a,el.dataset.id,el.dataset.group);
     if(a==='department'){const selected=activeDepartment(el.dataset.id);if(!selected)return;state.department=selected.id;state.group=selected.groups[0];state.schedulePicked=true;state.schedulePickerEditing=false;render();return;}
     if(a==='group'){state.group=el.dataset.group;render();return;}
     if(a==='new-talent')return openTalent();
     if(a==='edit-talent')return openTalent(el.dataset.id);
+    if(['toggle-talent','delete-talent','restore-talent'].includes(a))return openTalentLifecycle(a,el.dataset.id);
     if(a==='find-talent')return openTalentSearch();
     if(a==='retry-talent-search')return loadTalentSearch(modalContext);
     if(a==='search-schedule')return openSearchSchedule(el.dataset.id);
@@ -796,7 +924,15 @@ document.addEventListener('click',async e=>{
     if(a==='schedule-segment')return openScheduleSegment(el.dataset.from,el.dataset.to,el.dataset.slot,el.dataset.business);
     if(a==='schedule-slot')return el.dataset.id?openScheduleDetail(el.dataset.id):openSchedule(el.dataset.date,el.dataset.slot);
     if(a==='confirm-delete-schedule')return confirmDeleteSchedule(el.dataset.id);
-    if(a==='room-slot')return openRoom(el.dataset.room,el.dataset.slot,el.dataset.date);
+    if(a==='room-slot')return openRoom(el.dataset.room,el.dataset.slot,el.dataset.date,el.dataset.roomId);
+    if(a==='manage-rooms')return openRoomManagement();
+    if(a==='toggle-retired-room-bookings'){
+      state.showRetiredRoomBookings=!state.showRetiredRoomBookings;
+      render();
+      $('[data-action="toggle-retired-room-bookings"]')?.focus({preventScroll:true});
+      return;
+    }
+    if(['new-room','edit-room','toggle-room','delete-room','restore-room'].includes(a))return openRoomEditor(a,el.dataset.id);
     if(a==='confirm-cancel-room')return confirmCancelRoom(el.dataset.id);
   }catch(error){toast(error.message);}
 });
@@ -866,7 +1002,7 @@ document.addEventListener('submit',async e=>{
   if(departmentTargetError){protectOpenDepartmentDraft();return;}
   if(context.avatarLoading){$('#form-error').textContent='头像正在处理，请稍等片刻';return;}
   const fields=Object.fromEntries(new FormData(form));for(const key of Object.keys(fields))if(typeof fields[key]==='string')fields[key]=fields[key].trim();
-  const departmentSlotsSelected=['department-form','department-group-form'].includes(form.id)?[...form.querySelectorAll('input[name="slot"]:checked')].map(input=>input.value):null;
+  const departmentSlotsSelected=['department-form','department-group-form','restore-department-group-form'].includes(form.id)?[...form.querySelectorAll('input[name="slot"]:checked')].map(input=>input.value):null;
   if(departmentSlotsSelected&&!departmentSlotsSelected.length){$('#form-error').textContent='至少保留一个可用场次';return;}
   if(form.id==='schedule-form'){
     if(!context.optionsReady){$('#form-error').textContent='正在检查日期和可用人员，请稍候再保存。';return;}
@@ -875,7 +1011,7 @@ document.addEventListener('submit',async e=>{
   const submit=e.submitter||[...form.elements].find(element=>element.type==='submit');context.busy=true;if(submit){submit.disabled=true;submit.dataset.original=submit.textContent;submit.textContent='保存中…';}$('#form-error').textContent='';
   try{
     let success='操作成功';
-    if(['department-form','rename-department-form','delete-department-form','department-group-form','delete-department-group-form'].includes(form.id)){
+    if(['department-form','rename-department-form','delete-department-form','department-group-form','delete-department-group-form','restore-department-form','restore-department-group-form'].includes(form.id)){
       let result;
       const departmentPath='/api/departments/'+encodeURIComponent(context.department||'');
       if(form.id==='department-form'){
@@ -893,6 +1029,14 @@ document.addEventListener('submit',async e=>{
         state.slotConfigDepartment=context.department;state.slotConfigGroup=fields.name;success='组别已新增';
       }
       if(form.id==='delete-department-group-form'){result=await api(departmentPath+'/groups/'+encodeURIComponent(context.group),{method:'DELETE',body:'{}'});success='组别已删除，已有排班保留';}
+      if(form.id==='restore-department-form'){
+        result=await api(departmentPath+'/restore',{method:'POST',body:'{}'});
+        state.slotConfigDepartment=result.department.id;state.slotConfigGroup=result.department.groups[0];success='部门已恢复';
+      }
+      if(form.id==='restore-department-group-form'){
+        result=await api(departmentPath+'/groups',{method:'POST',body:JSON.stringify({name:context.group,slots:departmentSlotsSelected})});
+        state.slotConfigDepartment=context.department;state.slotConfigGroup=context.group;success='组别已恢复';
+      }
       if(result?.departments)state.config={...state.config,departments:result.departments,archivedDepartments:result.archivedDepartments||[]};
       state.slotConfigDraft=null;
     }
@@ -908,6 +1052,41 @@ document.addEventListener('submit',async e=>{
       await api(context.id?'/api/talents/'+encodeURIComponent(context.id):'/api/talents',{method:context.id?'PATCH':'POST',body:JSON.stringify(payload)});
       success=context.id?'卖手资料已更新':'已录入人才总库';
     }
+    if(form.id==='talent-directory-form'){
+      const path='/api/talents/'+encodeURIComponent(context.id);
+      if(context.action==='restore-talent'){
+        await api(path+'/restore',{method:'POST',body:'{}'});
+        state.talentStatus='active';success='卖手已恢复';
+      }else if(context.action==='delete-talent'){
+        await api(path,{method:'DELETE',body:'{}'});
+        state.talentStatus='archived';success='卖手已归档';
+      }else{
+        await api(path,{method:'PATCH',body:JSON.stringify({active:!context.active})});
+        state.talentStatus=context.active?'inactive':'active';success=context.active?'卖手已停用':'卖手已启用';
+      }
+    }
+    if(form.id==='room-directory-form'){
+      const path='/api/rooms'+(context.id?'/'+encodeURIComponent(context.id):'');
+      let result;
+      if(context.action==='new-room'||context.action==='edit-room'){
+        result=await api(path,{method:context.id?'PATCH':'POST',body:JSON.stringify({name:fields.name})});
+        success=context.id?'房间名称已更新':'房间已新增';
+      }else if(context.action==='restore-room'){
+        result=await api(path+'/restore',{method:'POST',body:'{}'});success='房间已恢复';
+      }else if(context.action==='delete-room'){
+        result=await api(path,{method:'DELETE',body:'{}'});success='房间已归档';
+      }else{
+        result=await api(path,{method:'PATCH',body:JSON.stringify({active:!context.active})});
+        success=context.active?'房间已停用':'房间已启用';
+      }
+      state.config={...state.config,rooms:result.rooms,roomDirectory:result.roomDirectory};
+      context.busy=false;
+      closeModal(true);
+      openRoomManagement();
+      await refresh();
+      toast(success);
+      return;
+    }
     if(form.id==='schedule-form'){
       const talentIds=[fields.talentId1,fields.talentId2,fields.talentId3].filter(Boolean);
       if(talentIds.length<1)throw new Error('请选择至少 1 位卖手');
@@ -922,7 +1101,11 @@ document.addEventListener('submit',async e=>{
       success='当天排班已调整，其他日期不变';
     }
     if(form.id==='delete-schedule-form'){await api('/api/schedules/'+encodeURIComponent(context.id),{method:'DELETE'});success='已取消当天排班';}
-    if(form.id==='room-form'){await api('/api/book',{method:'POST',body:JSON.stringify({...fields,date:context.date,room:context.room,slot:context.slot,clientId})});remember('tongchang-department',fields.department);remember('tongchang-booker',fields.bookerName);success='场地预约成功';}
+    if(form.id==='room-form'){
+      const room=context.roomId?{roomId:context.roomId}:{room:context.room};
+      await api('/api/book',{method:'POST',body:JSON.stringify({...fields,date:context.date,...room,slot:context.slot,clientId})});
+      remember('tongchang-department',fields.department);remember('tongchang-booker',fields.bookerName);success='场地预约成功';
+    }
     if(form.id==='cancel-room-form'){await api('/api/cancel',{method:'POST',body:JSON.stringify({id:context.id,clientId})});success='时段已释放';}
     context.busy=false;closeModal(true);await refresh();recordView();toast(success);
   }catch(error){context.busy=false;const errorBox=$('#form-error');if(errorBox)errorBox.textContent=error.message;if(error.status===409){await refresh({quiet:true});if(form.id==='schedule-form'&&modalContext===context)await updateScheduleOptions();}if(error.status===401&&form.id!=='login-form'){state.user=null;state.csrfToken='';render();}if(submit){submit.disabled=false;submit.textContent=submit.dataset.original;}}

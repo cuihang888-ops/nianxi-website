@@ -42,7 +42,7 @@ test('dashboard unlock protects finance routes and leaves basic entry available'
   for (const session of [admin, staff, staffService]) {
     const entry = await call('/api/entry/bootstrap?date=2026-11-25', session);
     assert.equal(entry.status, 200);
-    assert.ok((await entry.json()).sessions.every(item => !Object.hasOwn(item, 'orderAmount')));
+    assert.deepEqual(Object.keys(await entry.json()).sort(), ['accounts', 'anchors', 'slots']);
   }
   for (const endpoint of ['/api/bootstrap', '/api/monthly?month=2026-11', '/api/audit', '/api/export.csv', '/api/users']) {
     const response = await call(endpoint, admin);
@@ -97,7 +97,7 @@ test('dashboard unlock protects finance routes and leaves basic entry available'
   assert.equal((await call('/api/sessions', { ...board, data: { orderAmount: 500 } })).status, 403);
   const publicEntry = await call('/api/entry/bootstrap?date=2026-11-25', board);
   assert.equal(publicEntry.status, 200);
-  assert.equal((await publicEntry.json()).user.role, 'public_entry');
+  assert.deepEqual(Object.keys(await publicEntry.json()).sort(), ['accounts', 'anchors', 'slots']);
   assert.equal((await unlock(board.cookie, dashboardPassword, 'manage')).status, 401);
   const signOut = await call('/api/logout', { ...board, cookie: admin.cookie + '; ' + board.cookie, data: {} });
   assert.equal(signOut.status, 200);

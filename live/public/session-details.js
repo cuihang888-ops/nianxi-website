@@ -52,7 +52,7 @@ export function renderSessionDetails(data, date, accountFilter, anchorFilter, { 
       <thead><tr><th scope="col">直播间</th><th scope="col">主播</th><th scope="col">场次与时间</th><th scope="col">状态</th>${columns.map(([, label]) => `<th scope="col">${label}</th>`).join('')}</tr></thead>
       <tbody>${rows.map(({ session, anchor, account }) => {
         const slot = session?.slotLabel || anchor?.slotLabel || '场次';
-        const time = !session?.scheduleUnknown && session?.start && session?.end ? `${session.start}–${session.end}` : '';
+        const time = !session?.scheduleUnknown && session?.start && session?.end ? `${session.start}–${session.endDayOffset === 1 ? '次日' : ''}${session.end}` : '';
         const reported = metrics.some(([key]) => Number.isFinite(session?.[key]));
         const status = session?.sourceStatus === 'stopped' ? '停播' : session?.status === 'live' ? '直播中' : session?.status === 'planned' ? '已排班' : reported ? '已填报' : '待填报';
         return `<tr><td>${esc(account?.name || '未分配')}</td><th scope="row">${esc(anchor?.name || '待安排')}</th><td>${esc(slot)}${time ? `<small>${esc(time)}</small>` : ''}</td><td>${status}</td>${columns.map(([key, , format]) => cell(session, key, format)).join('')}</tr>`;

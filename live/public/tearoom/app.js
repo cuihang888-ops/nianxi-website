@@ -4,8 +4,8 @@ const content = byId('room-content');
 const status = byId('room-status');
 const pending = byId('room-pending');
 const navigation = document.querySelector('nav.bottom');
-const categories = ['全部', '砍价', '证书售后', '色名意境', '活动', '英文', '越南语', '其他'];
-const views = new Set(['home', 'scripts', 'cases', 'board', 'wall', 'help', 'suggest', 'market']);
+const categories = ['全部', '砍价', '证书售后', '色名意境', '活动', '英文', '越南语', '采购沟通', '缅语', '其他'];
+const views = new Set(['home', 'scripts', 'cases', 'board', 'wall', 'help', 'suggest', 'market', 'gratitude', 'goals', 'search']);
 const apiRoot = new URL('../api/tearoom', document.baseURI);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -154,11 +154,21 @@ function messageCard(row, isQuote = false) {
 }
 
 function helpCard(row, compact) {
+  const status = row.solved ? '已解决' : row.handler ? '已认领' : '待回答';
+  const assignment = row.handler ? `<span>认领人 ${escape(row.handler)}</span>` : '';
+  const claimControl = !row.solved && !row.mine
+    ? row.claimedByMe ? action('撤回认领', { action: 'unclaim', id: row.id })
+      : row.handler ? '' : action('认领求助', { action: 'claim', id: row.id })
+    : '';
+  const thanksControl = row.mine && row.solved && row.handler
+    ? row.thanked ? '<span class="status done">已发送感谢</span>' : action('一键感谢', { action: 'helpThank', id: row.id })
+    : '';
   return `<article class="card"><h3>${escape(row.title)}</h3>${!compact && row.body ? `<p>${escape(row.body)}</p>` : ''}
     <div class="meta"><span>${escape(row.who)} · ${escape(displayTime(stamp(row)))}</span>
-    <span class="status ${row.solved ? 'done' : 'wait'}">${row.solved ? '已解决' : '待回答'}</span>
+    <span class="status ${row.solved ? 'done' : 'wait'}">${status}</span>${assignment}
     ${compact ? `<span>${row.answers.length} 个回答</span>` : ''}
-    ${row.mine && !row.solved && !compact ? action('标为已解决', { action: 'solve', id: row.id }) : ''}</div>
+    ${row.mine && !row.solved && !compact ? action('标为已解决', { action: 'solve', id: row.id }) : ''}
+    ${compact ? '' : claimControl + thanksControl}</div>
     ${compact ? '' : row.answers.map(answer => `<div class="answer"><p><b>${escape(answer.who)}：</b>${escape(answer.body)}</p>
       <div class="meta">${escape(displayTime(stamp(answer)))}</div></div>`).join('')}
     ${compact || row.solved ? '' : `<form class="pub answer-form" data-answer="${escape(row.id)}"><div class="row">
@@ -188,11 +198,61 @@ function renderScripts() {
     (scriptCat === '全部' || scriptCat === row.cat)
     && (!keyword || (row.title + row.body + row.cat).toLocaleLowerCase().includes(keyword))
   )).sort((a, b) => b.fav - a.fav);
-  byId('scriptList').innerHTML = matching.map(row => `<article class="card"><h3><span class="pill">${escape(row.cat)}</span>
-    ${escape(row.title)}</h3><p>${escape(row.body)}</p>
+  byId('scriptList').innerHTML = matching.map(scriptCard).join('') || empty(keyword ? '暂无匹配的话术' : '暂无话术');
+}
+
+function scriptCard(row) {
+  return `<article class="card"><h3><span class="pill">${escape(row.cat)}</span>
+    ${row.sample ? '<span class="pill warm">培训示例</span>' : ''}${escape(row.title)}</h3><p>${escape(row.body)}</p>
     <div class="meta"><span>${escape(row.author || '匿名同事')} · ${escape(displayTime(stamp(row)))}</span>
-    ${action('复制话术', { action: 'copy', id: row.id })}${favorite(row, 'script')}</div></article>`).join('')
-    || empty(keyword ? '暂无匹配的话术' : '暂无话术');
+    ${action('复制话术', { action: 'copy', id: row.id })}${favorite(row, 'script')}</div></article>`;
+}
+
+function renderResourceSearch() {
+  if (!state) return;
+  const keyword = value('resourceSearch').toLocaleLowerCase();
+  if (!keyword) {
+    byId('resourceResults').innerHTML = '';
+    return;
+  }
+  const groups = [
+    ['话术库', state.scripts, scriptCard],
+    ['优秀案例', state.cases, caseCard],
+    ['求助台', state.help, row => helpCard(row, false)]
+  ];
+  const results = groups.map(([label, rows, render]) => {
+    const matching = rows.filter(row => [row.title, row.body, row.cat, ...(row.answers || []).map(answer => answer.body)]
+      .join(' ').toLocaleLowerCase().includes(keyword));
+    return matching.length ? `<h3 class="resource-heading">${label} · ${matching.length} 条</h3>${matching.map(render).join('')}` : '';
+  });
+  byId('resourceResults').innerHTML = results.join('') || empty('暂无匹配内容');
+}
+
+function renderGratitude() {
+  byId('gratitudeList').innerHTML = (state.gratitude || []).map(row => {
+    const liked = Boolean(state.likedGratitude[row.id]);
+    return `<article class="card"><h3>${escape(row.from)} 感谢 ${escape(row.recipient)}</h3><p>${escape(row.body)}</p>
+      <div class="meta"><span>${escape(displayTime(stamp(row)))}</span>
+      ${action(`${liked ? '已点赞' : '点赞'} ${row.likes}`, { action: 'gratitudeLike', id: row.id, active: liked })}</div></article>`;
+  }).join('') || empty('暂无感谢');
+}
+
+function renderGoals() {
+  byId('goalForm').hidden = !state.canModerate;
+  byId('goalList').innerHTML = (state.goals || []).map(row => `<article class="card">
+    <h3>${escape(row.title)}</h3><p>${escape(row.body)}</p>
+    <div class="meta"><span>负责人 ${escape(row.owner)}</span>${row.due ? `<span>${escape(row.due)} 前</span>` : ''}
+      <span class="status ${row.status === '已完成' ? 'done' : 'wait'}">${escape(row.status)}</span></div>
+    ${state.canModerate ? `<details class="goal-edit"><summary>编辑协作目标</summary>
+      <form class="pub" data-goal-id="${escape(row.id)}">
+        <input name="title" aria-label="协作目标" maxlength="100" value="${escape(row.title)}" required>
+        <textarea name="body" aria-label="协作说明" maxlength="500" required>${escape(row.body)}</textarea>
+        <input name="owner" aria-label="负责人" maxlength="40" value="${escape(row.owner)}" required>
+        <label class="goal-date">完成日期 <input name="due" type="date" value="${escape(row.due)}"></label>
+        <label class="goal-date">进度 <select name="status">${['待开始', '进行中', '已完成'].map(status => `<option${row.status === status ? ' selected' : ''}>${status}</option>`).join('')}</select></label>
+        <button type="submit" class="btn small">保存目标</button>
+      </form></details>` : ''}
+  </article>`).join('') || empty('暂无协作目标');
 }
 
 function suggestionCard(row, isPublic = false) {
@@ -227,6 +287,9 @@ function renderView() {
   if (!state) return;
   if (view === 'home') renderHome();
   else if (view === 'scripts') renderScripts();
+  else if (view === 'search') renderResourceSearch();
+  else if (view === 'gratitude') renderGratitude();
+  else if (view === 'goals') renderGoals();
   else if (view === 'cases') byId('caseList').innerHTML = state.cases.map(caseCard).join('') || empty('暂无案例');
   else if (view === 'board') byId('boardList').innerHTML = state.board.map(row => messageCard(row)).join('') || empty('暂无留言');
   else if (view === 'wall') {
@@ -297,7 +360,9 @@ const publishForms = {
   wallForm: ['wall', { body: 'wallBody' }, '已贴上励志墙'],
   helpForm: ['help', { title: 'helpTitle', body: 'helpBody' }, '求助已发布'],
   suggestForm: ['suggest', { body: 'suggestBody' }, '建议已提交'],
-  marketForm: ['market', { type: 'marketType', title: 'marketTitle' }, '集市消息已发布']
+  marketForm: ['market', { type: 'marketType', title: 'marketTitle' }, '集市消息已发布'],
+  gratitudeForm: ['gratitude', { recipient: 'gratitudeRecipient', body: 'gratitudeBody' }, '感谢已发布'],
+  goalForm: ['goal', { title: 'goalTitle', body: 'goalBody', owner: 'goalOwner', due: 'goalDue' }, '目标已添加']
 };
 
 document.addEventListener('click', event => {
@@ -332,10 +397,11 @@ document.addEventListener('click', event => {
     return;
   }
   if (name === 'copy') copyScript(button.dataset.id);
-  else if (name === 'solve') withBusy(button, '正在保存…', () => doAction({ action: name, id: button.dataset.id }, '已标为解决'));
-  else if (name === 'favorite' || name === 'cheer') {
-    const label = name === 'favorite' ? '正在更新收藏…' : '正在更新加油…';
-    withBusy(button, label, () => doAction({ action: name, id: button.dataset.id, active: button.getAttribute('aria-pressed') !== 'true' }));
+  else if (['claim', 'unclaim', 'solve', 'helpThank'].includes(name)) {
+    const result = { claim: '已认领求助', unclaim: '已撤回认领', solve: '已标为解决', helpThank: '感谢已发布到感谢墙' }[name];
+    withBusy(button, '正在保存…', () => doAction({ action: name, id: button.dataset.id }, result));
+  } else if (['favorite', 'cheer', 'gratitudeLike'].includes(name)) {
+    withBusy(button, '正在更新…', () => doAction({ action: name, id: button.dataset.id, active: button.getAttribute('aria-pressed') !== 'true' }));
   }
 });
 
@@ -356,6 +422,11 @@ document.addEventListener('submit', event => {
   }
   if (form.dataset.answer) {
     withBusy(button, '正在发布回答…', () => doAction({ action: 'answer', id: form.dataset.answer, body: form.elements.answer.value.trim() }, '回答已发布', form));
+    return;
+  }
+  if (form.dataset.goalId) {
+    const fields = Object.fromEntries(new FormData(form));
+    withBusy(button, '正在保存目标…', () => doAction({ action: 'goalUpdate', id: form.dataset.goalId, ...fields }, '协作目标已更新'));
     return;
   }
   if (form.dataset.suggestionReply) {
@@ -384,10 +455,11 @@ document.addEventListener('submit', event => {
 });
 
 byId('scriptSearch').addEventListener('input', renderScripts);
+byId('resourceSearch').addEventListener('input', renderResourceSearch);
 function homeSearch() {
-  byId('scriptSearch').value = value('homeSearch');
-  scriptCat = '全部';
-  go('scripts');
+  byId('resourceSearch').value = value('homeSearch');
+  go('search');
+  byId('resourceSearch').focus();
 }
 byId('homeSearchBtn').addEventListener('click', homeSearch);
 byId('homeSearch').addEventListener('keydown', event => {
