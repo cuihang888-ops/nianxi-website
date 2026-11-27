@@ -1,0 +1,170 @@
+[
+  {
+    "page": "首页",
+    "url": "http://127.0.0.1:4277/",
+    "cold": {
+      "nav": {
+        "dcl": 231,
+        "load": 473,
+        "resp": 186
+      },
+      "firstData": 679,
+      "totalMs": 897,
+      "reqs": 2,
+      "bytes": 9290,
+      "longTasks": []
+    },
+    "warm": {
+      "nav": {
+        "dcl": 204,
+        "load": 372,
+        "resp": 187
+      },
+      "firstData": 476,
+      "totalMs": 856,
+      "reqs": 4,
+      "bytes": 18580,
+      "longTasks": []
+    }
+  },
+  {
+    "page": "数据录入",
+    "url": "http://127.0.0.1:4277/entry",
+    "cold": {
+      "nav": {
+        "dcl": 2552,
+        "load": 2552,
+        "resp": 165
+      },
+      "firstData": 2857,
+      "totalMs": 3248,
+      "reqs": 6,
+      "bytes": 434346,
+      "longTasks": []
+    },
+    "warm": {
+      "nav": {
+        "dcl": 2533,
+        "load": 2533,
+        "resp": 159
+      },
+      "firstData": 2841,
+      "totalMs": 3232,
+      "reqs": 8,
+      "bytes": 443636,
+      "longTasks": []
+    }
+  },
+  {
+    "page": "看板(密码页)",
+    "url": "http://127.0.0.1:4277/dashboard",
+    "cold": {
+      "nav": {
+        "dcl": 1500,
+        "load": 1501,
+        "resp": 167
+      },
+      "firstData": 1708,
+      "totalMs": 2170,
+      "reqs": 20,
+      "bytes": 192973,
+      "longTasks": []
+    },
+    "warm": {
+      "nav": {
+        "dcl": 1592,
+        "load": 1594,
+        "resp": 166
+      },
+      "firstData": 1790,
+      "totalMs": 2260,
+      "reqs": 22,
+      "bytes": 202263,
+      "longTasks": []
+    }
+  },
+  {
+    "page": "茶水间",
+    "url": "http://127.0.0.1:4277/tearoom/",
+    "cold": {
+      "nav": {
+        "dcl": 653,
+        "load": 665,
+        "resp": 259
+      },
+      "firstData": 865,
+      "totalMs": 1352,
+      "reqs": 4,
+      "bytes": 40106,
+      "longTasks": []
+    },
+    "warm": {
+      "nav": {
+        "dcl": 554,
+        "load": 566,
+        "resp": 205
+      },
+      "firstData": 693,
+      "totalMs": 1256,
+      "reqs": 6,
+      "bytes": 49396,
+      "longTasks": []
+    }
+  },
+  {
+    "page": "看场地",
+    "url": "http://127.0.0.1:4277/booking/?module=rooms",
+    "cold": {
+      "nav": {
+        "dcl": 1738,
+        "load": 1738,
+        "resp": 319
+      },
+      "firstData": 1856,
+      "totalMs": 2636,
+      "reqs": 14,
+      "bytes": 243360,
+      "longTasks": []
+    },
+    "warm": {
+      "nav": {
+        "dcl": 1728,
+        "load": 1729,
+        "resp": 315
+      },
+      "firstData": 1853,
+      "totalMs": 2617,
+      "reqs": 16,
+      "bytes": 252650,
+      "longTasks": []
+    }
+  },
+  {
+    "page": "看卖手",
+    "url": "http://127.0.0.1:4277/booking/?module=schedule",
+    "cold": {
+      "nav": {
+        "dcl": 1745,
+        "load": 1747,
+        "resp": 326
+      },
+      "firstData": 1919,
+      "totalMs": 2684,
+      "reqs": 14,
+      "bytes": 243360,
+      "longTasks": []
+    },
+    "warm": {
+      "nav": {
+        "dcl": 1726,
+        "load": 1726,
+        "resp": 318
+      },
+      "firstData": 1844,
+      "totalMs": 2617,
+      "reqs": 16,
+      "bytes": 252650,
+      "longTasks": []
+    }
+  }
+]
