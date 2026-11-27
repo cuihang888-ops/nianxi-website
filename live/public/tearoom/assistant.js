@@ -20,8 +20,14 @@ const usageFeedback = document.querySelector('#ai-usage-feedback');
 const usageTable = document.querySelector('#ai-usage-table');
 const usageBody = usageTable.querySelector('tbody');
 const labels = { translate: '开始翻译', polish: '开始润色' };
-const serviceLabels = { demo: '演示模式 · 返回模拟结果', live: '服务已连接', off: '服务未启用' };
+const serviceLabels = {
+  demo: '演示模式 · 返回模拟结果',
+  pilot: '管理员试用',
+  live: '服务已连接',
+  off: '服务未启用'
+};
 let mode = 'off';
+let needsTeaSession = false;
 let busy = false;
 
 async function api(path, payload) {
@@ -63,19 +69,22 @@ function refreshControls() {
 
 async function checkService() {
   retry.hidden = true;
+  usagePanel.hidden = true;
   mode = 'off';
+  needsTeaSession = false;
   refreshControls();
   service.textContent = '正在检查服务…';
   feedback.textContent = '';
   try {
-    await api('tearoom/session', {});
     const status = await api('ai/status');
     mode = Object.hasOwn(serviceLabels, status.mode) ? status.mode : 'off';
+    needsTeaSession = (mode === 'demo' || mode === 'live') && status.needsTeaSession === true;
     service.textContent = serviceLabels[mode];
     usagePanel.hidden = status.canViewUsage !== true;
-  } catch {
-    service.textContent = '服务连接失败';
-    retry.hidden = false;
+  } catch (error) {
+    const closed = error.status === 404;
+    service.textContent = closed ? serviceLabels.off : '服务连接失败';
+    retry.hidden = closed;
   } finally {
     refreshControls();
   }
@@ -102,6 +111,10 @@ form.addEventListener('submit', async event => {
   result.hidden = true;
   copyStatus.textContent = '';
   try {
+    if (needsTeaSession) {
+      await api('tearoom/session', {});
+      needsTeaSession = false;
+    }
     const reply = await api('ai/chat', payload);
     if (typeof reply.text !== 'string' || !reply.text.trim()) throw new Error('未收到处理结果，请重试。');
     output.value = reply.text;
@@ -109,9 +122,9 @@ form.addEventListener('submit', async event => {
     result.hidden = false;
     feedback.textContent = '处理完成。';
   } catch (error) {
-    if (error.status === 401) {
+    if ([401, 403, 404].includes(error.status)) {
       await checkService();
-      feedback.textContent = mode === 'off' ? '请重新连接后再试。' : '连接已恢复，请重新提交原文。';
+      feedback.textContent = mode === 'off' ? error.message : '请重新提交原文。';
     } else {
       feedback.textContent = error.message || '暂时无法处理，请重试。';
     }

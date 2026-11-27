@@ -135,31 +135,6 @@ header.top { position: sticky; top: 0; z-index: 10; padding-block: 8px 11px; bac
 .goal-date input, .goal-date select { display: block; margin-top: 4px; }
 .goal-edit { margin-top: 10px; }
 .goal-edit summary { color: var(--green); cursor: pointer; font-size: 13px; }
-.ai-assistant-link {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 10px;
-  margin-top: 10px;
-  padding: 9px 11px;
-  border: 1px solid var(--line);
-  border-radius: 9px;
-  background: var(--card);
-  text-decoration: none;
-}
-.ai-assistant-link span { color: var(--muted); font-weight: 400; }
-.ai-workspace { padding-bottom: 24px; }
-.ai-fields { display: grid; gap: 9px; }
-.ai-workspace form.ai-fields textarea, .ai-workspace form.ai-fields select { font-size: 16px; }
-.ai-fields textarea { min-height: 125px; }
-.ai-language select { display: block; margin-top: 4px; }
-.ai-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 9px; }
-.ai-actions button { min-height: 40px; }
-.ai-actions button:disabled { opacity: .55; cursor: default; }
-.ai-count { color: var(--muted); font-size: 12px; }
-.ai-result textarea { width: 100%; min-height: 125px; margin: 7px 0; padding: 9px; resize: vertical; font: inherit; }
-.ai-result-title { display: flex; align-items: center; justify-content: space-between; gap: 7px; }
-.ai-result-title .pill { margin: 0; }
 .wish-link { color: inherit; text-decoration: none; }
 .wish-form { display: grid; gap: 8px; }
 .wish-form input[type="tel"] {
@@ -182,7 +157,3 @@ header.top { position: sticky; top: 0; z-index: 10; padding-block: 8px 11px; bac
 .wish-contact { margin-top: 8px; color: var(--green); font-size: 14px; }
 .wish-control-row { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 7px; }
 .wish-control-row button { min-height: 36px; }
-.ai-usage-scroll { max-width: 100%; overflow-x: auto; margin-top: 8px; }
-.ai-usage-table { border-collapse: collapse; font-size: 12px; }
-.ai-usage-table :is(th, td) { padding: 7px; white-space: nowrap; border-bottom: 1px solid var(--line); text-align: right; }
-.ai-usage-table :is(th, td):first-child { text-align: left; }

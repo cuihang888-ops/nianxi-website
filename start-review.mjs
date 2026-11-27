@@ -37,6 +37,8 @@ const live = createApplication({
   dataDir: resolve(root, 'live'),
   bookingUrl: new URL(bookingPrefix, `http://${host}:${port}`),
   dashboardPassword: 'Local-admin-board-2026',
+  assistantAccess: 'employees',
+  assistantDemo: true,
   assistantConfig: {
     primary: { url: 'https://primary.example.invalid/v1/chat/completions', key: 'local-primary-fixture', model: 'demo-primary' },
     fallback: { url: 'https://fallback.example.invalid/v1/chat/completions', key: 'local-fallback-fixture', model: 'demo-fallback' },

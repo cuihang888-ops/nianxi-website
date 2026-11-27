@@ -12,7 +12,6 @@ import { handleMonthly } from './lib/monthly.mjs';
 import { handleAnchorReview } from './lib/review.mjs';
 import { createTearoom } from './lib/tearoom.mjs';
 import { jadeGuideScripts } from './lib/tearoom-jade-guide.mjs';
-import { assistantConfiguration, createAssistant } from './lib/assistant.mjs';
 import { createWishes } from './lib/wishes.mjs';
 import { createDepartmentGoals } from './lib/department-goals.mjs';
 import { PERIODS, resolveShiftPeriod } from './public/shift-periods.js';
@@ -60,7 +59,7 @@ export function configuration(env = process.env) {
   if (!['http:', 'https:'].includes(bookingUrl.protocol) || bookingUrl.username || bookingUrl.password) {
     throw new Error('BOOKING_URL 须为不含登录信息的 HTTP 或 HTTPS 地址。');
   }
-  return { demo: !production, mode: env.PREVIEW_IMPORT === 'true' ? 'imported' : production ? 'production' : 'demo', production, host, port, dataDir: resolve(env.DATA_DIR || resolve(ROOT, 'data')), adminPassword: env.ADMIN_PASSWORD, adminUsername: env.ADMIN_USERNAME, adminName: env.ADMIN_NAME, cookieSecure: env.COOKIE_SECURE === 'true', dashboardPassword, bookingUrl };
+  return { demo: !production, mode: env.PREVIEW_IMPORT === 'true' ? 'imported' : production ? 'production' : 'demo', production, host, port, dataDir: resolve(env.DATA_DIR || resolve(ROOT, 'data')), adminPassword: env.ADMIN_PASSWORD, adminUsername: env.ADMIN_USERNAME, adminName: env.ADMIN_NAME, cookieSecure: env.COOKIE_SECURE === 'true', dashboardPassword, bookingUrl, assistantAccess: env.ASSISTANT_ACCESS };
 }
 
 async function body(request) {
@@ -82,17 +81,19 @@ export function createApplication(options = {}) {
   });
   const wishes = createWishes({ store });
   const departmentGoals = createDepartmentGoals({ store });
-  let assistantConfig = options.assistantConfig;
-  if (!assistantConfig) {
-    try {
-      assistantConfig = assistantConfiguration();
-    } catch {
-      console.error('AI 助手配置无效，服务已停用。请检查后端环境变量。');
-      assistantConfig = assistantConfiguration({});
-    }
+  const assistantAccess = ['pilot', 'employees'].includes(config.assistantAccess) ? config.assistantAccess : 'off';
+  const assistantMode = assistantAccess === 'pilot' ? 'pilot'
+    : !config.production && options.assistantDemo === true && options.assistantFetch ? 'demo' : 'live';
+  let assistantPromise;
+  function loadAssistant() {
+    return assistantPromise ??= import('./lib/assistant.mjs').then(({ assistantConfiguration, createAssistant }) => {
+      const settings = options.assistantConfig ?? assistantConfiguration();
+      return settings.primary ? createAssistant({ store, config: settings, fetchImpl: options.assistantFetch }) : null;
+    }).catch(() => {
+      console.error('AI 助手初始化失败，服务已停用。请检查后端配置。');
+      return null;
+    });
   }
-  const assistant = createAssistant({ store, config: assistantConfig, fetchImpl: options.assistantFetch });
-  const assistantMode = assistant.available ? (options.assistantFetch ? 'demo' : 'live') : 'off';
   const datasetInfo = () => store.getDataset();
   const demoVisible = () => store.demo && datasetInfo().kind === 'demo';
   const logins = new Map();
@@ -134,6 +135,36 @@ export function createApplication(options = {}) {
     if (dashboardOnly !== session.dashboardOnly) return null;
     const user = dashboardOnly ? DASHBOARD_VIEWER : store.userById(session.userId);
     return user ? { user, session, token, cookieName } : null;
+  }
+  function assistantAllowed(adminUser) {
+    return assistantAccess === 'employees' || (assistantAccess === 'pilot' && adminUser?.role === 'admin');
+  }
+  async function handleAssistant(path, request, response) {
+    const user = readSession(request, ACCOUNT_COOKIE)?.user;
+    if (!assistantAllowed(user)) return send(response, 404, { error: 'AI 助手暂未开放' });
+    const canViewUsage = user?.role === 'admin';
+    const isStatus = path === '/api/ai/status' && request.method === 'GET';
+    const isChat = path === '/api/ai/chat' && request.method === 'POST';
+    const isUsage = path === '/api/ai/usage' && request.method === 'GET';
+    if (!isStatus && !isChat && !isUsage) return send(response, 404, { error: '接口不存在' });
+    if (isUsage && !canViewUsage) return send(response, user ? 403 : 401, { error: '仅管理员可以查看 AI 用量' });
+    const profile = !isUsage && assistantAccess === 'employees' ? tearoom.session(request) : null;
+    if (isChat && assistantAccess === 'employees' && !profile) {
+      return send(response, 401, { error: '请进入茶水间后再试。' });
+    }
+    const assistant = await loadAssistant();
+    if (isStatus) return send(response, 200, {
+      mode: assistant ? assistantMode : 'off', canViewUsage: Boolean(assistant) && canViewUsage,
+      needsTeaSession: Boolean(assistant) && assistantAccess === 'employees' && !profile
+    });
+    if (!assistant) return send(response, 503, { error: 'AI 助手暂未启用。' });
+    if (isUsage) return send(response, 200, assistant.usage());
+    const input = await body(request);
+    keys(input, ['task', 'text', 'target']);
+    const output = await assistant.run({ action: input.task, text: input.text, target: input.target }, {
+      identity: profile?.actor ?? 'admin:' + user.id, secondaryIdentity: request.socket.remoteAddress
+    });
+    return send(response, 200, { ...output, mode: assistantMode });
   }
   function requireSession(request, scope) {
     const account = scope === 'dashboard' ? null : readSession(request, ACCOUNT_COOKIE);
@@ -279,23 +310,7 @@ export function createApplication(options = {}) {
         return send(response, 200, payload, { 'Set-Cookie': header });
       }
       if (path.startsWith('/api/')) {
-        if (path === '/api/ai/status' && request.method === 'GET') {
-          return send(response, 200, { mode: assistantMode, canViewUsage: readSession(request, ACCOUNT_COOKIE)?.user.role === 'admin' });
-        }
-        if (path === '/api/ai/chat' && request.method === 'POST') {
-          const { actor } = tearoomScope(request);
-          const input = await body(request);
-          keys(input, ['task', 'text', 'target']);
-          const output = await assistant.run({ action: input.task, text: input.text, target: input.target }, {
-            identity: actor, secondaryIdentity: request.socket.remoteAddress
-          });
-          return send(response, 200, { ...output, mode: assistantMode });
-        }
-        if (path === '/api/ai/usage' && request.method === 'GET') {
-          const { user } = requireSession(request, 'account');
-          if (user.role !== 'admin') throw new ApiError(403, '仅管理员可以查看 AI 用量');
-          return send(response, 200, assistant.usage());
-        }
+        if (path === '/api/ai' || path.startsWith('/api/ai/')) return await handleAssistant(path, request, response);
         if (path === '/api/tearoom/wishes') {
           const scope = tearoomScope(request);
           if (request.method === 'GET') return send(response, 200, wishes.list(scope));
@@ -527,15 +542,25 @@ export function createApplication(options = {}) {
       const pages = { '/': 'index.html', '/entry': 'entry.html', '/dashboard': 'dashboard.html', '/tearoom/': 'tearoom/index.html' };
       const target = resolve(publicRoot, Object.hasOwn(pages, path) ? pages[path] : `.${path}`);
       if (target !== publicRoot && !target.startsWith(publicRoot + sep)) throw new ApiError(404, '文件不存在');
+      const relativePath = target.slice(publicRoot.length).split(sep).join('/');
+      const assistantAsset = /^\/tearoom\/assistant\.(html|js|css)$/i.test(relativePath);
+      const tearoomIndex = relativePath.toLowerCase() === '/tearoom/index.html';
+      const showAssistant = (assistantAsset || tearoomIndex) && assistantAllowed(readSession(request, ACCOUNT_COOKIE)?.user);
+      if (assistantAsset && !showAssistant) return send(response, 404, { error: 'AI 助手暂未开放' });
       let metadata;
       try { metadata = await stat(target); } catch { throw new ApiError(404, '文件不存在'); }
       if (!metadata.isFile()) throw new ApiError(404, '文件不存在');
-      const content = await readFile(target);
+      let content = await readFile(target);
+      if (tearoomIndex && showAssistant) {
+        const link = '<a class="training-link" href="./assistant.html">AI 助手 <span>翻译与话术润色</span></a>';
+        content = content.toString('utf8').replace('<!-- assistant-entry -->', link);
+      }
       const versionedTearoomAsset = /^\/tearoom\/[a-z-]+\.(js|css)$/.test(path)
         && /^[0-9]{8}-[a-z0-9-]+$/.test(url.searchParams.get('v') || '');
       response.writeHead(200, {
         'Content-Type': MIME[extname(target)] || 'application/octet-stream',
-        'Cache-Control': versionedTearoomAsset ? 'public, max-age=86400' : 'no-cache'
+        'Cache-Control': (tearoomIndex || assistantAsset) && assistantAccess === 'pilot'
+          ? 'private, no-store' : versionedTearoomAsset ? 'public, max-age=86400' : 'no-cache'
       });
       response.end(request.method === 'HEAD' ? undefined : content);
     } catch (error) {

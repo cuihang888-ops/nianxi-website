@@ -22,3 +22,4 @@
 - `live/` 提供首页、数据录入、看板和茶水间。Node.js 原生 HTTP、SQLite、原生前端。进入该目录后执行 `npm test`。
 - `booking/` 提供场地预约、卖手排班、卖手搜索和管理员操作。Node.js 原生 HTTP、JSON 文件存储、原生前端。进入该目录后执行 `npm test`。
 - [Muse 评审清单](MUSE-REVIEW.md)
+- [AI 助手真实 API 延迟复测与开放条件](AI-RELEASE-CHECK.md)
