@@ -30,6 +30,7 @@
 .fb-form input[type="text"] { flex: 1 1 220px; min-width: 0; }
 .fb-form button, .fb-toggle { min-height: 38px; border: 1px solid #174c3e; background: #174c3e; color: #fff; border-radius: 6px; padding: 6px 14px; font-size: 13px; cursor: pointer; }
 .fb-toggle { background: #fff; color: #174c3e; margin-top: 9px; }
+.fb-day-button { margin-top: 0; min-height: 30px; padding: 3px 10px; margin-left: 8px; }
 .fb-honors { margin: 10px 0 0; padding-left: 18px; font-size: 13px; line-height: 2; }
 @media (max-width: 640px) {
   .fb-summary { grid-template-columns: repeat(2, minmax(0, 1fr)); }

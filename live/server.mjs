@@ -7,7 +7,7 @@ import { Store, passwordHash, passwordMatches, publicUser } from './lib/store.mj
 import { ApiError, keys, text, date, version, countFields, sessionInput, inventoryInput, taskInput, conflict } from './lib/validation.mjs';
 import { directory, handleDirectory, sessionSlotWrite } from './lib/directory.mjs';
 import { ROLES, PUBLIC_ENTRY_USER, isStaff, safeDataset, entryDirectory, entryInput, duplicateEntry, hasSessionMetrics, fillableSession, fillSession, mergeableSession, mergeSession } from './lib/entry.mjs';
-import { completenessForDate } from './lib/completeness.mjs';
+import { completenessForDate, completenessRange, monthToDateRange } from './lib/completeness.mjs';
 import { createFeedback } from './lib/feedback.mjs';
 import { chinaDate } from './lib/seed.mjs';
 import { handleMonthly } from './lib/monthly.mjs';
@@ -73,6 +73,19 @@ async function body(request, maxBytes = 64 * 1024) {
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new ApiError(400, 'JSON 格式无效'); }
+}
+
+// 完整性范围查询：缺省为本月至今（当月 1 号 → 今天，北京时间，与提醒的月周期口径一致）。
+// 显式 from/to 时 to 不超过今天（今天之后还没发生的场次不产生未录提醒），跨度上限 92 天防滥用。
+function completenessRangeQuery(store, params) {
+  const today = chinaDate();
+  const fallback = monthToDateRange(today);
+  const from = params.get('from') ? date(params.get('from'), '起始日期') : fallback.from;
+  let to = params.get('to') ? date(params.get('to'), '结束日期') : fallback.to;
+  if (to > today) to = today;
+  if (from > to) return { from, to, days: [], accounts: [], summary: { expected: 0, complete: 0, partial: 0, empty: 0, stopped: 0 } };
+  if ((Date.parse(to) - Date.parse(from)) / 86_400_000 > 92) throw new ApiError(400, '查询范围过大，最多 92 天');
+  return completenessRange(store, directory(store), from, to);
 }
 
 export function createApplication(options = {}) {
@@ -352,8 +365,12 @@ export function createApplication(options = {}) {
         }
         if (path === '/api/entry/completeness' && request.method === 'GET') {
           // 只下发完成状态与缺项名称，不下发任何指标数值（录入只写不读）。
-          const target = date(url.searchParams.get('date') ?? '');
-          return send(response, 200, completenessForDate(store, directory(store), target));
+          // 带 date 为单日明细；不带 date（或带 from/to）为范围汇总，缺省本月至今。
+          if (url.searchParams.has('date')) {
+            const target = date(url.searchParams.get('date') ?? '');
+            return send(response, 200, completenessForDate(store, directory(store), target));
+          }
+          return send(response, 200, completenessRangeQuery(store, url.searchParams));
         }
         if (path === '/api/entry/sessions' && request.method === 'POST') {
           const user = entryUser(request);
@@ -437,8 +454,12 @@ export function createApplication(options = {}) {
             return send(response, 200, feedback.updateCoordinate(coordinateRoute[1], await body(request)));
           }
           if (path === '/api/dashboard/completeness' && request.method === 'GET') {
-            const target = date(url.searchParams.get('date') ?? '');
-            return send(response, 200, completenessForDate(store, directory(store), target));
+            // 与录入端同一口径：带 date 看单日明细，缺省为本月至今的范围汇总。
+            if (url.searchParams.has('date')) {
+              const target = date(url.searchParams.get('date') ?? '');
+              return send(response, 200, completenessForDate(store, directory(store), target));
+            }
+            return send(response, 200, completenessRangeQuery(store, url.searchParams));
           }
           if (path === '/api/dashboard/honors') {
             if (request.method === 'GET') return send(response, 200, { honors: feedback.listHonors() });

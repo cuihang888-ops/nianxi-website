@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApplication } from '../server.mjs';
-import { completenessForDate, sessionStatus } from '../lib/completeness.mjs';
+import { completenessForDate, completenessRange, monthToDateRange, sessionStatus } from '../lib/completeness.mjs';
+import { chinaDate } from '../lib/seed.mjs';
 import { suggestionTiming, SUGGESTION_SLA_MS } from '../lib/feedback.mjs';
 
 const BOARD_PASSWORD = 'TestBoardPass';
@@ -65,6 +66,75 @@ test('completeness: explicit zero counts as filled, partial lists missing names,
   assert.deepEqual(result.accounts[0].sessions[0].missing, ['单量']);
   // 完整性结果只含状态与缺项名，不含任何指标数值字段。
   assert.doesNotMatch(JSON.stringify(result), /orderAmount|actualMinutes|impressions/);
+});
+
+test('completeness range: month-to-date only — in-month gaps count, last month and future days do not', () => {
+  assert.deepEqual(monthToDateRange('2026-11-25'), { from: '2026-11-01', to: '2026-11-25' });
+  assert.deepEqual(monthToDateRange('2026-11-01'), { from: '2026-11-01', to: '2026-11-01' });
+  const zero = { orderAmount: 0, orders: 0, actualMinutes: 0, impressions: 0, shares: 0, newFollowers: 0 };
+  const roster = {
+    accounts: [{ id: 'a1', name: '甲直播间', active: true }],
+    anchors: [{ id: 'an1', name: '主播甲', accountId: 'a1', slotId: 's1', slotLabel: '早场', activeFrom: null, activeTo: null }]
+  };
+  const sessions = [
+    { id: 'r-partial', date: '2026-11-03', accountId: 'a1', anchorId: 'an1', slotId: 's1', ...zero, orders: null },
+    { id: 'r-full', date: '2026-11-04', accountId: 'a1', anchorId: 'an1', slotId: 's1', ...zero },
+    // 上月的缺项记录与本月未来日期的记录都在库里，但都不应计入本月至今的提醒范围。
+    { id: 'r-last-month', date: '2026-10-20', accountId: 'a1', anchorId: 'an1', slotId: 's1', ...zero, orders: null },
+    { id: 'r-future', date: '2026-11-28', accountId: 'a1', anchorId: 'an1', slotId: 's1', ...zero, orders: null }
+  ];
+  const store = { list: name => name === 'sessions' ? sessions : [] };
+  const { from, to } = monthToDateRange('2026-11-25');
+  const range = completenessRange(store, roster, from, to);
+  assert.equal(range.days.length, 25);
+  assert.equal(range.days[0].date, '2026-11-01');
+  assert.equal(range.days.at(-1).date, '2026-11-25');
+  // 25 天各 1 场：11-03 缺项、11-04 齐全，其余未录；上月与未来日期均未计入。
+  assert.deepEqual(range.summary, { expected: 25, complete: 1, partial: 1, empty: 23, stopped: 0 });
+  assert.deepEqual(range.accounts[0].summary, range.summary);
+  // 范围汇总与逐日单日结果对得上。
+  const totals = { expected: 0, complete: 0, partial: 0, empty: 0, stopped: 0 };
+  for (const day of range.days) {
+    const single = completenessForDate(store, roster, day.date);
+    assert.deepEqual(day.summary, single.summary);
+    for (const key of Object.keys(totals)) totals[key] += single.summary[key];
+  }
+  assert.deepEqual(range.summary, totals);
+  // 范围结果同样只含状态计数，不含指标数值。
+  assert.doesNotMatch(JSON.stringify(range), /orderAmount|actualMinutes|impressions/);
+});
+
+test('completeness API: default range is month-to-date (Beijing), matching daily endpoints and the dashboard', async t => {
+  const { browser } = await fixture(t);
+  const staff = browser();
+  const today = chinaDate();
+  const monthStart = today.slice(0, 8) + '01';
+  const range = await staff.request('/api/entry/completeness');
+  assert.equal(range.status, 200, JSON.stringify(range.body));
+  assert.equal(range.body.from, monthStart);
+  assert.equal(range.body.to, today);
+  assert.equal(range.body.days.length, Number(today.slice(8, 10)));
+  assert.ok(range.body.days.every(day => day.date >= monthStart && day.date <= today));
+  let pending = 0;
+  for (const day of range.body.days) {
+    const single = await staff.request('/api/entry/completeness?date=' + day.date);
+    assert.equal(single.status, 200);
+    assert.deepEqual(day.summary, single.body.summary);
+    pending += single.body.summary.partial + single.body.summary.empty;
+  }
+  assert.equal(range.body.summary.partial + range.body.summary.empty, pending);
+  // 单日接口保留：上月日期仍可单独查（供补录核对），只是不进默认提醒范围。
+  const lastMonth = await staff.request('/api/entry/completeness?date=2026-10-15');
+  assert.equal(lastMonth.status, 200);
+  assert.equal(lastMonth.body.date, '2026-10-15');
+  // 看板默认口径与录入端一致。
+  const board = browser();
+  await board.unlockBoard();
+  const dash = await board.request('/api/dashboard/completeness');
+  assert.equal(dash.status, 200);
+  assert.equal(dash.body.from, monthStart);
+  assert.equal(dash.body.to, today);
+  assert.deepEqual(dash.body.summary, range.body.summary);
 });
 
 test('suggestion timing: pending past 48h is overdue, resolved is neither', () => {

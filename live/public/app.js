@@ -6,7 +6,7 @@ import { renderSessionDetails } from './session-details.js?v=20261127-v130';
 import { setupAnchorReview } from './anchor-review.js?v=20261127-v12';
 import { setupDirectory } from './directory.js?v=20261127-v130';
 import { setupDepartmentGoals } from './department-goals.js?v=20261127-goals';
-import { setupFeedback } from './feedback.js?v=20261128-feedback';
+import { setupFeedback } from './feedback.js?v=20261128-month';
 import { PERIODS, resolveShiftPeriod } from './shift-periods.js?v=20261127-comparison';
 const $ = (s, root = document) => root.querySelector(s);
 const root = $('#app');

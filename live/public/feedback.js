@@ -19,7 +19,8 @@ function slaLabel(item) {
 export function setupFeedback(api) {
   let mounted = null;
   let feedback = null;
-  let completeness = null;
+  let compRange = null;
+  let compDay = null;
   let honors = [];
   let compDate = todayText;
   let message = '';
@@ -29,13 +30,13 @@ export function setupFeedback(api) {
     if (!mounted || loading) return;
     loading = true;
     try {
-      const [nextFeedback, nextCompleteness, nextHonors] = await Promise.all([
+      const [nextFeedback, nextRange, nextHonors] = await Promise.all([
         api('/api/dashboard/feedback'),
-        api('/api/dashboard/completeness?date=' + encodeURIComponent(compDate)),
+        api('/api/dashboard/completeness'),
         api('/api/dashboard/honors')
       ]);
       feedback = nextFeedback;
-      completeness = nextCompleteness;
+      compRange = nextRange;
       honors = nextHonors.honors || [];
       if (!force) message = '';
     } catch (error) {
@@ -53,9 +54,11 @@ export function setupFeedback(api) {
       return;
     }
     const counts = feedback.counts;
-    const pendingSessions = (completeness?.accounts || []).flatMap(group =>
+    const pendingSessions = (compDay?.accounts || []).flatMap(group =>
       group.sessions.filter(session => session.status === 'partial' || session.status === 'empty')
         .map(session => ({ group, session })));
+    const rangePendingDays = (compRange?.days || []).filter(day => day.summary.partial + day.summary.empty > 0);
+    const rangePendingAccounts = (compRange?.accounts || []).filter(group => group.summary.partial + group.summary.empty > 0);
     mounted.innerHTML = `
     ${message ? `<p class="fb-message" role="status">${esc(message)}</p>` : ''}
     <div class="fb-summary">
@@ -66,15 +69,28 @@ export function setupFeedback(api) {
     </div>
 
     <section class="fb-block">
-      <h2>录入完整性总览</h2>
+      <h2>录入完整性总览（本月）</h2>
       <div class="fb-row">
-        <label>日期 <input type="date" data-feedback-date value="${esc(compDate)}"></label>
-        ${completeness ? `<span class="fb-note">共 ${completeness.summary.expected} 场 · 已录齐 ${completeness.summary.complete} · 待补 ${completeness.summary.partial} · 未录入 ${completeness.summary.empty}${completeness.summary.stopped ? ' · 停播 ' + completeness.summary.stopped : ''}</span>` : '<span class="fb-note">正在读取…</span>'}
+        ${compRange ? `<span class="fb-note">${esc(compRange.from)} 至 ${esc(compRange.to)} · 共 ${compRange.summary.expected} 场 · 已录齐 ${compRange.summary.complete} · 待补 ${compRange.summary.partial} · 未录入 ${compRange.summary.empty}${compRange.summary.stopped ? ' · 停播 ' + compRange.summary.stopped : ''}（跨月不再提醒）</span>` : '<span class="fb-note">正在读取…</span>'}
       </div>
-      ${pendingSessions.length ? `<ul class="fb-missing">${pendingSessions.map(({ group, session }) => `<li>
+      ${compRange && !(compRange.summary.partial + compRange.summary.empty) ? '<p class="fb-note">本月各场次均已录齐。</p>' : ''}
+      ${rangePendingAccounts.length ? `<ul class="fb-missing">${rangePendingAccounts.map(group => `<li>
+        <b>${esc(group.accountName)}</b>
+        <span class="${group.summary.empty ? 'fb-over' : 'fb-wait'}">本月待补 ${group.summary.partial + group.summary.empty} 场${group.summary.empty ? ' · 未录入 ' + group.summary.empty : ''}${group.summary.partial ? ' · 缺项 ' + group.summary.partial : ''}</span>
+      </li>`).join('')}</ul>` : ''}
+      ${rangePendingDays.length ? `<ul class="fb-missing">${rangePendingDays.slice().reverse().map(day => `<li>
+        <b>${esc(day.date)}</b>
+        <span class="${day.summary.empty ? 'fb-over' : 'fb-wait'}">待补 ${day.summary.partial + day.summary.empty} 场${day.summary.empty ? ' · 未录入 ' + day.summary.empty : ''}${day.summary.partial ? ' · 缺项 ' + day.summary.partial : ''}</span>
+        <button type="button" class="fb-toggle fb-day-button" data-feedback-day="${esc(day.date)}">查看明细</button>
+      </li>`).join('')}</ul>` : ''}
+      <div class="fb-row">
+        <label>查看某日明细 <input type="date" data-feedback-date value="${esc(compDate)}"></label>
+        ${compDay ? `<span class="fb-note">${esc(compDay.date)} · 共 ${compDay.summary.expected} 场 · 已录齐 ${compDay.summary.complete} · 待补 ${compDay.summary.partial} · 未录入 ${compDay.summary.empty}${compDay.summary.stopped ? ' · 停播 ' + compDay.summary.stopped : ''}</span>` : '<span class="fb-note">点上方某一天的「查看明细」或选日期，看当天待补场次。</span>'}
+      </div>
+      ${compDay ? (pendingSessions.length ? `<ul class="fb-missing">${pendingSessions.map(({ group, session }) => `<li>
         <b>${esc(group.accountName)}</b> · ${esc(session.anchorName)}（${esc(session.slotLabel)}）
         <span class="${session.status === 'empty' ? 'fb-over' : 'fb-wait'}">${session.status === 'empty' ? '未录入' : '待补'}：缺 ${esc(session.missing.join('、'))}</span>
-      </li>`).join('')}</ul>` : '<p class="fb-note">该日各场次均已录齐。</p>'}
+      </li>`).join('')}</ul>` : '<p class="fb-note">该日各场次均已录齐。</p>') : ''}
     </section>
 
     <section class="fb-block">
@@ -140,16 +156,25 @@ export function setupFeedback(api) {
   new MutationObserver(mount).observe(document.body, { childList: true, subtree: true });
   mount();
 
+  function loadDayDetail(targetDate) {
+    compDate = targetDate;
+    api('/api/dashboard/completeness?date=' + encodeURIComponent(targetDate))
+      .then(result => { compDay = result; render(); })
+      .catch(error => { message = error.message; render(); });
+  }
+
   document.addEventListener('change', event => {
     if (event.target.matches?.('[data-feedback-date]')) {
-      compDate = event.target.value || todayText;
-      api('/api/dashboard/completeness?date=' + encodeURIComponent(compDate))
-        .then(result => { completeness = result; render(); })
-        .catch(error => { message = error.message; render(); });
+      loadDayDetail(event.target.value || todayText);
     }
   });
 
   document.addEventListener('click', async event => {
+    const dayButton = event.target.closest('[data-feedback-day]');
+    if (dayButton && mounted?.contains(dayButton)) {
+      loadDayDetail(dayButton.dataset.feedbackDay);
+      return;
+    }
     const button = event.target.closest('[data-feedback-vent]');
     if (!button || !mounted?.contains(button)) return;
     button.disabled = true;

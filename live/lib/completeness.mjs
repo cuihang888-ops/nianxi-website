@@ -84,3 +84,46 @@ export function completenessForDate(store, roster, date) {
   }
   return { date, accounts, summary };
 }
+
+const blankSummary = () => ({ expected: 0, complete: 0, partial: 0, empty: 0, stopped: 0 });
+const addSummary = (target, source) => {
+  for (const key of Object.keys(target)) target[key] += source[key] ?? 0;
+};
+const summarizeSessions = sessions => {
+  const summary = blankSummary();
+  for (const session of sessions) { summary.expected++; summary[session.status]++; }
+  return summary;
+};
+
+// YYYY-MM-DD 按 UTC 加减天数，避免本地时区漂移。
+export const shiftDate = (value, days) => {
+  const parsed = new Date(value + 'T00:00:00Z');
+  parsed.setUTCDate(parsed.getUTCDate() + days);
+  return parsed.toISOString().slice(0, 10);
+};
+
+// 提醒周期口径（负责人 2026-11-28 定版）：以自然月为周期——
+// 本月 1 号到今天之内的未录/缺项都算待补；跨了月不再提醒；今天之后还没发生的场次不算未录。
+export const monthToDateRange = today => ({ from: today.slice(0, 8) + '01', to: today });
+
+// 范围汇总：逐日复用 completenessForDate，保证范围数与单日结果永远对得上。
+// 返回逐日汇总（升序）、按直播间汇总与总汇总；同样只含状态计数，不含任何指标数值。
+export function completenessRange(store, roster, from, to) {
+  const days = [];
+  const accountsById = new Map();
+  const summary = blankSummary();
+  if (from <= to) {
+    for (let date = from; date <= to; date = shiftDate(date, 1)) {
+      const day = completenessForDate(store, roster, date);
+      days.push({ date, summary: day.summary });
+      addSummary(summary, day.summary);
+      for (const group of day.accounts) {
+        if (!accountsById.has(group.accountId)) {
+          accountsById.set(group.accountId, { accountId: group.accountId, accountName: group.accountName, summary: blankSummary() });
+        }
+        addSummary(accountsById.get(group.accountId).summary, summarizeSessions(group.sessions));
+      }
+    }
+  }
+  return { from, to, days, accounts: [...accountsById.values()], summary };
+}

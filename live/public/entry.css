@@ -43,6 +43,18 @@
 .reminder-bar .lucide { width: 18px; height: 18px; }
 .reminder-bar.is-warning { background: #fdf3e0; border: 1px solid #ecd9ac; color: #7c5410; }
 .reminder-bar.is-done { background: #e8f1ea; border: 1px solid #bcd4c2; color: var(--green); }
+.reminder-bar.is-neutral { background: #eef0ee; border: 1px solid #d3dcd4; color: #54645a; }
+/* 本月待补总览（月周期口径）：按间分布与逐日待补行默认展开显示 */
+.reminder-month { margin-top: 16px; border-top: 1px dashed var(--line); padding-top: 13px; }
+.reminder-month h3 { font-size: 13px; margin: 0 0 4px; color: var(--green); }
+.month-range { font-size: 12px; color: var(--muted); margin: 0 0 8px; }
+.month-summary { font-size: 13px; line-height: 1.7; margin: 0 0 9px; }
+.month-done { display: flex; align-items: center; gap: 8px; font-size: 13px; color: var(--green); margin: 0; }
+.month-done .lucide { width: 17px; height: 17px; }
+.month-accounts { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 11px; }
+.month-account-chip { font-size: 12px; line-height: 1.5; background: #fdf3e0; border: 1px solid #ecd9ac; color: #7c5410; border-radius: 4px; padding: 3px 8px; }
+.month-days { display: grid; gap: 7px; }
+.month-day-row { margin-bottom: 0; }
 .reminder-error { color: var(--muted); font-size: 12px; margin: 0; line-height: 1.6; }
 .reminder-list .completeness-group:first-child h3 { margin-top: 14px; }
 .card-badges { display: inline-flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; align-items: center; }

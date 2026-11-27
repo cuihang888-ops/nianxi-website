@@ -2,7 +2,7 @@ const app = document.querySelector('#entry-app');
 const dialog = document.querySelector('#entry-editor');
 const toastElement = document.querySelector('#entry-toast');
 const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-const state = { date: today, accountId: '', directory: null, editing: null, busy: false, completeness: null };
+const state = { date: today, accountId: '', directory: null, editing: null, busy: false, completeness: null, month: null };
 const definitions = {
   orderAmount: ['业绩（元）', ''],
   orders: ['单量', '单'],
@@ -157,6 +157,11 @@ const completenessStatusText = session => session.status === 'complete' ? '已�
 const missingKeyByLabel = { '业绩': 'orderAmount', '单量': 'orders', '直播时长': 'actualMinutes', '浏览量': 'impressions', '分享次数': 'shares', '关注数': 'newFollowers' };
 const dateLabelFor = value => value === today ? '今日' : value;
 
+// 提醒按月为周期：本月 1 号至今天之内的日期才产生待补提醒；
+// 更早的日期视为已跨月（不再提醒），今天之后的日期场次还没开始（不算未录）。
+const monthStart = today.slice(0, 8) + '01';
+const dateScope = value => value > today ? 'future' : value < monthStart ? 'past' : 'current';
+
 function findSession(comp, accountId, anchorId) {
   return comp?.accounts.find(group => group.accountId === accountId)
     ?.sessions.find(session => session.anchorId === anchorId) ?? null;
@@ -174,14 +179,32 @@ async function ensureCompleteness() {
   try { return await fetchCompleteness(state.date); } catch { return null; }
 }
 
+// 本月范围汇总（服务端缺省即本月至今），供顶部第二层「本月待补」总览使用。
+async function fetchMonthRange() {
+  const result = await api('api/entry/completeness');
+  if (result && Array.isArray(result.days)) state.month = result;
+  return state.month;
+}
+
 // 录入提醒只显示状态与缺项名称，不显示任何往期数字。
 // 页面顶部汇总条 + 按直播间分组的待补清单 + 场次卡片状态标，三处共用同一份状态数据。
+// 所选日期跨月或在未来时不产生待补提醒，只给一句中性说明，补录照常可用。
 async function loadCompleteness() {
   const section = document.querySelector('#entry-reminder');
   if (!section) return;
   const targetDate = state.date;
+  const scope = dateScope(targetDate);
+  if (scope !== 'current') {
+    section.innerHTML = `<div class="reminder-bar is-neutral" role="status">${icon('check')}<span>${scope === 'past'
+      ? '该日期已跨月，不再提醒；如需补录可正常填写。'
+      : '该日期的场次还没开始，暂无未录提醒。'}</span></div>`;
+    return;
+  }
   try {
-    const result = await fetchCompleteness(targetDate);
+    const [result] = await Promise.all([
+      fetchCompleteness(targetDate),
+      fetchMonthRange().catch(() => null)
+    ]);
     if (state.date !== targetDate || !document.querySelector('#entry-reminder')) return;
     renderReminder(result);
     applyCardBadges(result);
@@ -189,6 +212,46 @@ async function loadCompleteness() {
     if (state.date !== targetDate || !document.querySelector('#entry-reminder')) return;
     section.innerHTML = '<p class="reminder-error">暂时无法读取录入状态，录入与提交不受影响。</p>';
   }
+}
+
+// 第二层：本月待补总览。本月累计待补数、按直播间分布直接展开显示；
+// 逐日行可点进那一天（切到该日后，第一层就会列出那天的待补场次，点行直达编辑器）。
+function renderMonthOverview(range) {
+  if (!range) return '';
+  const { summary } = range;
+  const pending = summary.partial + summary.empty;
+  const head = `<h3>本月待补总览</h3><p class="month-range">统计范围：${esc(range.from)} 至 ${esc(range.to)} · 跨月不再提醒</p>`;
+  if (!pending) {
+    return `<div class="reminder-month">${head}<p class="month-done">${icon('check')}<span>本月已全部录完</span></p></div>`;
+  }
+  const parts = [];
+  if (summary.empty) parts.push('未录 ' + summary.empty + ' 场');
+  if (summary.partial) parts.push('缺项 ' + summary.partial + ' 场');
+  const accountChips = range.accounts
+    .filter(group => group.summary.partial + group.summary.empty > 0)
+    .map(group => {
+      const bits = [];
+      if (group.summary.empty) bits.push('未录 ' + group.summary.empty);
+      if (group.summary.partial) bits.push('缺项 ' + group.summary.partial);
+      return `<span class="month-account-chip">${esc(group.accountName)} · ${esc(bits.join(' · '))}</span>`;
+    }).join('');
+  const dayRows = range.days
+    .filter(day => day.summary.partial + day.summary.empty > 0)
+    .slice().reverse()
+    .map(day => {
+      const bits = [];
+      if (day.summary.empty) bits.push('未录 ' + day.summary.empty + ' 场');
+      if (day.summary.partial) bits.push('缺项 ' + day.summary.partial + ' 场');
+      return `<button type="button" class="completeness-row month-day-row" data-month-date="${esc(day.date)}">
+        <span class="completeness-who"><strong>${esc(day.date === today ? '今日' : day.date.slice(5))}</strong><em>${esc(day.date)}</em></span>
+        <span class="completeness-status is-${day.summary.empty ? 'empty' : 'partial'}">待补 ${day.summary.partial + day.summary.empty} 场 · ${esc(bits.join('、'))}</span>
+      </button>`;
+    }).join('');
+  return `<div class="reminder-month">${head}
+    <p class="month-summary"><strong>本月累计还有 ${pending} 场待补</strong>：${esc(parts.join('、'))}。</p>
+    ${accountChips ? `<div class="month-accounts">${accountChips}</div>` : ''}
+    ${dayRows ? `<div class="month-days">${dayRows}</div>` : ''}
+  </div>`;
 }
 
 function renderReminder(result) {
@@ -217,7 +280,7 @@ function renderReminder(result) {
         <span class="completeness-status is-${esc(session.status)}">${esc(completenessStatusText(session))}</span>
       </button>`).join('')}</div>`;
   }).join('');
-  section.innerHTML = bar + (groups ? `<div class="reminder-list">${groups}</div>` : '');
+  section.innerHTML = bar + (groups ? `<div class="reminder-list">${groups}</div>` : '') + renderMonthOverview(state.month);
 }
 
 // 场次卡片本身带状态标，不用滚到别处才知道哪场没录齐。
@@ -305,6 +368,20 @@ function openEditor(anchorId) {
 function applyEditorHints(anchor, draft, comp = state.completeness) {
   const hint = dialog.querySelector('#editor-hint');
   if (!hint) return;
+  // 跨月与未来日期不产生缺项提醒：只给中性说明，不标缺项字段，补录/登记照常可用。
+  const scope = dateScope(state.date);
+  if (scope !== 'current') {
+    hint.hidden = false;
+    hint.className = 'editor-hint is-stopped';
+    hint.textContent = scope === 'past'
+      ? '该日期已跨月，不再提醒缺项；如需补录可正常填写，确认没有的指标请填 0。'
+      : '该日期的场次还没开始，暂无缺项提醒；如需提前登记请按实际数据填写。';
+    for (const wrapper of dialog.querySelectorAll('[data-field]')) {
+      wrapper.classList.remove('field-missing', 'field-draft');
+      wrapper.querySelector('.field-tag')?.remove();
+    }
+    return;
+  }
   const session = findSession(comp, anchor.accountId, anchor.id);
   if (!session) { hint.hidden = true; return; }
   hint.hidden = false;
@@ -452,7 +529,9 @@ async function showReceipt(anchor, date) {
   const group = comp?.accounts.find(item => item.accountId === anchor.accountId);
   const mine = group?.sessions.find(item => item.anchorId === anchor.id) ?? null;
   const remaining = (group?.sessions ?? []).filter(item => item.status === 'empty' || item.status === 'partial');
-  const next = remaining.find(item => item.anchorId && item.anchorId !== anchor.id) ?? remaining[0] ?? null;
+  // 跨月/未来日期不做「还剩几场」的提醒，也不给继续补下一场入口（补录本身仍可从列表进入）。
+  const inScope = dateScope(date) === 'current';
+  const next = inScope ? (remaining.find(item => item.anchorId && item.anchorId !== anchor.id) ?? remaining[0] ?? null) : null;
   const accountName = state.directory.accounts.find(item => item.id === anchor.accountId)?.name ?? '';
   const mineText = !mine ? '已记入系统。'
     : mine.status === 'complete' ? '本场已完整，六项全部录入。'
@@ -467,9 +546,11 @@ async function showReceipt(anchor, date) {
     </div>
     <div class="entry-form-body">
       <p class="receipt-status ${mine?.status === 'complete' ? 'is-complete' : 'is-partial'}">${icon('check')}<span><strong>登记已提交</strong> — ${esc(mineText)}</span></p>
-      <p class="receipt-remaining">${group
-        ? (remaining.length ? `本间${date === today ? '今日' : '当日'}还剩 ${remaining.length} 场未完成。` : '本间已全部录完，辛苦了。')
-        : '暂时无法读取本间剩余场次状态，可返回列表查看顶部提醒。'}</p>
+      <p class="receipt-remaining">${!inScope
+        ? (dateScope(date) === 'past' ? '该日期已跨月，其余场次不再提醒；如需继续补录，可返回列表正常填写。' : '该日期的场次还没开始，本月待补请看列表顶部的本月总览。')
+        : group
+          ? (remaining.length ? `本间${date === today ? '今日' : '当日'}还剩 ${remaining.length} 场未完成。` : '本间已全部录完，辛苦了。')
+          : '暂时无法读取本间剩余场次状态，可返回列表查看顶部提醒。'}</p>
     </div>
     <div class="editor-actions">
       <button type="button" data-action="receipt-done">返回列表</button>
@@ -493,6 +574,8 @@ app.addEventListener('change', event => {
 });
 
 app.addEventListener('click', async event => {
+  const monthDay = event.target.closest('[data-month-date]');
+  if (monthDay) { renderDate(monthDay.dataset.monthDate); return; }
   const compRow = event.target.closest('[data-comp-anchor]');
   if (compRow?.dataset.compAnchor) {
     state.accountId = compRow.dataset.compAccount || state.accountId;
