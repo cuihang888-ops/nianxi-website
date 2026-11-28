@@ -1,0 +1,146 @@
+[
+  {
+    "id": "L390-1",
+    "title": "布局 390px：五间名字完整 + 直播间红色 +N 与接口待补数一致",
+    "expected": "5 间名无截断；每间 badge = 当日 canEnter 场次数",
+    "actual": "边境源头1号:+2 翠缘2号:+2 臻选3号:+2 高货4号:+2 甄品5号:+2",
+    "pass": true,
+    "detail": "接口期望 {\"边境源头1号\":2,\"翠缘2号\":2,\"臻选3号\":2,\"高货4号\":2,\"甄品5号\":2}"
+  },
+  {
+    "id": "L390-2",
+    "title": "布局 390px：场次卡 +N = 缺项数",
+    "expected": "首卡 badge=+2（浏览量/分享次数）",
+    "actual": "阿玉 badge=+2 title=2 项待补录",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "L390-3",
+    "title": "布局 390px：无横向滚动",
+    "expected": "scrollWidth ≤ 390",
+    "actual": "doc=390 body=390 inner=390",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "L390-4",
+    "title": "布局 390px：长中文名不溢出页面（合成压测）",
+    "expected": "页面无横向滚动",
+    "actual": "docScrollW=390 标签内截断=false",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "L320-1",
+    "title": "布局 320px：五间名字完整 + 直播间红色 +N 与接口待补数一致",
+    "expected": "5 间名无截断；每间 badge = 当日 canEnter 场次数",
+    "actual": "边境源头1号:+2 翠缘2号:+2 臻选3号:+2 高货4号:+2 甄品5号:+2",
+    "pass": true,
+    "detail": "接口期望 {\"边境源头1号\":2,\"翠缘2号\":2,\"臻选3号\":2,\"高货4号\":2,\"甄品5号\":2}"
+  },
+  {
+    "id": "L320-2",
+    "title": "布局 320px：场次卡 +N = 缺项数",
+    "expected": "首卡 badge=+2（浏览量/分享次数）",
+    "actual": "阿玉 badge=+2 title=2 项待补录",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "L320-3",
+    "title": "布局 320px：无横向滚动",
+    "expected": "scrollWidth ≤ 320",
+    "actual": "doc=320 body=320 inner=320",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "M1",
+    "title": "本月待补：月度清单点击直达具体表单",
+    "expected": "点击待补记录 → 日期切到该日且对应主播表单打开",
+    "actual": "目标 2026-11-28/边境源头1号 · 第 1 场 · 阿玉\n → 当前日期=2026-11-28 表单打开=true 标题=阿玉 · 场次登记",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "G1",
+    "title": "草稿：填写后关闭自动保留并在卡上标记",
+    "expected": "localStorage 有草稿键；卡显示「本机草稿」",
+    "actual": "keys=1 badge=本机草稿",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "G2",
+    "title": "草稿：刷新后仍恢复且归原场次",
+    "expected": "impressions=12345 shares=3",
+    "actual": "{\"impressions\":\"12345\",\"shares\":\"3\"}",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "G3",
+    "title": "草稿：提交成功后草稿清除且场次录齐",
+    "expected": "草稿键=0；接口状态 complete",
+    "actual": "keys=0 status=complete",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "S1",
+    "title": "历史/归属：旧表单带过期 slot 提交被拦并提示刷新",
+    "expected": "409 code=ENTRY_CONFLICT assignmentChanged=true",
+    "actual": "409 code=ENTRY_CONFLICT assignmentChanged=true",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "T1",
+    "title": "茶水间：荣誉照片在员工端大图显示",
+    "expected": "发布 201；荣誉墙有照片图且成功加载（naturalWidth>0）",
+    "actual": "发布=201 img={\"src\":\"../api/tearoom/honors/cee2d6bf-5e06-4fc2-9a4c-fb27b1406591/photo\",\"natural\":1,\"visible\":true}",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "T2",
+    "title": "预约：有返回协作中心入口",
+    "expected": "存在含「协作中心」的链接",
+    "actual": "{\"text\":\"← 返回协作中心\",\"href\":\"../\"}",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "P1",
+    "title": "性能：录入页冷打开（慢网+CPU 4×）",
+    "expected": "记录可见耗时/请求数/传输量；首屏 API 仅 1 次 bootstrap（含名录+状态+本月汇总）",
+    "actual": "中位 1628ms / 5 请求 / 149KB；bootstrap 调用=1 /api/entry/bootstrap?date=2026-11-28&completeness=1",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "P2",
+    "title": "性能：录入页热打开（先访问首页）",
+    "expected": "记录中位可见耗时",
+    "actual": "中位 1639ms / 5 请求 / 149KB",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "P3",
+    "title": "性能：交互请求数（切间/开表单/提交）",
+    "expected": "切间 0 请求；开表单 0 请求；提交 1 个 POST 且回执内嵌状态不再拉取",
+    "actual": "切间=0 开表单=0 提交请求=[\"POST /api/entry/sessions?status=1\"] 提交耗时=30110ms",
+    "pass": true,
+    "detail": ""
+  },
+  {
+    "id": "N1",
+    "title": "慢网并发补录：双端同场不同缺项最终都落库",
+    "expected": "最终状态 complete（两项都补上），无互相覆盖",
+    "actual": "A端= 阿玉 · 场次登记边境源头1号 · 2026-11-24 · 第 1 场 返回协作中心 已录入 业绩、单量、直播时长、 | B端= 阿玉 · 场次登记边境源头1号 · 2026-11-24 · 第 1 场 返回协作中心 已录入 业绩、单量、直播时长、 | 接口状态=complete",
+    "pass": true,
+    "detail": "A= 阿玉 · 场次登记边境源头1号 · 2026-11-24 · 第 1 场 返回协作中心 已录入 业绩、单量、直播时长、关注数 浏览量次 分享次数次 浏览量填写平台曝光总数。待补指标可留空，已确认没有的指标请填 0。 草稿已保存在本浏览器 重新核对录入状态 返回检查 确认提交 关闭 提交登记  || B= 阿玉 · 场次登记边境源头1号 · 2026-11-24 · 第 1 场 返回协作中心 已录入 业绩、单量、直播时长、关注数 浏览量次 分享次数次 浏览量填写平台曝光总数。待补指标可留空，已确认没有的指标请填 0。 草稿已保存在本浏览器 重新核对录入状态 返回检查 确认提交 关闭 提交登记 "
+  }
+]

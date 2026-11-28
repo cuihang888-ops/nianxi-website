@@ -1,0 +1,174 @@
+{
+  "at": "2026-11-28T09:11:02.037Z",
+  "today": "2026-11-28",
+  "results": [
+    {
+      "id": "A1",
+      "title": "替播：同日同间同时段两位主播分别提交",
+      "expected": "两人均 201，两条独立记录",
+      "actual": "主播 201 / 替播 201",
+      "pass": true,
+      "detail": "{\"ok\":true,\"completeness\":{\"date\":\"2026-11-10\",\"accounts\":[{\"accountId\":\"account-1\",\"accountName\":\"边境源头1号\",\"sessions\":[{"
+    },
+    {
+      "id": "A1b",
+      "title": "替播：两条记录归属独立",
+      "expected": "2 条，anchorId 各一",
+      "actual": "2 条: ra-a,ra-b",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "A2",
+      "title": "替播：分别补录互不串扰不覆盖",
+      "expected": "两人均 201；各自字段落到各自记录，对方字段为空",
+      "actual": "201/201; 甲 impressions=777 shares=null; 乙 shares=5 impressions=null minutes=240",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "A3",
+      "title": "替播：同一主播同日同间冲突值重复提交仍被拦",
+      "expected": "均 409 且原值不变",
+      "actual": "409/409; orders=11 shares=5",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "A4",
+      "title": "管理员排班：时间冲突检查仍生效（登录+管理解锁后）",
+      "expected": "首建 201；同主播重叠时段 409；主播跨间归属冲突 409；另一主播按其时段规范化后可建 201",
+      "actual": "201/409/409/201 次场start=14:00",
+      "pass": true,
+      "detail": "{\"error\":\"该账号在此时段已有排期\",\"conflictId\":\"b4f2153b-37aa-4017-8030-2a17613a0c65\",\"demo\":true,\"dataset\":{\"kind\":\"demo"
+    },
+    {
+      "id": "B1",
+      "title": "历史记录：有主播的旧记录归原主播",
+      "expected": "ra-old 显示 complete",
+      "actual": "ra-old=complete",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "B2",
+      "title": "历史记录：无主播导入行在唯一候选时作只读参考",
+      "expected": "ra-ref（slot-2 唯一主播）historicalReference=true 且 canEnter=false",
+      "actual": "historicalReference=true canEnter=false status=partial",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "B3",
+      "title": "历史记录：双主播同槽时导入行不串认",
+      "expected": "两位主播均为 empty（未认领），导入行单独列出",
+      "actual": "ra-c1=empty ra-c2=empty orphanRow=complete",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "C1a",
+      "title": "本月待补：默认范围为北京时间本月 1 号→今天",
+      "expected": "from=2026-11-01 to=2026-11-28",
+      "actual": "from=2026-11-01 to=2026-11-28",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "C1b",
+      "title": "本月待补：按日汇总与逐日明细对账",
+      "expected": "抽查 3 天 summary 完全一致",
+      "actual": "3/3 一致",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "C1c",
+      "title": "本月待补：按间汇总与逐日之和对账",
+      "expected": "各间 empty/partial 均相等",
+      "actual": "全部一致",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "C2",
+      "title": "本月待补：当天未开播（晚场）不算未录",
+      "expected": "晚场主播 status=upcoming；已开播早场主播 status=empty（对照）",
+      "actual": "晚场=upcoming 早场=empty",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "C3",
+      "title": "本月待补：往月可补录但不进本月提醒",
+      "expected": "往月提交 201；往月单日显示 complete；本月范围不含该日期",
+      "actual": "提交=201 往月状态=complete 范围含往月=false",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "C4",
+      "title": "本月待补：停播不计缺项；晚场记录归开播日",
+      "expected": "停播=stopped；昨晚场次在昨日 complete、今日不出现该记录状态",
+      "actual": "stopped=stopped 昨日=complete 今日同主播=upcoming",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "E1",
+      "title": "并发补录：两端同时补同一场不同缺项不互相覆盖",
+      "expected": "最终 impressions=111、shares=9、orders=3 全部落库",
+      "actual": "不需要恢复；最终 orders=3 impressions=111 shares=9",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "D1",
+      "title": "看板：共享口令可看录入统计，私密维护被拒",
+      "expected": "completeness 200；feedback 403；honors POST 403",
+      "actual": "200/403/403",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "D2",
+      "title": "茶水间：协调/吐槽员工端零下发，动态脱敏",
+      "expected": "乙看不到协调与吐槽；动态含拼单、不含三类正文与 vent 条目",
+      "actual": "乙 coordinates=0 vents=0 动态拼单=true vent条目=false 正文泄露=false",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "D3",
+      "title": "茶水间：建议闭环（提交→管理处理→员工凭编号查状态）+48H 标记字段",
+      "expected": "trackedSuggestion.status=处理中 且 mine=true；新建议 overdue=false",
+      "actual": "overdue=false tracked={\"code\":\"JY-6B938303F1F94F5E\",\"status\":\"处理中\",\"reply\":\"已安排\",\"time\":\"11/28 17:11\",\"mine\":true}",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "D4",
+      "title": "建议 48H：超 48 小时未处理标逾期",
+      "expected": "overdue=true 且 remainingMs<0",
+      "actual": "code=JY-FD5A587890E04785 overdue=true remainingMs=-3600001",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "D5",
+      "title": "荣誉墙：三周期发布 + 照片经员工会话下发、无会话 401",
+      "expected": "发布 201×3；墙面三周期齐；photoUrl 为站内照片接口",
+      "actual": "发布=201/201/201 三周期=月星,周星,昨日星 photoUrl=../api/tearoom/honors/4a0c5cb8-32e7-4c15-b598-c624fcdecc37/photo 无会话=401",
+      "pass": true,
+      "detail": ""
+    },
+    {
+      "id": "D6",
+      "title": "AI 门槛：未配置 ASSISTANT_ACCESS 时默认关闭",
+      "expected": "status 显示 off/不可用；chat 被拒（403/404/503）",
+      "actual": "status=404 {\"error\":\"AI 助手暂未开放\"} chat=404",
+      "pass": true,
+      "detail": ""
+    }
+  ]
+}

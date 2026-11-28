@@ -1,0 +1,95 @@
+{
+  "conditions": {
+    "viewport": "390x844",
+    "ua": "MicroMessenger/8.0.44 (Android)",
+    "downKbps": 1600,
+    "upKbps": 750,
+    "rttMs": 150,
+    "cpuThrottle": 4
+  },
+  "runs": {
+    "entryCold": {
+      "visibleMsMedian": 1628,
+      "requestCountMedian": 5,
+      "totalBytesMedian": 152432,
+      "samples": [
+        {
+          "visibleMs": 1628,
+          "requestCount": 5,
+          "totalBytes": 152432,
+          "apiRequests": [
+            "/api/entry/bootstrap?date=2026-11-28&completeness=1"
+          ]
+        },
+        {
+          "visibleMs": 1660,
+          "requestCount": 5,
+          "totalBytes": 152432,
+          "apiRequests": [
+            "/api/entry/bootstrap?date=2026-11-28&completeness=1"
+          ]
+        },
+        {
+          "visibleMs": 1625,
+          "requestCount": 5,
+          "totalBytes": 152432,
+          "apiRequests": [
+            "/api/entry/bootstrap?date=2026-11-28&completeness=1"
+          ]
+        }
+      ]
+    },
+    "entryHot": {
+      "visibleMsMedian": 1639,
+      "requestCountMedian": 5,
+      "totalBytesMedian": 152432,
+      "samples": [
+        {
+          "visibleMs": 1639,
+          "requestCount": 5,
+          "totalBytes": 152432,
+          "apiRequests": [
+            "/api/entry/bootstrap?date=2026-11-28&completeness=1"
+          ]
+        },
+        {
+          "visibleMs": 1600,
+          "requestCount": 5,
+          "totalBytes": 152432,
+          "apiRequests": [
+            "/api/entry/bootstrap?date=2026-11-28&completeness=1"
+          ]
+        },
+        {
+          "visibleMs": 1643,
+          "requestCount": 5,
+          "totalBytes": 152432,
+          "apiRequests": [
+            "/api/entry/bootstrap?date=2026-11-28&completeness=1"
+          ]
+        }
+      ]
+    }
+  },
+  "interactions": {
+    "switchAccountApiRequests": 0,
+    "openFormApiRequests": 0,
+    "submitApiRequests": [
+      "POST /api/entry/sessions?status=1"
+    ],
+    "submitToToastMsSamples": [
+      969,
+      957,
+      975
+    ],
+    "submitToToastMsMedian": 969,
+    "note": "提交成功后 v1.3.2 的交互是关闭弹窗 + toast「登记已提交」（无回执页）；耗时为点击提交到 toast 出现，慢网+CPU4× 条件。browser-review.mjs 中 P3 的 30110ms 是等待回执文案的探针误判，已以本探针复测为准。"
+  },
+  "concurrentBackfill": {
+    "scenario": "双浏览器上下文（均慢网+CPU4×）同时打开同一场（2026-11-24 阿玉，缺浏览量+分享次数），一端填浏览量、一端填分享次数，同时提交",
+    "result": "两端均成功，最终完整性状态 complete，两项均落库、无覆盖"
+  },
+  "firstLoadApiCalls": [
+    "GET /api/entry/bootstrap?date=<date>&completeness=1 （仅 1 次，含名录+当日状态+本月汇总）"
+  ]
+}
