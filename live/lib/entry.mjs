@@ -63,9 +63,11 @@ export function entryInput(input, user, known) {
   return result;
 }
 
-export function duplicateEntry(item, sessions, anchors) {
+// 判重口径（负责人 2026-11-28 定版）：同一时段可以换主播、各录各的，
+// 重复只认「同日 + 同直播间 + 同一主播」，不再按时段判重。
+export function duplicateEntry(item, sessions) {
   return sessions.filter(other => !other.cancelled && other.date === item.date && other.accountId === item.accountId &&
-    (other.anchorId === item.anchorId || (other.slotId || anchors.find(anchor => anchor.id === other.anchorId)?.slotId) === item.slotId));
+    other.anchorId === item.anchorId);
 }
 
 export function hasSessionMetrics(row) {

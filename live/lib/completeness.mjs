@@ -57,12 +57,24 @@ export function completenessForDate(store, roster, date) {
   for (const account of roster.accounts.filter(active)) {
     const group = groupFor(account);
     const anchors = roster.anchors.filter(anchor => anchor.accountId === account.id && activeOn(anchor, date));
+    // 两遍匹配：先全体按主播本人精确匹配；再给仍未匹配上的主播按时段兜底认领
+    // 「主播已不在当日名录」的历史导入行——名录内其他主播的记录绝不串认。
+    const rosterAnchorIds = new Set(anchors.map(anchor => anchor.id));
+    const matched = new Map();
     for (const anchor of anchors) {
       const row = rows.find(candidate => !used.has(candidate.id) && candidate.accountId === account.id &&
-        (candidate.anchorId === anchor.id ||
-          (candidate.slotId && anchor.slotId && candidate.slotId === anchor.slotId)));
-      if (row) used.add(row.id);
-      group.sessions.push(describe(row ?? null, anchor));
+        candidate.anchorId === anchor.id);
+      if (row) { used.add(row.id); matched.set(anchor.id, row); }
+    }
+    for (const anchor of anchors) {
+      if (matched.has(anchor.id)) continue;
+      const row = rows.find(candidate => !used.has(candidate.id) && candidate.accountId === account.id &&
+        !rosterAnchorIds.has(candidate.anchorId) &&
+        candidate.slotId && anchor.slotId && candidate.slotId === anchor.slotId);
+      if (row) { used.add(row.id); matched.set(anchor.id, row); }
+    }
+    for (const anchor of anchors) {
+      group.sessions.push(describe(matched.get(anchor.id) ?? null, anchor));
     }
   }
   // 名录之外的当日记录（如导入数据）也如实列出，避免总览漏项。

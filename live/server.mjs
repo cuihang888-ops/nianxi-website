@@ -381,7 +381,7 @@ export function createApplication(options = {}) {
           if (result.orderAmount >= 100000 && input.confirmAmount !== true) {
             throw new ApiError(422, '请再次核对填写的业绩金额。确认后可以继续提交。', { code: 'ENTRY_CONFIRM_AMOUNT' });
           }
-          const matching = duplicateEntry(result, store.list('sessions'), known.anchors);
+          const matching = duplicateEntry(result, store.list('sessions'));
           const blank = matching.length === 1 && fillableSession(matching[0], result) ? matching[0] : null;
           // 补录：场次已填一部分时，只补空缺字段，不覆盖已填数值；与已填值冲突仍按重复提交拦截。
           const partial = !blank && matching.length === 1 && mergeableSession(matching[0], result) ? matching[0] : null;
@@ -393,7 +393,8 @@ export function createApplication(options = {}) {
             : partial ? mergeSession(partial, result)
             : { ...result, id: randomUUID() };
           try {
-            if (!existing) conflict(next, store.list('sessions'));
+            // 录入是登记已发生的场次，不是排期：不做时段冲突拦截，
+            // 同一时段换主播各录各的（判重只认同一主播，见 duplicateEntry）。
             store.save('sessions', next, existing?.version, user);
           } catch (error) {
             if (!(error instanceof ApiError) || error.status !== 409) throw error;

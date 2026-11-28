@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createApplication } from '../server.mjs';
 import { completenessForDate, completenessRange, monthToDateRange, sessionStatus } from '../lib/completeness.mjs';
+import { duplicateEntry } from '../lib/entry.mjs';
 import { chinaDate } from '../lib/seed.mjs';
 import { suggestionTiming, SUGGESTION_SLA_MS } from '../lib/feedback.mjs';
 
@@ -66,6 +67,41 @@ test('completeness: explicit zero counts as filled, partial lists missing names,
   assert.deepEqual(result.accounts[0].sessions[0].missing, ['单量']);
   // 完整性结果只含状态与缺项名，不含任何指标数值字段。
   assert.doesNotMatch(JSON.stringify(result), /orderAmount|actualMinutes|impressions/);
+});
+
+test('duplicate rule: same slot different anchor is NOT a duplicate; same anchor is', () => {
+  const base = { date: '2026-11-25', accountId: 'a1', anchorId: 'an1', slotId: 's1' };
+  const sessions = [
+    { id: 'r1', ...base },
+    { id: 'r2', date: '2026-11-25', accountId: 'a1', anchorId: 'an2', slotId: 's1' },
+    { id: 'r3', date: '2026-11-24', accountId: 'a1', anchorId: 'an1', slotId: 's1' },
+    { id: 'r4', ...base, cancelled: true }
+  ];
+  // 同一主播同日同间 → 判重（不含已取消）。
+  assert.deepEqual(duplicateEntry(base, sessions).map(row => row.id), ['r1']);
+  // 换主播（同时段另一人）→ 不判重，可以各录各的。
+  const relief = { date: '2026-11-25', accountId: 'a1', anchorId: 'an2', slotId: 's1' };
+  assert.deepEqual(duplicateEntry(relief, sessions).map(row => row.id), ['r2']);
+  const fresh = { date: '2026-11-25', accountId: 'a1', anchorId: 'an3', slotId: 's1' };
+  assert.deepEqual(duplicateEntry(fresh, sessions), []);
+});
+
+test('completeness: two anchors sharing one slot are matched to their own rows', () => {
+  const zero = { orderAmount: 0, orders: 0, actualMinutes: 0, impressions: 0, shares: 0, newFollowers: 0 };
+  const roster = {
+    accounts: [{ id: 'a1', name: '甲直播间', active: true }],
+    anchors: [
+      { id: 'an1', name: '主播甲', accountId: 'a1', slotId: 's1', slotLabel: '早场', activeFrom: null, activeTo: null },
+      { id: 'an2', name: '主播乙', accountId: 'a1', slotId: 's1', slotLabel: '早场', activeFrom: null, activeTo: null }
+    ]
+  };
+  const store = { list: name => name === 'sessions' ? [
+    { id: 'r2', date: '2026-11-25', accountId: 'a1', anchorId: 'an2', slotId: 's1', ...zero }
+  ] : [] };
+  const result = completenessForDate(store, roster, '2026-11-25');
+  const byAnchor = Object.fromEntries(result.accounts[0].sessions.map(item => [item.anchorId, item.status]));
+  assert.equal(byAnchor.an2, 'complete');
+  assert.equal(byAnchor.an1, 'empty');
 });
 
 test('completeness range: month-to-date only — in-month gaps count, last month and future days do not', () => {
