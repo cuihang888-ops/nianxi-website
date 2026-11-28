@@ -31,7 +31,7 @@ export function entryDirectory(roster) {
 export function entryInput(input, user, known) {
   const isPublic = user.role === PUBLIC_ENTRY_USER.role;
   const allowed = isPublic ? publicEntryFields : entryFields(user);
-  keys(input, ['date', 'accountId', 'anchorId', ...allowed, ...(isPublic ? ['confirmAmount'] : [])]);
+  keys(input, ['date', 'accountId', 'anchorId', 'slotId', ...allowed, ...(isPublic ? ['confirmAmount'] : [])]);
   if (isPublic && Object.hasOwn(input, 'confirmAmount') && typeof input.confirmAmount !== 'boolean') {
     throw new ApiError(400, '金额确认须为布尔值');
   }
@@ -39,6 +39,15 @@ export function entryInput(input, user, known) {
   const accountId = text(input.accountId, '账号', 160, true);
   const selectedDate = date(input.date);
   const anchor = known.anchors.find(item => item.id === anchorId);
+  if (Object.hasOwn(input, 'slotId')) {
+    const slotId = text(input.slotId, '场次', 160, true);
+    const account = known.accounts.find(item => item.id === accountId);
+    const slot = known.slots.find(item => item.accountId === accountId && item.id === slotId);
+    if (anchor?.accountId !== accountId || anchor?.slotId !== slotId ||
+        !active(account) || !active(slot) || !activeOn(anchor, selectedDate)) {
+      throw new ApiError(409, '该主播场次已调整，请按最新排期重新录入。', { code: 'ENTRY_SLOT_CHANGED', date: selectedDate });
+    }
+  }
   if (!anchor) throw new ApiError(400, '请选择有效主播');
   if (!active(known.accounts.find(item => item.id === accountId))) throw new ApiError(400, '请选择已启用的直播间');
   if (!activeOn(anchor, selectedDate)) throw new ApiError(400, '该主播在此日期不在录入名录有效期内');
@@ -63,9 +72,9 @@ export function entryInput(input, user, known) {
   return result;
 }
 
-export function duplicateEntry(item, sessions, anchors) {
+export function duplicateEntry(item, sessions) {
   return sessions.filter(other => !other.cancelled && other.date === item.date && other.accountId === item.accountId &&
-    (other.anchorId === item.anchorId || (other.slotId || anchors.find(anchor => anchor.id === other.anchorId)?.slotId) === item.slotId));
+    other.anchorId === item.anchorId);
 }
 
 export function hasSessionMetrics(row) {
@@ -82,4 +91,31 @@ export function fillableSession(row, entry) {
 export function fillSession(row, entry) {
   const values = sessionMetrics.filter(field => entry[field] != null).map(field => [field, entry[field]]);
   return { ...row, ...Object.fromEntries(values), slotId: row.slotId ?? entry.slotId, slotLabel: row.slotLabel ?? entry.slotLabel, status: 'completed' };
+}
+
+// 补录口径：场次已有一部分指标时，只允许补齐仍为空缺的字段。
+// 新提交若与已填数值不一致（同字段两个不同的值），不视为补录，仍按重复提交拦截，避免覆盖已填数值。
+export function mergeableSession(row, entry) {
+  if (row.anchorId !== entry.anchorId || (row.slotId && row.slotId !== entry.slotId) ||
+    row.cancelled || row.sourceStatus === 'stopped' || !hasSessionMetrics(row)) return false;
+  let additions = 0;
+  for (const field of sessionMetrics) {
+    if (entry[field] == null) continue;
+    if (row[field] == null) additions++;
+    else if (row[field] !== entry[field]) return false;
+  }
+  const merged = mergeSession(row, entry);
+  const checks = [
+    ['qualified', 'messages'], ['paidOrders', 'orders'], ['refundOrders', 'paidOrders'],
+    ['refunds', 'received'], ['received', 'orderAmount'], ['peak', 'viewers']
+  ];
+  if (checks.some(([left, right]) => (row[left] == null || row[right] == null) &&
+    Number.isFinite(merged[left]) && Number.isFinite(merged[right]) && merged[left] > merged[right])) return false;
+  return additions > 0;
+}
+
+export function mergeSession(row, entry) {
+  const values = sessionMetrics.filter(field => row[field] == null && entry[field] != null)
+    .map(field => [field, entry[field]]);
+  return { ...row, ...Object.fromEntries(values), status: 'completed' };
 }

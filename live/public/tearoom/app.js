@@ -5,7 +5,7 @@ const status = byId('room-status');
 const pending = byId('room-pending');
 const navigation = document.querySelector('nav.bottom');
 const categories = ['全部', '砍价', '证书售后', '色名意境', '活动', '英文', '越南语', '采购沟通', '缅语', '其他'];
-const views = new Set(['home', 'scripts', 'cases', 'board', 'wall', 'help', 'suggest', 'market', 'gratitude', 'goals', 'search']);
+const views = new Set(['home', 'scripts', 'cases', 'board', 'wall', 'help', 'suggest', 'market', 'gratitude', 'goals', 'search', 'vents', 'coordinates', 'honors']);
 const apiRoot = new URL('../api/tearoom', document.baseURI);
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({
   '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
@@ -69,7 +69,13 @@ function showRoom() {
   }
   renderProfile();
   go(view, false);
+  loadActivity();
 }
+
+// 页面可见时每 45 秒轻量刷新一次最新动态；切到后台不轮询。
+setInterval(() => {
+  if (!document.hidden && state) loadActivity();
+}, 45_000);
 
 function renderProfile() {
   byId('profile-name').textContent = state.name;
@@ -104,6 +110,8 @@ function go(next, scroll = true) {
     }
   }
   renderView();
+  if (next === 'home') loadActivity();
+  if (next === 'honors') honorsCache = null;
   if (scroll) window.scrollTo(0, 0);
 }
 
@@ -177,7 +185,42 @@ function helpCard(row, compact) {
   </article>`;
 }
 
+function relativeTime(raw) {
+  const then = Number(raw);
+  if (!Number.isFinite(then) || then <= 0) return '';
+  const diff = Date.now() - then;
+  if (diff < 60_000) return '刚刚';
+  if (diff < 3_600_000) return Math.floor(diff / 60_000) + '分钟前';
+  if (diff < 86_400_000) return Math.floor(diff / 3_600_000) + '小时前';
+  return displayTime(then);
+}
+
+let activityItems = null;
+// 最新动态只拉轻量字段（发起人、动作、时间、去向），页面打开与回到首页时刷新，
+// 页面可见时每 45 秒轻量轮询一次，不用长连接。
+async function loadActivity() {
+  try {
+    const result = await api('/activity');
+    activityItems = result.items || [];
+    if (view === 'home') renderActivity();
+  } catch { /* 动态加载失败不影响首页其他内容 */ }
+}
+
+function renderActivity() {
+  const box = byId('homeActivity');
+  if (!box) return;
+  if (!activityItems) {
+    box.innerHTML = empty('正在加载动态…');
+    return;
+  }
+  box.innerHTML = activityItems.length ? activityItems.map(item => `<button type="button" class="activity-item" data-activity-view="${escape(item.view)}">
+    <span class="activity-text">${item.actorName ? `<b>${escape(item.actorName)}</b> ` : ''}${escape(item.text)}</span>
+    <span class="activity-time">${escape(relativeTime(item.createdAt))}</span>
+  </button>`).join('') : empty('暂时还没有动态，去发第一条吧');
+}
+
 function renderHome() {
+  renderActivity();
   const quote = topQuote();
   byId('dailyQuote').innerHTML = quote ? `<div class="tag">每日一句</div>
     <div class="text">“${escape(quote.body)}”</div><div class="from">${escape(quote.who)}</div>
@@ -256,11 +299,13 @@ function renderGoals() {
 }
 
 function suggestionCard(row, isPublic = false) {
+  const done = ['已回复', '已调整'].includes(row.status);
   return `<article class="card">
     ${isPublic ? '' : `<h3>${escape(row.code)}</h3><p>${escape(row.body)}</p>`}
     <div class="meta"><span>${escape(displayTime(stamp(row)))}</span>
-      <span class="status ${row.status === '已回复' ? 'done' : 'wait'}">${escape(row.status)}</span></div>
-    ${row.reply ? `<p class="reply"><b>回复</b> ${escape(row.reply)}</p>` : ''}
+      ${row.anonymous !== undefined ? `<span>${row.anonymous ? '匿名提交' : '实名提交'}</span>` : ''}
+      <span class="status ${done ? 'done' : 'wait'}">${escape(row.status)}</span></div>
+    ${row.reply ? `<p class="reply"><b>${row.status === '已调整' ? '调整动作' : '回复'}</b> ${escape(row.reply)}</p>` : ''}
   </article>`;
 }
 
@@ -268,7 +313,7 @@ function renderSuggestions() {
   const mine = state.suggest.filter(row => row.mine);
   const personal = tracked && !mine.some(row => row.code === tracked.code) ? [tracked, ...mine] : mine;
   byId('mySuggest').innerHTML = personal.length ? `<h2>建议进度</h2>${personal.map(row => suggestionCard(row)).join('')}` : '';
-  const published = state.suggest.filter(row => row.status === '已回复' && row.reply && row.public !== false);
+  const published = state.suggest.filter(row => ['已回复', '已调整'].includes(row.status) && row.reply && row.public !== false);
   byId('suggestPublic').innerHTML = published.map(row => suggestionCard(row, true)).join('') || empty('暂无公开回复');
   byId('suggest-admin').hidden = !state.canModerate;
   if (!state.canModerate) return;
@@ -277,15 +322,57 @@ function renderSuggestions() {
     <form class="pub" data-suggestion-reply="${escape(row.code)}">
       <label>进度 <select name="status"><option${row.status === '已收到' ? ' selected' : ''}>已收到</option>
         <option${row.status === '处理中' ? ' selected' : ''}>处理中</option>
+        <option${row.status === '已调整' ? ' selected' : ''}>已调整</option>
         <option${row.status === '已回复' ? ' selected' : ''}>已回复</option></select></label>
       <textarea name="reply" maxlength="1000" aria-label="建议回复" placeholder="填写回复">${escape(row.reply)}</textarea>
       <button class="btn small" type="submit">保存答复</button>
     </form></div>`).join('') || empty('暂无建议');
 }
 
+function renderVents() {
+  byId('ventList').innerHTML = empty('你提交的心声只有管理层能看到，处理情况会认真对待。');
+}
+
+function renderCoordinates() {
+  byId('coordinateList').innerHTML = (state.coordinates || []).map(row => `<article class="card">
+    <h3>事项编号 ${escape(row.code)}</h3>
+    <div class="meta"><span>${escape(displayTime(stamp(row)))}</span>
+      <span class="status ${row.status === '已解决' ? 'done' : 'wait'}">${escape(row.status)}</span></div>
+  </article>`).join('') || empty('你还没有提交过协调事项');
+}
+
+let honorsCache = null;
+async function renderHonors() {
+  if (!honorsCache) {
+    byId('honorCurrent').innerHTML = empty('正在加载荣誉墙…');
+    try {
+      honorsCache = await api('/honors');
+    } catch {
+      byId('honorCurrent').innerHTML = empty('荣誉墙暂时无法加载');
+      return;
+    }
+  }
+  const card = (row, big) => row ? `<article class="card honor-card${big ? ' big' : ''}">
+    ${big && row.photoUrl ? `<img class="honor-banner" src="${escape(row.photoUrl)}" alt="" referrerpolicy="no-referrer">` : ''}
+    <div class="honor-head">${row.photoUrl && !big
+      ? `<img class="honor-photo" src="${escape(row.photoUrl)}" alt="" referrerpolicy="no-referrer" loading="lazy">`
+      : big && row.photoUrl ? '' : `<span class="honor-avatar" aria-hidden="true">${escape((row.personName || '星').slice(0, 1))}</span>`}
+      <div><span class="pill warm">${escape(row.periodLabel)}</span><h3>${escape(row.personName)}</h3></div></div>
+    <p>${escape(row.citation)}</p>
+    <div class="meta"><span>${escape(displayTime(row.publishedAt))} 发布</span></div>
+  </article>` : '';
+  const { current, history } = honorsCache;
+  byId('honorCurrent').innerHTML = ['month', 'week', 'yesterday'].map(type => card(current[type], true)).join('') || empty('管理层还没有发布荣誉');
+  const currentIds = new Set(Object.values(current).filter(Boolean).map(row => row.id));
+  byId('honorHistory').innerHTML = history.filter(row => !currentIds.has(row.id)).map(row => card(row, false)).join('') || empty('暂无更多历史荣誉');
+}
+
 function renderView() {
   if (!state) return;
   if (view === 'home') renderHome();
+  else if (view === 'vents') renderVents();
+  else if (view === 'coordinates') renderCoordinates();
+  else if (view === 'honors') renderHonors();
   else if (view === 'scripts') renderScripts();
   else if (view === 'search') renderResourceSearch();
   else if (view === 'gratitude') renderGratitude();
@@ -360,6 +447,8 @@ const publishForms = {
   wallForm: ['wall', { body: 'wallBody' }, '已贴上励志墙'],
   helpForm: ['help', { title: 'helpTitle', body: 'helpBody' }, '求助已发布'],
   suggestForm: ['suggest', { body: 'suggestBody' }, '建议已提交'],
+  ventForm: ['vent', { body: 'ventBody' }, '心声已发布'],
+  coordinateForm: ['coordinate', { title: 'coordinateTitle', body: 'coordinateBody' }, '已提交，管理层会在看板跟进'],
   marketForm: ['market', { type: 'marketType', title: 'marketTitle' }, '集市消息已发布'],
   gratitudeForm: ['gratitude', { recipient: 'gratitudeRecipient', body: 'gratitudeBody' }, '感谢已发布'],
   goalForm: ['goal', { title: 'goalTitle', body: 'goalBody', owner: 'goalOwner', due: 'goalDue' }, '目标已添加']
@@ -368,6 +457,10 @@ const publishForms = {
 document.addEventListener('click', event => {
   const button = event.target.closest('button');
   if (!button) return;
+  if (button.dataset.activityView) {
+    go(button.dataset.activityView);
+    return;
+  }
   if (button.dataset.go) {
     if (button.dataset.cat) {
       scriptCat = button.dataset.cat;
@@ -397,7 +490,9 @@ document.addEventListener('click', event => {
     return;
   }
   if (name === 'copy') copyScript(button.dataset.id);
-  else if (['claim', 'unclaim', 'solve', 'helpThank'].includes(name)) {
+  else if (['ventHide', 'ventUnhide'].includes(name)) {
+    withBusy(button, '正在更新…', () => doAction({ action: name, id: button.dataset.id }, name === 'ventHide' ? '已下架' : '已恢复展示'));
+  } else if (['claim', 'unclaim', 'solve', 'helpThank'].includes(name)) {
     const result = { claim: '已认领求助', unclaim: '已撤回认领', solve: '已标为解决', helpThank: '感谢已发布到感谢墙' }[name];
     withBusy(button, '正在保存…', () => doAction({ action: name, id: button.dataset.id }, result));
   } else if (['favorite', 'cheer', 'gratitudeLike'].includes(name)) {
@@ -450,6 +545,9 @@ document.addEventListener('submit', event => {
   if (!definition) return;
   const [name, fields, success] = definition;
   const data = Object.fromEntries(Object.entries(fields).map(([key, id]) => [key, value(id)]));
+  if (form.id === 'suggestForm') {
+    data.anonymous = form.querySelector('input[name="suggestAnon"]:checked')?.value !== 'named';
+  }
   const label = name === 'suggest' ? '正在提交建议…' : '正在发布…';
   withBusy(button, label, () => doAction({ action: name, ...data }, success, form));
 });

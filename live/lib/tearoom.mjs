@@ -13,7 +13,8 @@ const BROWSER_COOKIE = 'tearoom_browser';
 const TOKEN = /^[A-Za-z0-9_-]{43}$/;
 const categories = ['砍价', '证书售后', '色名意境', '活动', '英文', '越南语', '采购沟通', '缅语', '其他'];
 const marketTypes = ['拼车', '夜宵拼单', '二手闲置', '租房', '其他'];
-const suggestionStates = ['已收到', '处理中', '已回复'];
+const suggestionStates = ['已收到', '处理中', '已调整', '已回复'];
+const coordinateStates = ['已收到', '协调中', '已解决'];
 const anonNames = ['晚场的一颗小翠', '匿名的助理', '路过的翻译', '夜班小太阳', '一颗冰种', '匿名的客服', '刚下播的主播', '茶水间常客', '匿名的卖手', '一颗晴底'];
 const suggestedNames = [
   '镜头雕琢者', '现场节奏官', '选品策展人', '话术打磨师', '灯光造境师',
@@ -24,7 +25,7 @@ const suggestedNames = [
   '案例整理人', '趋势观察员', '经验记录者', '场次分析员', '首饰细节观察者'
 ];
 const goalStates = ['待开始', '进行中', '已完成'];
-const sections = { script: 'scripts', case: 'cases', board: 'board', wall: 'wall', help: 'help', suggest: 'suggest', market: 'market', gratitude: 'gratitude', goal: 'goals' };
+const sections = { script: 'scripts', case: 'cases', board: 'board', wall: 'wall', help: 'help', suggest: 'suggest', market: 'market', gratitude: 'gratitude', goal: 'goals', vent: 'vents', coordinate: 'coordinates' };
 const formatter = new Intl.DateTimeFormat('zh-CN', {
   timeZone: 'Asia/Shanghai', month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hourCycle: 'h23'
 });
@@ -74,9 +75,24 @@ function fieldsFor(action, input, name) {
         owner: text(input.owner, '负责人', 40, true), due: input.due ? date(input.due, '完成日期') : '',
         status: allowedValue(input.status ?? '待开始', goalStates, '目标状态')
       };
-    case 'suggest':
+    case 'suggest': {
+      keys(input, ['action', 'body', 'anonymous']);
+      if (input.anonymous !== undefined && typeof input.anonymous !== 'boolean') throw new ApiError(400, '提交方式无效');
+      const anonymous = input.anonymous !== false;
+      return {
+        body: text(input.body, '建议', 2000, true), status: '已收到', reply: '', anonymous,
+        ...(anonymous ? {} : { authorName: name })
+      };
+    }
+    case 'vent':
       keys(input, ['action', 'body']);
-      return { body: text(input.body, '建议', 2000, true), status: '已收到', reply: '' };
+      return { body: text(input.body, '吐槽', 1000, true), who: anonNames[randomInt(anonNames.length)] };
+    case 'coordinate':
+      keys(input, ['action', 'title', 'body']);
+      return {
+        title: text(input.title, '需要协调的事项', 120, true), body: text(input.body, '问题与所需帮助', 2000, true),
+        who: name, status: '已收到'
+      };
     case 'market': {
       keys(input, ['action', 'type', 'title', 'contact']);
       const contact = text(input.contact ?? '', '内部称呼', 60);
@@ -168,7 +184,7 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
   }
 
   function state({ actor, name }, canModerate, extra = {}) {
-    const data = { scripts: [], cases: [], board: [], wall: [], help: [], suggest: [], market: [], gratitude: [], goals: [], favScripts: {}, favCases: {}, cheered: {}, likedGratitude: {}, canModerate, name, suggestedNames };
+    const data = { scripts: [], cases: [], board: [], wall: [], help: [], suggest: [], market: [], gratitude: [], goals: [], vents: [], coordinates: [], favScripts: {}, favCases: {}, cheered: {}, likedGratitude: {}, canModerate, name, suggestedNames };
     const reactions = db.prepare(`
       SELECT postId, COUNT(*) AS total, MAX(actor = ?) AS mine
       FROM tearoom_reactions GROUP BY postId
@@ -184,7 +200,7 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
     }
     const recentPosts = db.prepare('SELECT id, actor, createdAt, data FROM tearoom_posts WHERE section = ? AND actor <> ? ORDER BY createdAt DESC, rowid DESC LIMIT 150');
     const referenceScripts = db.prepare("SELECT id, actor, createdAt, data FROM tearoom_posts WHERE section = 'scripts' AND actor = 'starter' ORDER BY rowid");
-    for (const section of Object.values(sections).filter(name => name !== 'suggest')) {
+    for (const section of Object.values(sections).filter(name => name !== 'suggest' && name !== 'coordinates' && name !== 'vents')) {
       const posts = recentPosts.all(section, 'starter');
       if (section === 'scripts') posts.push(...referenceScripts.all());
       for (const row of posts) {
@@ -221,8 +237,21 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
       const item = JSON.parse(row.data);
       const mine = row.actor === actor;
       const time = formatter.format(row.createdAt);
-      if (mine || canModerate) data.suggest.push({ code: row.id, ...item, mine, time });
+      if (mine || canModerate) data.suggest.push({ code: row.id, ...item, mine, time, createdAt: row.createdAt });
       else data.suggest.push({ status: item.status, reply: item.reply, mine: false, time });
+    }
+    // 提交者可查询自己的处理状态，标题和正文仅供管理层在看板中查阅。
+    const coordinates = db.prepare(`
+      SELECT id, createdAt, data FROM tearoom_posts
+      WHERE section = 'coordinates' AND actor = ?
+      ORDER BY createdAt DESC, rowid DESC LIMIT 100
+    `).all(actor);
+    for (const row of coordinates) {
+      const item = JSON.parse(row.data);
+      data.coordinates.push({
+        code: row.id, status: item.status ?? '已收到',
+        createdAt: row.createdAt, time: formatter.format(row.createdAt), mine: true
+      });
     }
     return { ...data, ...extra };
   }
@@ -306,6 +335,16 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
       return;
     }
 
+    if (action === 'ventHide' || action === 'ventUnhide') {
+      if (row.section !== 'vents') throw new ApiError(404, '记录不存在');
+      if (!canModerate) throw new ApiError(403, '请先登录管理账号');
+      keys(input, ['action', 'id']);
+      const record = JSON.parse(row.data);
+      record.hidden = action === 'ventHide';
+      db.prepare('UPDATE tearoom_posts SET data = ? WHERE id = ?').run(JSON.stringify(record), id);
+      return;
+    }
+
     if (action === 'suggestLookup' || action === 'suggestReply') {
       if (row.section !== 'suggest') throw new ApiError(404, '找不到此编号');
       const record = JSON.parse(row.data);
@@ -316,7 +355,15 @@ export function createTearoom({ store, cookieSecure = false, seedScripts = [] })
       keys(input, ['action', 'code', 'status', 'reply']);
       if (!canModerate) throw new ApiError(403, '请先登录管理账号');
       record.status = allowedValue(input.status, suggestionStates, '建议状态');
-      record.reply = record.status === '已回复' ? text(input.reply, '回复', 1500, true) : '';
+      if (['已调整', '已回复'].includes(record.status)) {
+        record.reply = text(input.reply, record.status === '已调整' ? '调整动作' : '回复', 1500, true);
+      } else if (record.status === '处理中') {
+        const note = text(input.reply ?? '', '处理进展', 1500);
+        if (note) record.reply = note;
+      } else {
+        record.reply = '';
+      }
+      record.handledAt = Date.now();
       db.prepare('UPDATE tearoom_posts SET data = ? WHERE id = ?').run(JSON.stringify(record), id);
       return;
     }

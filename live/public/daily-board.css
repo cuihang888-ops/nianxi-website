@@ -239,6 +239,43 @@
   .daily-changes thead th { font-size: 10px; }
 }
 
+/* 紧凑密度（2026-11-28）：默认排版收紧，小屏核心区（月目标进度、昨日业绩、五间汇总）尽量一屏可见；
+   正文不小于 12px，不引入横向滚动。 */
+.daily-board { gap: 5px; padding-block: 6px; }
+.daily-totals section { padding: 6px 10px; }
+.daily-totals strong { font-size: clamp(23px, 2.2vw, 30px); }
+.daily-data { gap: 6px; }
+.daily-data header { padding: 5px 10px; }
+
+@media (max-width: 640px) {
+  /* 手机上五间汇总提到主播近五日表之前，与月目标进度、昨日业绩组成一屏核心区。 */
+  .daily-data { display: flex; flex-direction: column; }
+  .daily-data > section { width: 100%; }
+  .daily-room-list { order: -1; }
+  .daily-board { padding: 6px; gap: 6px; }
+  .daily-head { padding-bottom: 4px; }
+  .daily-identity h1 { font-size: 17px; }
+  .daily-totals { gap: 5px; }
+  .daily-totals section { padding: 5px 4px; }
+  .daily-totals h2 { font-size: 12px; }
+  .daily-totals h2 small { font-size: 10px; }
+  .daily-totals strong { font-size: clamp(19px, 5.8vw, 24px); margin-top: 2px; letter-spacing: 0; }
+  .daily-totals p { font-size: 11px; margin-top: 2px; }
+  .daily-data header { padding: 4px 6px; }
+  .daily-metric-heading h2 { font-size: 13px; }
+  .daily-metric-buttons button { min-height: 34px; font-size: 12px; }
+  .daily-data .daily-table-note { font-size: 10px; }
+  .daily-data :is(th, td) { padding: 4px 3px; font-size: 12px; line-height: 1.35; }
+  .daily-data thead th { font-size: 11px; padding-block: 4px; }
+  .daily-anchor-name { font-size: 12px; }
+  .daily-anchor-name small { font-size: 10px; }
+  .daily-changes td strong { font-size: 12px; }
+  .daily-changes tbody th { height: 27px; }
+  .daily-room-list :is(th, td) { padding: 5px 3px; font-size: 12px; }
+  .daily-room-list tbody td:last-child { font-size: 11px; }
+  .daily-footer { font-size: 11px; }
+}
+
 .board-auth {
   min-height: 100dvh;
   display: grid;

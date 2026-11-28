@@ -11,13 +11,51 @@
   .simple-entry input { min-height: 42px; height: 42px; }
 }
 
+.entry-count-badge { display: inline-flex; align-items: center; justify-content: center; min-width: 22px; padding: 3px 5px;
+  border-radius: 999px; background: #fbeae8; color: #9f332d; font-size: 11px; line-height: 1; font-weight: 700; }
+.account-tabs { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 7px; overflow: visible; }
+.account-tabs button { min-width: 0; min-height: 44px; gap: 4px; padding: 6px 7px; white-space: normal; }
+.entry-account-name { min-width: 0; overflow-wrap: anywhere; line-height: 1.3; }
+.entry-count-badge { flex: none; }
+.card-indicators { display: flex; align-items: center; flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+.entry-session-card { min-height: 90px; padding: 10px 13px; gap: 4px; }
+.entry-session-card:disabled { opacity: 1; cursor: default; background: #f3f6f3; }
+.entry-session-card .card-body strong { font-size: 16px; overflow-wrap: anywhere; }
+.entry-session-card .card-arrow { width: 24px; height: 24px; flex: none; }
+.entry-session-card .card-arrow .lucide { width: 16px; height: 16px; }
+.entry-session-card .card-status { color: #52665b; }
+.entry-session-card .draft-badge { color: var(--green); }
+.entry-month { margin-top: 21px; padding-top: 14px; border-top: 1px solid var(--line); }
+.entry-month-head, .entry-month-count { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 12px; }
+.entry-month-head h2 { margin: 0; font-size: 16px; }
+.entry-month-head span, .entry-month-count span, .entry-month-info { color: #52665b; font-size: 12px; }
+.entry-month-count { margin: 9px 0; font-size: 14px; }
+.entry-month-count strong { color: #9f332d; }
+.entry-month-rooms, .entry-month-days { padding: 0; margin: 0; list-style: none; }
+.entry-month-rooms { display: flex; flex-wrap: wrap; gap: 5px 10px; margin-bottom: 10px; font-size: 12px; color: #52665b; line-height: 1.45; }
+.entry-month-rooms strong { color: var(--green); }
+.entry-month-days { display: grid; gap: 5px; }
+.entry-month-days a { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 3px 12px;
+  min-height: 44px; padding: 7px 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: #174c3e; font-size: 13px; }
+.entry-month-days a:is(:hover, :focus-visible), .entry-month-days a[aria-current] { background: #e8f1ea; border-color: #a5c0af; }
+.entry-month-days time { font-weight: 700; }
+.entry-month-days a span { color: #8d352d; }
+.entry-month-shifts { margin: 0 0 3px; padding: 0 0 0 8px; list-style: none; border-left: 1px solid var(--line); }
+.entry-month-shifts a { border: 0; border-bottom: 1px solid var(--line); border-radius: 0; background: transparent; }
+.entry-month-shifts a span:first-child { min-width: 0; overflow-wrap: anywhere; color: #174c3e; }
+.saved-fields { margin: 14px 0 0; color: var(--green); font-size: 13px; line-height: 1.6; }
+#entry-form [data-action="refresh-editor"] { margin-top: 9px; }
+
 .draft-notice { color: var(--green); font-size: 12px; line-height: 1.5; margin: 10px 0 0; }
 .draft-badge { padding: 3px 7px; border-radius: 4px; color: var(--green); background: #e8f1ea; }
 .confirmation-panel button { min-height: 44px; margin-right: 5px; }
 .confirmation-panel .primary { border-color: var(--green); }
-.entry-session-card { min-height: 122px; }
+@media (max-width: 640px) {
+  .account-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .entry-cards { gap: 7px; }
+  .entry-session-card { min-height: 76px; }
+}
 @media (max-width: 360px) {
   .cooperation-dialog-actions { flex-wrap: wrap-reverse; justify-content: end; gap: 0; }
   .cooperation-dialog-link { min-height: 40px; font-size: 13px; }
-  .card-body strong { font-size: 20px; }
 }

@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { mkdtemp, rmdir, unlink } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import test from 'node:test';
@@ -18,7 +19,7 @@ function useWishes(db) {
 }
 
 test('wishes and private contact persist separately, and only admin can read contacts or set status', async t => {
-  const temp = await mkdtemp(resolve('D:/CodexStorage/temp', 'wishes-'));
+  const temp = await mkdtemp(resolve(tmpdir(), 'wishes-'));
   const filename = resolve(temp, 'wishes.sqlite');
   let db = new DatabaseSync(filename);
   t.after(async () => {

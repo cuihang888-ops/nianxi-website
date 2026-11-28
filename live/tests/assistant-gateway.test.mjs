@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { mkdtemp } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
 import { assistantConfiguration, createAssistant } from '../lib/assistant.mjs';
@@ -131,7 +132,7 @@ test('fallback, aborted request and rejected output consume bounded accounted at
 });
 
 test('identity, address and total reservations are enforced durably for concurrent calls', async () => {
-  const directory = await mkdtemp(resolve('D:/CodexStorage/temp', 'assistant-usage-'));
+  const directory = await mkdtemp(resolve(tmpdir(), 'assistant-usage-'));
   const path = resolve(directory, 'usage.sqlite');
   const config = assistantConfiguration({
     ...primary, ASSISTANT_IDENTITY_DAILY_REQUESTS: '1', ASSISTANT_ADDRESS_DAILY_REQUESTS: '2',

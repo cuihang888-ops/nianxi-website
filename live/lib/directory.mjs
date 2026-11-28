@@ -38,9 +38,8 @@ export const activeOn = (anchor, date) => active(anchor) &&
   (!anchor.activeFrom || date >= anchor.activeFrom) &&
   (!anchor.activeTo || date <= anchor.activeTo);
 
-export function directory(store) {
+export function directory(store, sessionRows = store.list('sessions')) {
   const accounts = store.list('accounts').map(record => ({ ...record, active: active(record), archived: record.archived === true }));
-  const sessionRows = store.list('sessions');
   const currentAccounts = new Set(accounts.map(account => account.id));
   const latest = new Map();
   for (const session of sessionRows) {

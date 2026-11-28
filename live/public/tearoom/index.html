@@ -4,8 +4,8 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>茶水间 · 协作中心</title>
-<link rel="stylesheet" href="./styles.css?v=20261127-pilot">
-<script type="module" src="./app.js?v=20261127-v12"></script>
+<link rel="stylesheet" href="./styles.css?v=20261128-feedback">
+<script type="module" src="./app.js?v=20261128-monthly-completeness"></script>
 </head>
 <body>
 <div class="wrap">
@@ -13,7 +13,7 @@
     <a class="back" href="../">‹ 返回协作中心</a>
     <h1>茶水间</h1>
     <div class="room-meta">
-      <small class="release-version">协作中心 v1.3.0</small>
+      <small class="release-version">协作中心 v1.3.2</small>
       <span id="room-pending" role="status"></span>
     </div>
   </header>
@@ -43,6 +43,11 @@
   <main id="view-home">
     <div class="quote" id="dailyQuote"></div>
 
+    <section class="activity-section">
+      <h2>最新动态</h2>
+      <div id="homeActivity"><div class="empty">正在加载动态…</div></div>
+    </section>
+
     <div class="search">
       <span class="search-icon" aria-hidden="true">搜</span>
       <input id="homeSearch" aria-label="搜索话术、案例和求助" type="search" maxlength="120" placeholder="搜索话术、案例和求助">
@@ -71,6 +76,11 @@
       <button type="button" class="cell" data-go="gratitude"><span class="ic warm">谢</span><span class="lb">感谢墙</span></button>
       <button type="button" class="cell" data-go="goals"><span class="ic">协</span><span class="lb">协作目标墙</span></button>
       <a class="cell wish-link" href="./wishes.html"><span class="ic warm">愿</span><span class="lb">愿望墙</span></a>
+    </div>
+    <div class="grid grid3">
+      <button type="button" class="cell" data-go="vents"><span class="ic warm">声</span><span class="lb">吐槽</span></button>
+      <button type="button" class="cell" data-go="coordinates"><span class="ic">调</span><span class="lb">协调求助</span></button>
+      <button type="button" class="cell" data-go="honors"><span class="ic warm">誉</span><span class="lb">荣誉墙</span></button>
     </div>
 
     <section>
@@ -207,11 +217,15 @@
   <!-- 建议箱视图 -->
   <main id="view-suggest" class="hidden">
     <section>
-      <h2>匿名建议箱</h2>
-      <p class="sub">提交后请保存编号。用编号可查询已收到、处理中或已回复。</p>
+      <h2>建议箱</h2>
+      <p class="sub">实名或匿名都可以提交。管理层会在 48 小时内给出调整动作或处理进展；进度分已收到、处理中、已调整、已回复。提交后请保存编号，凭编号可查询进度。</p>
       <form class="pub" id="suggestForm">
         <textarea id="suggestBody" aria-label="建议" maxlength="2000" placeholder="你的建议…" required></textarea>
-        <button class="btn" type="submit" disabled>匿名提交</button>
+        <div class="anon-choice" role="radiogroup" aria-label="提交方式">
+          <label><input type="radio" name="suggestAnon" value="anonymous" checked> 匿名提交</label>
+          <label><input type="radio" name="suggestAnon" value="named"> 用当前昵称实名提交</label>
+        </div>
+        <button class="btn" type="submit" disabled>提交建议</button>
       </form>
       <div id="suggest-receipt" role="status"></div>
       <form class="pub" id="suggestLookup">
@@ -245,6 +259,46 @@
         <button class="btn" type="submit" disabled>发布</button>
       </form>
       <div id="marketList"></div>
+    </section>
+  </main>
+
+  <!-- 吐槽墙视图 -->
+  <main id="view-vents" class="hidden">
+    <section>
+      <h2>吐槽</h2>
+      <p class="sub vent-promise">我们会认真对待每一个心声。</p>
+      <p class="sub">匿名提交，内容只有管理层能看到，其他同事看不到，请放心说。</p>
+      <form class="pub" id="ventForm">
+        <textarea id="ventBody" aria-label="吐槽内容" maxlength="1000" placeholder="说说最近让你不舒服的事…" required></textarea>
+        <button class="btn warm" type="submit" disabled>匿名提交</button>
+      </form>
+      <div id="ventList"></div>
+    </section>
+  </main>
+
+  <!-- 协调求助视图 -->
+  <main id="view-coordinates" class="hidden">
+    <section>
+      <h2>协调求助</h2>
+      <p class="sub">需要管理层协调或帮助的事写在这里。内容只有管理层在看板能看到，其他同事看不到；你可以在这里查看自己事项的处理状态。</p>
+      <form class="pub" id="coordinateForm">
+        <input type="text" id="coordinateTitle" aria-label="需要协调的事项" maxlength="120" placeholder="事项，如：晚场空调需要维修" required>
+        <textarea id="coordinateBody" aria-label="问题与所需帮助" maxlength="2000" placeholder="写清问题和你需要的帮助" required></textarea>
+        <button class="btn" type="submit" disabled>提交给管理层</button>
+      </form>
+      <h2 class="suggest-heading">我提交的协调事项</h2>
+      <div id="coordinateList"></div>
+    </section>
+  </main>
+
+  <!-- 荣誉墙视图 -->
+  <main id="view-honors" class="hidden">
+    <section>
+      <h2>荣誉墙</h2>
+      <p class="sub">月度之星、本周之星、昨日之星由管理层评选发布。这里只展示荣誉，不展示业绩数字。</p>
+      <div id="honorCurrent"></div>
+      <h2 class="suggest-heading">历史荣誉</h2>
+      <div id="honorHistory"></div>
     </section>
   </main>
   </div>

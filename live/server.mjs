@@ -6,7 +6,9 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Store, passwordHash, passwordMatches, publicUser } from './lib/store.mjs';
 import { ApiError, keys, text, date, version, countFields, sessionInput, inventoryInput, taskInput, conflict } from './lib/validation.mjs';
 import { directory, handleDirectory, sessionSlotWrite } from './lib/directory.mjs';
-import { ROLES, PUBLIC_ENTRY_USER, isStaff, safeDataset, entryDirectory, entryInput, duplicateEntry, hasSessionMetrics, fillableSession, fillSession } from './lib/entry.mjs';
+import { ROLES, PUBLIC_ENTRY_USER, isStaff, safeDataset, entryDirectory, entryInput, duplicateEntry, hasSessionMetrics, fillableSession, fillSession, mergeableSession, mergeSession } from './lib/entry.mjs';
+import { beijingEntryTime, completenessForDate, completenessRange, monthToDateRange } from './lib/completeness.mjs';
+import { createFeedback } from './lib/feedback.mjs';
 import { chinaDate } from './lib/seed.mjs';
 import { handleMonthly } from './lib/monthly.mjs';
 import { handleAnchorReview } from './lib/review.mjs';
@@ -18,6 +20,7 @@ import { PERIODS, resolveShiftPeriod } from './public/shift-periods.js';
 
 const ROOT = dirname(fileURLToPath(import.meta.url));
 const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.mjs': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.jpg': 'image/jpeg', '.ico': 'image/x-icon', '.woff2': 'font/woff2' };
+const CONTENT_POLICY = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'";
 const TTL = 12 * 60 * 60 * 1000;
 const DASHBOARD_ATTEMPT_WINDOW = 15 * 60 * 1000;
 const PUBLIC_ENTRY_WINDOW = 60 * 1000;
@@ -62,15 +65,39 @@ export function configuration(env = process.env) {
   return { demo: !production, mode: env.PREVIEW_IMPORT === 'true' ? 'imported' : production ? 'production' : 'demo', production, host, port, dataDir: resolve(env.DATA_DIR || resolve(ROOT, 'data')), adminPassword: env.ADMIN_PASSWORD, adminUsername: env.ADMIN_USERNAME, adminName: env.ADMIN_NAME, cookieSecure: env.COOKIE_SECURE === 'true', dashboardPassword, bookingUrl, assistantAccess: env.ASSISTANT_ACCESS };
 }
 
-async function body(request) {
+async function body(request, maxBytes = 64 * 1024) {
   if (!(request.headers['content-type'] || '').startsWith('application/json')) throw new ApiError(415, '请使用 application/json');
   const chunks = []; let length = 0;
   for await (const chunk of request) {
     length += chunk.length;
-    if (length > 64 * 1024) throw new ApiError(413, '单次录入内容过大');
+    if (length > maxBytes) throw new ApiError(413, '单次录入内容过大');
     chunks.push(chunk);
   }
   try { return JSON.parse(Buffer.concat(chunks).toString('utf8')); } catch { throw new ApiError(400, 'JSON 格式无效'); }
+}
+
+function entryStatus(store, roster, target, sessions, clock) {
+  const { from, to } = monthToDateRange(clock.day);
+  return {
+    completeness: completenessForDate(store, roster, target, sessions, clock),
+    month: completenessRange(store, roster, from, to, sessions, clock)
+  };
+}
+
+function completenessQuery(store, params) {
+  const clock = beijingEntryTime();
+  if (params.has('date')) {
+    const target = date(params.get('date') ?? '');
+    const sessions = store.list('sessions');
+    return completenessForDate(store, directory(store, sessions), target, sessions, clock);
+  }
+  const fallback = monthToDateRange(clock.day);
+  const from = params.has('from') ? date(params.get('from'), '起始日期') : fallback.from;
+  const end = params.has('to') ? date(params.get('to'), '结束日期') : fallback.to;
+  const to = end > clock.day ? clock.day : end;
+  if ((Date.parse(to) - Date.parse(from)) / 86_400_000 > 92) throw new ApiError(400, '查询范围过大，最多 92 天');
+  const sessions = store.list('sessions');
+  return completenessRange(store, directory(store, sessions), from, to, sessions, clock);
 }
 
 export function createApplication(options = {}) {
@@ -81,6 +108,7 @@ export function createApplication(options = {}) {
   });
   const wishes = createWishes({ store });
   const departmentGoals = createDepartmentGoals({ store });
+  const feedback = createFeedback({ store });
   const assistantAccess = ['pilot', 'employees'].includes(config.assistantAccess) ? config.assistantAccess : 'off';
   const assistantMode = assistantAccess === 'pilot' ? 'pilot'
     : !config.production && options.assistantDemo === true && options.assistantFetch ? 'demo' : 'live';
@@ -260,7 +288,7 @@ export function createApplication(options = {}) {
     response.setHeader('X-Content-Type-Options', 'nosniff');
     response.setHeader('X-Frame-Options', 'DENY');
     response.setHeader('Referrer-Policy', 'same-origin');
-    response.setHeader('Content-Security-Policy', "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'self'");
+    response.setHeader('Content-Security-Policy', CONTENT_POLICY);
     try {
       const url = new URL(request.url, `http://${request.headers.host || 'localhost'}`);
       const path = decodeURIComponent(url.pathname);
@@ -329,36 +357,91 @@ export function createApplication(options = {}) {
           if (action === 'status' && request.method === 'POST') return send(response, 200, wishes.status(id, await body(request), scope));
           throw new ApiError(405, '请求方法不支持');
         }
+        if (path === '/api/tearoom/honors') {
+          if (request.method !== 'GET') throw new ApiError(405, '请求方法不支持');
+          tearoomScope(request);
+          return send(response, 200, feedback.honorsForTearoom());
+        }
+        const honorPhoto = /^\/api\/tearoom\/honors\/([\w-]+)\/photo$/.exec(path);
+        if (honorPhoto && request.method === 'GET') {
+          tearoomScope(request);
+          const { mime, bytes } = feedback.honorPhoto(honorPhoto[1]);
+          response.writeHead(200, { 'Content-Type': mime, 'Cache-Control': 'private, no-store' });
+          response.end(bytes);
+          return;
+        }
+        if (path === '/api/tearoom/activity') {
+          if (request.method !== 'GET') throw new ApiError(405, '请求方法不支持');
+          tearoomScope(request);
+          const limit = Number(url.searchParams.get('limit') ?? 20);
+          return send(response, 200, feedback.activityFeed(Number.isFinite(limit) ? limit : 20));
+        }
         if (await tearoom.handle({
           path, request, response, send, body,
           getAdmin: () => readSession(request, ACCOUNT_COOKIE)?.user.role === 'admin'
         })) return;
         if (path === '/api/entry/bootstrap' && request.method === 'GET') {
-          return send(response, 200, entryDirectory(directory(store)));
+          const sessions = store.list('sessions');
+          const roster = directory(store, sessions);
+          const payload = entryDirectory(roster);
+          if (url.searchParams.get('completeness') === '1') {
+            const target = date(url.searchParams.get('date') ?? '');
+            Object.assign(payload, entryStatus(store, roster, target, sessions, beijingEntryTime()));
+          }
+          return send(response, 200, payload);
+        }
+        if (path === '/api/entry/completeness' && request.method === 'GET') {
+          // 只下发完成状态与缺项名称，不下发任何指标数值（录入只写不读）。
+          return send(response, 200, completenessQuery(store, url.searchParams));
         }
         if (path === '/api/entry/sessions' && request.method === 'POST') {
           const user = entryUser(request);
           entryWritable(user, request);
           const input = await body(request);
-          const known = directory(store);
-          const result = entryInput(input, user, known);
+          const sessions = store.list('sessions');
+          const known = directory(store, sessions);
+          const includeStatus = url.searchParams.get('status') === '1';
+          const clock = beijingEntryTime();
+          const statusPayload = (target, rows) => includeStatus
+            ? entryStatus(store, known, target, rows, clock) : {};
+          const entryConflict = (target, rows, assignmentChanged = false) => includeStatus
+            ? new ApiError(409, '本场未能保存。请核对待补项目，仍无法提交时请联系负责人。', {
+              code: 'ENTRY_CONFLICT', ...(assignmentChanged && { assignmentChanged }), ...statusPayload(target, rows)
+            })
+            : new ApiError(409, '该场次无法重复提交。需要更正时请联系主管。');
+          let result;
+          try {
+            result = entryInput(input, user, known);
+          } catch (error) {
+            if (error instanceof ApiError && error.details?.code === 'ENTRY_SLOT_CHANGED') {
+              throw entryConflict(error.details.date, sessions, true);
+            }
+            throw error;
+          }
           if (result.orderAmount >= 100000 && input.confirmAmount !== true) {
             throw new ApiError(422, '请再次核对填写的业绩金额。确认后可以继续提交。', { code: 'ENTRY_CONFIRM_AMOUNT' });
           }
-          const matching = duplicateEntry(result, store.list('sessions'), known.anchors);
+          const matching = duplicateEntry(result, sessions);
           const blank = matching.length === 1 && fillableSession(matching[0], result) ? matching[0] : null;
-          if (matching.length && !blank) {
-            throw new ApiError(409, '该场次无法重复提交。需要更正时请联系主管。');
+          // 补录：场次已填一部分时，只补空缺字段，不覆盖已填数值；与已填值冲突仍按重复提交拦截。
+          const partial = !blank && matching.length === 1 && mergeableSession(matching[0], result) ? matching[0] : null;
+          if (matching.length && !blank && !partial) {
+            throw entryConflict(result.date, sessions);
           }
-          const next = blank ? fillSession(blank, result) : { ...result, id: randomUUID() };
+          const existing = blank ?? partial;
+          const next = blank ? fillSession(blank, result)
+            : partial ? mergeSession(partial, result)
+            : { ...result, id: randomUUID() };
+          let saved;
           try {
-            if (!blank) conflict(next, store.list('sessions'));
-            store.save('sessions', next, blank?.version, user);
+            saved = store.save('sessions', next, existing?.version, user);
           } catch (error) {
             if (!(error instanceof ApiError) || error.status !== 409) throw error;
-            throw new ApiError(409, '该场次无法重复提交。需要更正时请联系主管。');
+            throw entryConflict(result.date, store.list('sessions'));
           }
-          return send(response, 201, { ok: true });
+          const updated = includeStatus
+            ? [...sessions.filter(row => row.id !== saved.id), saved] : sessions;
+          return send(response, 201, { ok: true, ...statusPayload(result.date, updated) });
         }
         if (path.startsWith('/api/entry/')) {
           throw new ApiError(405, '录入入口只接受新场次提交。');
@@ -384,6 +467,41 @@ export function createApplication(options = {}) {
             return send(response, 200, goalProgress(plan, user));
           }
           throw new ApiError(405, '请求方法不支持');
+        }
+        if (path === '/api/dashboard/feedback' || path.startsWith('/api/dashboard/feedback/') ||
+            path === '/api/dashboard/completeness' || path === '/api/dashboard/honors') {
+          if (isStaff(user)) throw new ApiError(403, '员工录入账号无法查看员工反馈');
+          if (!session.dashboardOnly && dashboardHash && !session.dashboardUnlocked) {
+            throw new ApiError(403, '请先解锁业绩看板', { code: 'DASHBOARD_LOCKED' });
+          }
+          if (path === '/api/dashboard/completeness' && request.method === 'GET') {
+            return send(response, 200, completenessQuery(store, url.searchParams));
+          }
+          if (session.dashboardOnly || !['admin', 'manager'].includes(user.role)) {
+            throw new ApiError(403, '请使用已解锁看板的管理账号查看和处理员工反馈');
+          }
+          if (path === '/api/dashboard/feedback' && request.method === 'GET') {
+            return send(response, 200, feedback.dashboardFeedback());
+          }
+          const suggestionRoute = /^\/api\/dashboard\/feedback\/suggestions\/(JY-[A-F0-9]+)\/status$/.exec(path);
+          if (suggestionRoute && request.method === 'POST') {
+            return send(response, 200, feedback.updateSuggestion(suggestionRoute[1], await body(request)));
+          }
+          const ventRoute = /^\/api\/dashboard\/feedback\/vents\/([\w-]+)\/visibility$/.exec(path);
+          if (ventRoute && request.method === 'POST') {
+            return send(response, 200, feedback.setVentHidden(ventRoute[1], await body(request)));
+          }
+          const coordinateRoute = /^\/api\/dashboard\/feedback\/coordinates\/([\w-]+)\/status$/.exec(path);
+          if (coordinateRoute && request.method === 'POST') {
+            return send(response, 200, feedback.updateCoordinate(coordinateRoute[1], await body(request)));
+          }
+          if (path === '/api/dashboard/honors') {
+            if (request.method === 'GET') return send(response, 200, { honors: feedback.listHonors() });
+            if (request.method === 'POST') {
+              return send(response, 201, feedback.publishHonor(await body(request, 360_000), user.name));
+            }
+          }
+          throw new ApiError(404, '接口不存在');
         }
         if (session.dashboardOnly) {
           if (await handleAnchorReview({ path, url, request, response, user, store, send, body, canWriteNotes: false })) return;
@@ -555,12 +673,18 @@ export function createApplication(options = {}) {
         const link = '<a class="training-link" href="./assistant.html">AI 助手 <span>翻译与话术润色</span></a>';
         content = content.toString('utf8').replace('<!-- assistant-entry -->', link);
       }
+      if (tearoomIndex) response.setHeader('Content-Security-Policy', CONTENT_POLICY.replace("img-src 'self' data:", "img-src 'self' data: https:"));
       const versionedTearoomAsset = /^\/tearoom\/[a-z-]+\.(js|css)$/.test(path)
         && /^[0-9]{8}-[a-z0-9-]+$/.test(url.searchParams.get('v') || '');
+      const assetVersion = url.searchParams.get('v');
+      const versionedEntryAsset = (path === '/entry.js' && assetVersion === '20261128-slot-identity')
+        || (path === '/entry.css' && assetVersion === '20261128-monthly-backfill');
       response.writeHead(200, {
         'Content-Type': MIME[extname(target)] || 'application/octet-stream',
         'Cache-Control': (tearoomIndex || assistantAsset) && assistantAccess === 'pilot'
-          ? 'private, no-store' : versionedTearoomAsset ? 'public, max-age=86400' : 'no-cache'
+          ? 'private, no-store'
+          : versionedEntryAsset ? 'public, max-age=86400, immutable'
+          : versionedTearoomAsset ? 'public, max-age=86400' : 'no-cache'
       });
       response.end(request.method === 'HEAD' ? undefined : content);
     } catch (error) {

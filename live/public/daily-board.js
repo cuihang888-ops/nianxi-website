@@ -123,7 +123,7 @@ function coverage(totals) {
   return parts.join(' · ');
 }
 
-export function renderDailySales(data, selectedDate, canEdit, manage, selectedMetric = 'orderAmount', canManageDirectory = false) {
+export function renderDailySales(data, selectedDate, canEdit, manage, selectedMetric = 'orderAmount', canManageDirectory = false, canManageFeedback = false) {
   const today = beijingToday();
   const yesterday = lastCompletedDay();
   const date = selectedDate && selectedDate <= today ? selectedDate : yesterday;
@@ -152,6 +152,8 @@ export function renderDailySales(data, selectedDate, canEdit, manage, selectedMe
         <button type="button" data-view="compare">数据对比</button>
         <button type="button" data-view="session-details">主播场次明细</button>
         <button type="button" data-view="anchor-review">主播复盘</button>
+        <button type="button" data-view="completeness">录入完整性</button>
+        ${canManageFeedback ? '<button type="button" data-view="feedback">员工反馈</button>' : ''}
       </nav>
     </header>
     <div class="daily-totals">

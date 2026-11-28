@@ -2,7 +2,14 @@ const app = document.querySelector('#entry-app');
 const dialog = document.querySelector('#entry-editor');
 const toastElement = document.querySelector('#entry-toast');
 const today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
-const state = { date: today, accountId: '', directory: null, editing: null, busy: false };
+function validDate(value) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value) || value < '2000-01-01' || value > '2100-12-31') return false;
+  const parsed = new Date(value + 'T12:00:00Z');
+  return Number.isFinite(parsed.valueOf()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+const linkedDate = new URLSearchParams(location.search).get('date');
+const state = { date: validDate(linkedDate) ? linkedDate : today, accountId: '', directory: null, editing: null, busy: false, completeness: null, month: null, loadError: '' };
 const definitions = {
   orderAmount: ['业绩（元）', ''],
   orders: ['单量', '单'],
@@ -11,6 +18,9 @@ const definitions = {
   newFollowers: ['关注数', '人']
 };
 const rawKeys = [...Object.keys(definitions), 'durationHours', 'durationMinutes'];
+const metricsKeys = ['orderAmount', 'orders', 'actualMinutes', 'impressions', 'shares', 'newFollowers'];
+const savedLabels = { orderAmount: '业绩', orders: '单量', actualMinutes: '直播时长', impressions: '浏览量', shares: '分享次数', newFollowers: '关注数' };
+let directoryRequest;
 const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[char]));
 // Lucide icon paths. Copyright (c) 2026 Lucide Icons and Contributors.
 // See the ISC license at public/vendor/LUCIDE-LICENSE.txt.
@@ -44,18 +54,38 @@ const amountPattern = /^(?:\d+(?:\.\d{1,2})?|\.\d{1,2})$/;
 const draftPrefix = 'cooperation-trial-entry:' + location.pathname + ':';
 const draftKey = (anchor, date) => draftPrefix + JSON.stringify([date, anchor.accountId, anchor.slotId, anchor.id]);
 
-async function api(path, data) {
+async function api(path, data, signal) {
   const headers = new Headers({ 'X-Command-Scope': 'public-entry' });
   if (data !== undefined) headers.set('Content-Type', 'application/json');
-  const response = await fetch(new URL(path, document.baseURI), {
-    method: data === undefined ? 'GET' : 'POST', credentials: 'same-origin', headers,
-    body: data === undefined ? undefined : JSON.stringify(data)
-  });
-  const result = await response.json().catch(() => ({}));
+  const controller = new AbortController();
+  const abort = () => controller.abort();
+  const timeout = setTimeout(abort, 12000);
+  if (signal?.aborted) abort();
+  else signal?.addEventListener('abort', abort, { once: true });
+  let response;
+  let result;
+  try {
+    response = await fetch(new URL(path, document.baseURI), {
+      method: data === undefined ? 'GET' : 'POST', credentials: 'same-origin', headers,
+      body: data === undefined ? undefined : JSON.stringify(data),
+      signal: controller.signal
+    });
+    result = await response.json();
+  } catch (error) {
+    if (signal?.aborted) throw error;
+    const message = data === undefined ? '读取超时或连接中断，请重试。' : '暂时无法确认提交结果，正在重新核对录入状态。';
+    throw Object.assign(new Error(message), { uncertain: data !== undefined });
+  } finally {
+    clearTimeout(timeout);
+    signal?.removeEventListener('abort', abort);
+  }
   if (!response.ok) {
     const error = new Error(result.error || result.message || '暂时无法连接，请稍后重试');
     error.status = response.status;
     error.code = result.code;
+    error.completeness = result.completeness;
+    error.month = result.month;
+    error.assignmentChanged = result.assignmentChanged === true;
     throw error;
   }
   return result;
@@ -72,6 +102,12 @@ function readDraft(key) {
 
 function hasDraft(raw) {
   return rawKeys.some(key => raw[key]?.trim());
+}
+
+function applicableDraft(draft, missing) {
+  return Object.fromEntries(rawKeys.map(key => [key,
+    missing.includes(key.startsWith('duration') ? 'actualMinutes' : key) ? draft[key] || '' : ''
+  ]));
 }
 
 function persistDraft(form) {
@@ -111,17 +147,122 @@ function showLoadError(message) {
   </main>`;
 }
 
-async function loadDirectory() {
-  const { accounts, anchors } = await api('api/entry/bootstrap');
-  state.directory = { accounts, anchors };
-  if (!accounts.some(account => account.id === state.accountId)) state.accountId = accounts[0]?.id || '';
-  renderPage();
+function applyCompleteness(completeness, month, date = state.date) {
+  if (completeness?.date !== date || !Array.isArray(completeness.accounts) || !completeness.summary) return false;
+  state.completeness = completeness;
+  if (Array.isArray(month?.days) && Array.isArray(month.accounts) && month.summary) state.month = month;
+  state.loadError = '';
+  return true;
+}
+
+async function loadDirectory({ paint = true } = {}) {
+  const date = state.date;
+  directoryRequest?.abort();
+  const request = new AbortController();
+  directoryRequest = request;
+  state.loadError = '';
+  if (paint && state.directory) renderPage();
+  try {
+    const { accounts, anchors, slots, completeness, month } = await api('api/entry/bootstrap?date=' + encodeURIComponent(date) + '&completeness=1', undefined, request.signal);
+    if (request.signal.aborted || state.date !== date) return false;
+    if (!Array.isArray(accounts) || !Array.isArray(anchors) || !applyCompleteness(completeness, month, date)) {
+      throw new Error('暂时无法读取录入状态，请重试。');
+    }
+    state.directory = { accounts, anchors, slots };
+    if (!accounts.some(account => account.id === state.accountId)) state.accountId = accounts[0]?.id || '';
+    return true;
+  } catch (error) {
+    if (request.signal.aborted) return false;
+    state.loadError = error.message;
+    if (!state.directory) showLoadError(error.message);
+    return false;
+  } finally {
+    if (directoryRequest === request) {
+      directoryRequest = null;
+      if (paint && state.directory) renderPage();
+    }
+  }
+}
+
+function sessionFor(anchor) {
+  if (state.completeness?.date !== state.date || state.loadError) return null;
+  const group = state.completeness.accounts.find(group => group.accountId === anchor.accountId);
+  const matching = group?.sessions.filter(row => row.anchorId === anchor.id && (row.slotId == null || row.slotId === anchor.slotId)) || [];
+  return matching.find(row => row.canEnter) || matching[0] || null;
+}
+
+function editableKeys(session) {
+  if (!session?.canEnter || session.ambiguous || session.historicalReference) return [];
+  return (session.missingKeys || []).filter(key => metricsKeys.includes(key));
+}
+
+function missingBadge(count, description) {
+  if (!count) return '';
+  const label = description.replace('{count}', count);
+  return `<span class="entry-count-badge" title="${label}" aria-label="${label}">+${count}</span>`;
+}
+
+function currentMonthDay(date) {
+  const monthStart = state.month?.from || today.slice(0, 8) + '01';
+  const monthEnd = state.month?.to || today;
+  return date >= monthStart && date <= monthEnd;
+}
+
+function dateUrl(date, shift) {
+  const url = new URL(location.href);
+  url.searchParams.set('date', date);
+  for (const key of ['accountId', 'anchorId', 'slotId']) {
+    if (shift?.[key]) url.searchParams.set(key, shift[key]);
+    else url.searchParams.delete(key);
+  }
+  return url.href;
+}
+
+function renderMonthlyReminder() {
+  const month = state.month;
+  const to = month?.to || today;
+  if (state.date > to) return '';
+  if (!currentMonthDay(state.date)) {
+    return '<p class="entry-month-info">当前查看的是往月场次。如需补录，可打开对应场次。</p>';
+  }
+  if (!month) return '';
+  const pendingTotal = month.summary.partial + month.summary.empty;
+  const days = month.days.filter(day => day.summary.partial + day.summary.empty > 0)
+    .sort((a, b) => b.date.localeCompare(a.date));
+  const breakdown = summary => [summary.empty ? `未录 ${summary.empty} 场` : '', summary.partial ? `缺项 ${summary.partial} 场` : '']
+    .filter(Boolean).join(' · ');
+  return `<section class="entry-month" aria-labelledby="entry-month-title">
+    <div class="entry-month-head"><h2 id="entry-month-title">本月待补总览</h2><span>${esc(month.from)} 至 ${esc(month.to)}</span></div>
+    ${pendingTotal ? `<p class="entry-month-count"><strong>共 ${pendingTotal} 场待补</strong><span>${breakdown(month.summary)}</span></p>
+    <ul class="entry-month-rooms">${month.accounts.filter(group => group.summary.partial + group.summary.empty > 0).map(group =>
+      `<li><strong>${esc(group.accountName)}</strong> ${breakdown(group.summary)}</li>`).join('')}</ul>
+    <ul class="entry-month-days" aria-label="待补日期">${days.map(day => `<li>
+      <a href="${esc(dateUrl(day.date))}" data-month-date="${esc(day.date)}"${day.date === state.date ? ' aria-current="date"' : ''}>
+        <time datetime="${esc(day.date)}">${esc(day.date)}${day.date === to ? '（今日）' : ''}</time>
+        <span>${breakdown(day.summary)}</span>
+      </a>${renderPendingShifts(day)}</li>`).join('')}</ul>` : '<p class="entry-month-info">本月暂无待补场次。</p>'}
+  </section>`;
+}
+
+function renderPendingShifts(day) {
+  if (!day.pendingShifts?.length) return '';
+  const names = new Map(state.directory.accounts.map(account => [account.id, account.name]));
+  return `<ul class="entry-month-shifts">${day.pendingShifts.map(shift => {
+    const { accountId, anchorId, slotId, slotLabel, anchorName } = shift;
+    return `<li><a href="${esc(dateUrl(day.date, shift))}" data-month-date="${esc(day.date)}"
+      data-month-account="${esc(accountId)}" data-month-anchor="${esc(anchorId)}" data-month-slot="${esc(slotId)}">
+        <span>${esc([names.get(accountId), slotLabel, anchorName].filter(Boolean).join(' · '))}</span>
+        ${missingBadge(shift.missingKeys?.length, '{count} 项待补录')}
+      </a></li>`;
+  }).join('')}</ul>`;
 }
 
 function renderPage() {
   const { accounts, anchors } = state.directory;
   const account = accounts.find(item => item.id === state.accountId);
   const available = anchors.filter(anchor => anchor.accountId === state.accountId && activeOnDate(anchor));
+  const loading = Boolean(directoryRequest);
+  const showBadges = currentMonthDay(state.date);
   app.innerHTML = `${header()}<main class="entry-main">
     <div class="entry-notice">${icon('shield-check')}<span>提交后如需更正，请联系负责人。</span></div>
     <div class="entry-controls">
@@ -133,17 +274,40 @@ function renderPage() {
       <button type="button" data-action="today" class="today-button">今天</button>
       <button type="button" data-action="refresh" class="icon-button refresh-button" title="刷新场次名单" aria-label="刷新场次名单">${icon('refresh-cw')}</button>
     </div>
-    <nav class="account-tabs" aria-label="直播间">${accounts.map(item => `<button type="button" aria-pressed="${item.id === state.accountId}" data-account-id="${esc(item.id)}">${esc(item.name)}</button>`).join('')}</nav>
+    <nav class="account-tabs" aria-label="直播间">${accounts.map(item => {
+      const shifts = loading || !showBadges ? [] : anchors.filter(anchor => anchor.accountId === item.id && activeOnDate(anchor));
+      const count = shifts.filter(anchor => editableKeys(sessionFor(anchor)).length).length;
+      return `<button type="button" aria-pressed="${item.id === state.accountId}" data-account-id="${esc(item.id)}"><span class="entry-account-name">${esc(item.name)}</span>${missingBadge(count, '{count} 场待补录')}</button>`;
+    }).join('')}</nav>
     <div class="entry-list-heading"><h2>${esc(account?.name || '直播间')} · 场次</h2><span>${esc(state.date)}</span></div>
-    ${available.length ? `<div class="entry-cards">${available.map(anchor => `
-      <button type="button" class="entry-session-card" data-testid="entry-session-card" data-anchor-id="${esc(anchor.id)}">
+    ${loading ? '<div class="entry-empty" role="status">正在读取录入状态…</div>'
+      : state.loadError ? `<div class="entry-error" role="alert">${esc(state.loadError)}</div>`
+      : available.length ? `<div class="entry-cards">${available.map(anchor => {
+        const session = sessionFor(anchor);
+        const missing = editableKeys(session);
+        const draft = applicableDraft(readDraft(draftKey(anchor, state.date)), missing);
+        return `<button type="button" class="entry-session-card" data-testid="entry-session-card" data-anchor-id="${esc(anchor.id)}" ${missing.length ? '' : 'disabled'}>
         <span class="card-top">
           <span class="slot-caption">${esc(anchor.slotLabel || '直播场次')}</span>
-          ${hasDraft(readDraft(draftKey(anchor, state.date))) ? '<span class="card-status draft-badge">本机草稿</span>' : ''}
+          <span class="card-indicators">${hasDraft(draft) ? '<span class="card-status draft-badge">本机草稿</span>' : ''}${showBadges ? missingBadge(missing.length, '{count} 项待补录') : ''}</span>
         </span>
-        <span class="card-body"><strong>${esc(anchor.name)}</strong><span class="card-arrow">${icon('chevron-right')}</span></span>
-      </button>`).join('')}</div>` : '<div class="entry-empty">该日期暂无适用的主播场次</div>'}
+        <span class="card-body"><strong>${esc(anchor.name)}</strong>${missing.length ? `<span class="card-arrow">${icon('chevron-right')}</span>` : ''}</span>
+        ${missing.length ? '' : `<span class="card-status">${esc(completenessStatusText(session))}</span>`}
+      </button>`;
+      }).join('')}</div>` : '<div class="entry-empty">该日期暂无适用的主播场次</div>'}
+    ${!loading && !state.loadError ? renderMonthlyReminder() : ''}
   </main>`;
+}
+
+function completenessStatusText(session) {
+  if (!session) return '录入状态待确认';
+  if (session.ambiguous || session.status === 'ambiguous') return '场次安排或记录待核对 · 请联系负责人';
+  if (session.historicalReference) return '历史记录归属待核对 · 请联系负责人';
+  if (session.status === 'complete') return '已录齐';
+  if (session.status === 'stopped') return '停播/取消 · 不计缺项';
+  if (session.status === 'upcoming') return '尚未开播';
+  if (session.status === 'empty') return session.canEnter ? '未录入' : '未录入 · 请联系负责人';
+  return '待补录 · 请联系负责人';
 }
 
 function metricInput(key, draft) {
@@ -167,30 +331,35 @@ function openEditor(anchorId) {
   const { accounts, anchors } = state.directory;
   const anchor = anchors.find(item => item.id === anchorId && activeOnDate(item) && item.accountId === state.accountId);
   if (!anchor) return;
-  const account = accounts.find(item => item.id === anchor.accountId);
+  const missing = editableKeys(sessionFor(anchor));
+  if (!missing.length) return;
   const key = draftKey(anchor, state.date);
-  const draft = readDraft(key);
-  state.editing = { anchor, date: state.date, key, draftUnavailable: false };
+  const draft = applicableDraft(readDraft(key), missing);
+  state.editing = { anchor, account: accounts.find(item => item.id === anchor.accountId), date: state.date, key, missing, draftUnavailable: false };
+  renderEditor(draft);
+  dialog.showModal();
+}
+
+function renderEditor(draft) {
+  const { anchor, account, date, missing } = state.editing;
+  const saved = metricsKeys.filter(key => !missing.includes(key));
   dialog.innerHTML = `<form id="entry-form" data-testid="entry-form">
     <div class="editor-header">
-      <div><h2 id="entry-editor-title">${esc(anchor.name)} · 场次登记</h2><p>${esc(account?.name)} · ${esc(state.date)} · ${esc(anchor.slotLabel || '直播场次')}</p></div>
+      <div><h2 id="entry-editor-title">${esc(anchor.name)} · 场次登记</h2><p>${esc(account?.name)} · ${esc(date)} · ${esc(anchor.slotLabel || '直播场次')}</p></div>
       <div class="cooperation-dialog-actions">
         <a class="cooperation-dialog-link" href="./" data-action="return-home">返回协作中心</a>
         <button type="button" class="icon-button editor-close" data-action="close-editor" aria-label="关闭" autofocus>${icon('x')}</button>
       </div>
     </div>
     <div class="entry-form-body">
+      ${saved.length ? `<p class="saved-fields">已录入 ${saved.map(key => savedLabels[key]).join('、')}</p>` : ''}
       <fieldset class="field-grid simple-entry" aria-label="场次指标">
-        ${metricInput('orderAmount', draft)}
-        ${metricInput('orders', draft)}
-        ${durationInputs(draft)}
-        ${metricInput('impressions', draft)}
-        ${metricInput('shares', draft)}
-        ${metricInput('newFollowers', draft)}
+        ${missing.map(key => key === 'actualMinutes' ? durationInputs(draft) : metricInput(key, draft)).join('')}
       </fieldset>
       <p class="form-notice">浏览量填写平台曝光总数。待补指标可留空，已确认没有的指标请填 0。</p>
       <p class="draft-notice" role="status">${hasDraft(draft) ? '已恢复本浏览器中的草稿' : '填写时自动保存草稿'}</p>
       <p id="entry-form-error" class="form-error" role="alert" tabindex="-1"></p>
+      <button type="button" data-action="refresh-editor" hidden>重新核对录入状态</button>
       <div class="confirmation-panel" hidden>
         <p id="amount-confirmation-label" role="alert"></p>
         <button type="button" data-action="check-amount">返回检查</button>
@@ -202,17 +371,16 @@ function openEditor(anchorId) {
       <button type="submit" class="primary" data-testid="entry-submit">${icon('check')}提交登记</button>
     </div>
   </form>`;
-  dialog.showModal();
 }
 
 function readRawFields(form) {
-  return Object.fromEntries(rawKeys.map(key => [key, form.elements.namedItem(key).value]));
+  return Object.fromEntries(rawKeys.map(key => [key, form.elements.namedItem(key)?.value || '']));
 }
 
 function closeEditor() {
   if (state.busy) return false;
-  if (state.editing.draftUnavailable && !window.confirm('浏览器无法保存草稿。确定关闭并放弃填写内容？')) return false;
-  const anchorId = state.editing.anchor.id;
+  if (state.editing?.draftUnavailable && !window.confirm('浏览器无法保存草稿。确定关闭并放弃填写内容？')) return false;
+  const anchorId = state.editing?.anchor.id;
   dialog.close();
   state.editing = null;
   renderPage();
@@ -264,11 +432,12 @@ function setBusy(form, busy) {
   state.busy = busy;
   const button = form.querySelector('[data-testid="entry-submit"]');
   for (const control of form.querySelectorAll('button, input')) control.disabled = busy;
+  button.disabled = busy || Boolean(state.editing?.needsRefresh);
   button.innerHTML = busy ? '正在提交…' : icon('check') + '提交登记';
 }
 
 async function submitEntry(form, confirmAmount = false) {
-  if (state.busy || !state.editing) return;
+  if (state.busy || !state.editing || state.editing.needsRefresh) return;
   const panel = form.querySelector('.confirmation-panel');
   if (!panel.hidden && !confirmAmount) return;
   panel.hidden = true;
@@ -281,23 +450,28 @@ async function submitEntry(form, confirmAmount = false) {
     return;
   }
   const { date, anchor, key } = state.editing;
-  const submittedDraft = JSON.stringify(readRawFields(form));
+  const submittedDraft = JSON.stringify(readDraft(key));
   setBusy(form, true);
   try {
-    const result = await api('api/entry/sessions', {
-      date, accountId: anchor.accountId, anchorId: anchor.id, ...metrics,
+    const result = await api('api/entry/sessions?status=1', {
+      date, accountId: anchor.accountId, anchorId: anchor.id, slotId: anchor.slotId, ...metrics,
       ...(confirmAmount ? { confirmAmount: true } : {})
     });
-    if (result.ok !== true) throw new Error('未收到提交回执，请联系负责人核对。');
+    if (result.ok !== true) throw Object.assign(new Error('暂时无法确认提交结果，正在重新核对录入状态。'), { uncertain: true });
     try {
       // A second tab may have written a newer local draft while the request was running.
       if (JSON.stringify(readDraft(key)) === submittedDraft) localStorage.removeItem(key);
     } catch {}
+    if (!applyCompleteness(result.completeness, result.month, date)) await loadDirectory({ paint: false });
     state.editing.draftUnavailable = false;
     setBusy(form, false);
     closeEditor();
     toast('登记已提交');
   } catch (error) {
+    if (error.code === 'ENTRY_CONFLICT' || error.uncertain) {
+      await reconcileEditor(form, error);
+      return;
+    }
     setBusy(form, false);
     if (error.code === 'ENTRY_CONFIRM_AMOUNT') {
       panel.querySelector('p').textContent = '填写的业绩金额较高，请核对元和小数点后再提交。';
@@ -309,12 +483,78 @@ async function submitEntry(form, confirmAmount = false) {
   }
 }
 
-function renderDate(value, action) {
-  const parsed = new Date(value + 'T12:00:00Z');
-  if (Number.isNaN(parsed.valueOf()) || value < '2000-01-01' || value > '2100-12-31' || parsed.toISOString().slice(0, 10) !== value) return;
-  state.date = value;
-  renderPage();
-  (action ? app.querySelector('[data-action="' + action + '"]') : app.querySelector('#entry-date'))?.focus();
+async function reconcileEditor(form, error) {
+  const editing = state.editing;
+  const draft = readRawFields(form);
+  const storedDraft = JSON.stringify(readDraft(editing.key));
+  setBusy(form, true);
+  showFormError(form, error?.message || '正在重新核对录入状态…');
+  const hasStatus = applyCompleteness(error?.completeness, error?.month, editing.date);
+  const refreshed = (hasStatus && !error?.assignmentChanged && sessionFor(editing.anchor)) ||
+    await loadDirectory({ paint: false });
+  if (!refreshed) {
+    editing.needsRefresh = true;
+    setBusy(form, false);
+    form.querySelector('[data-action="refresh-editor"]').hidden = false;
+    showFormError(form, '录入状态暂时无法核对。草稿已保留，请先重新核对。');
+    return;
+  }
+  const anchor = state.directory.anchors.find(item => item.id === editing.anchor.id &&
+    item.accountId === editing.anchor.accountId && item.slotId === editing.anchor.slotId);
+  const session = anchor && sessionFor(anchor);
+  const missing = editableKeys(session);
+  if (!missing.length) {
+    editing.draftUnavailable = false;
+    setBusy(form, false);
+    closeEditor();
+    toast(session ? completenessStatusText(session) : '场次已变更，请联系负责人核对。');
+    return;
+  }
+  editing.missing = missing;
+  editing.needsRefresh = false;
+  const remaining = applicableDraft(draft, missing);
+  renderEditor(remaining);
+  const refreshedForm = dialog.querySelector('form');
+  if (JSON.stringify(readDraft(editing.key)) === storedDraft) persistDraft(refreshedForm);
+  setBusy(refreshedForm, false);
+  showFormError(refreshedForm, error?.code === 'ENTRY_CONFLICT'
+    ? '本次数据未保存。请检查待补指标与草稿，仍无法提交时联系负责人。'
+    : '已核对当前录入状态。请检查待补指标和草稿后再提交。');
+}
+
+async function renderDate(value, action, updateUrl = true, shift) {
+  if (!validDate(value)) return;
+  const nextUrl = dateUrl(value, shift);
+  if (updateUrl && location.href !== nextUrl) history.pushState(null, '', nextUrl);
+  const needsLoad = state.date !== value || state.loadError || state.completeness?.date !== value;
+  const restoreFocus = () => (action && action !== 'month' ? app.querySelector('[data-action="' + action + '"]') : app.querySelector('#entry-date'))?.focus();
+  if (needsLoad) {
+    state.date = value;
+    const pending = loadDirectory();
+    restoreFocus();
+    if (!await pending || state.date !== value) return;
+  }
+  if (shift) openLinkedShift(shift);
+  else if (action === 'month' || (needsLoad && document.activeElement === document.body)) restoreFocus();
+}
+
+function openLinkedShift({ accountId, anchorId, slotId }) {
+  const anchor = state.directory.anchors.find(item => item.id === anchorId &&
+    item.accountId === accountId && (!slotId || item.slotId === slotId));
+  if (anchor) {
+    state.accountId = accountId;
+    renderPage();
+    openEditor(anchor.id);
+    if (!state.editing) toast(completenessStatusText(sessionFor(anchor)));
+  } else {
+    toast('场次已变更，请联系负责人核对。');
+  }
+}
+
+function linkedShift(params) {
+  const accountId = params.get('accountId');
+  const anchorId = params.get('anchorId');
+  return accountId && anchorId ? { accountId, anchorId, slotId: params.get('slotId') } : undefined;
 }
 
 app.addEventListener('change', event => {
@@ -322,6 +562,14 @@ app.addEventListener('change', event => {
 });
 
 app.addEventListener('click', async event => {
+  const dateLink = event.target.closest('[data-month-date]');
+  if (dateLink && !event.altKey && !event.ctrlKey && !event.metaKey && !event.shiftKey) {
+    event.preventDefault();
+    const { monthDate, monthAccount, monthAnchor, monthSlot } = dateLink.dataset;
+    const shift = monthAnchor ? { accountId: monthAccount, anchorId: monthAnchor, slotId: monthSlot } : undefined;
+    void renderDate(monthDate, 'month', true, shift);
+    return;
+  }
   const accountButton = event.target.closest('[data-account-id]');
   if (accountButton) {
     state.accountId = accountButton.dataset.accountId;
@@ -340,26 +588,27 @@ app.addEventListener('click', async event => {
   }
   if (action === 'today') renderDate(today, action);
   if (action === 'refresh') {
-    const button = event.target.closest('button');
-    button.disabled = true;
-    try {
-      await loadDirectory();
-      toast('场次名单已刷新');
-    } catch (error) {
-      if (state.directory) toast(error.message);
-      else showLoadError(error.message);
-    } finally {
-      button.disabled = false;
-      app.querySelector('[data-action="refresh"]')?.focus();
-    }
+    if (directoryRequest) return;
+    if (await loadDirectory()) toast('场次状态已刷新');
+    app.querySelector('[data-action="refresh"]')?.focus();
   }
+});
+
+window.addEventListener('popstate', () => {
+  const params = new URLSearchParams(location.search);
+  const linked = params.get('date');
+  if (state.editing && !closeEditor()) {
+    history.replaceState(null, '', dateUrl(state.date));
+    return;
+  }
+  void renderDate(validDate(linked) ? linked : today, undefined, false, linkedShift(params));
 });
 
 dialog.addEventListener('input', event => {
   if (!rawKeys.includes(event.target.name)) return;
   const form = event.target.form;
   form.querySelector('.confirmation-panel').hidden = true;
-  form.querySelector('.form-error').textContent = '';
+  if (!state.editing?.needsRefresh) form.querySelector('.form-error').textContent = '';
   const invalid = form.querySelector('[aria-invalid]');
   invalid?.removeAttribute('aria-invalid');
   invalid?.removeAttribute('aria-describedby');
@@ -374,11 +623,12 @@ dialog.addEventListener('click', event => {
   const action = control?.dataset.action;
   if (action === 'return-home' && !closeEditor()) event.preventDefault();
   if (action === 'close-editor') closeEditor();
+  if (action === 'refresh-editor' && !state.busy && state.editing) void reconcileEditor(control.form);
   if (action === 'confirm-amount' && !control.closest('.confirmation-panel').hidden) submitEntry(control.form, true);
   if (action === 'check-amount') {
     const form = control.form;
     form.querySelector('.confirmation-panel').hidden = true;
-    form.elements.namedItem('orderAmount').focus();
+    form.elements.namedItem('orderAmount')?.focus();
   }
 });
 dialog.addEventListener('cancel', event => { event.preventDefault(); closeEditor(); });
@@ -386,8 +636,7 @@ window.addEventListener('beforeunload', event => {
   if (state.busy || state.editing?.draftUnavailable) { event.preventDefault(); event.returnValue = ''; }
 });
 
-try {
-  await loadDirectory();
-} catch (error) {
-  showLoadError(error.message);
+if (await loadDirectory()) {
+  const shift = linkedShift(new URLSearchParams(location.search));
+  if (shift) openLinkedShift(shift);
 }

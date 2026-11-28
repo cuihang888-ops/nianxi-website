@@ -1,11 +1,12 @@
 import { totals, change, decomposeSales } from './metrics.js?v=20261127-impressions';
 import { renderImported } from './imported-view.js?v=20261127-impressions';
 import { setupMonthly, monthlyPage } from './monthly.js';
-import { beijingToday, lastCompletedDay, renderDailySales } from './daily-board.js?v=20261127-goals';
+import { beijingToday, lastCompletedDay, renderDailySales } from './daily-board.js?v=20261128-monthly-completeness';
 import { renderSessionDetails } from './session-details.js?v=20261127-v130';
 import { setupAnchorReview } from './anchor-review.js?v=20261127-v12';
 import { setupDirectory } from './directory.js?v=20261127-v130';
 import { setupDepartmentGoals } from './department-goals.js?v=20261127-goals';
+import { setupFeedback } from './feedback.js?v=20261128-monthly-completeness';
 import { PERIODS, resolveShiftPeriod } from './shift-periods.js?v=20261127-comparison';
 const $ = (s, root = document) => root.querySelector(s);
 const root = $('#app');
@@ -13,8 +14,8 @@ const dialog = $('#editor');
 const search = new URLSearchParams(location.search);
 const manage = search.get('mode') === 'manage';
 const requestedView = search.get('view');
-const initialView = manage && ['monthly', 'directory'].includes(requestedView) ? requestedView
-  : requestedView === 'anchor-review' ? 'anchor-review' : 'daily';
+const initialView = manage && ['monthly', 'directory', 'feedback'].includes(requestedView) ? requestedView
+  : ['anchor-review', 'completeness'].includes(requestedView) ? requestedView : 'daily';
 const today = new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
 const state = { data: null, view: initialView, dailyDate: '', dailyMetric: 'orderAmount', date: today, from: today, to: today, account: '', anchor: '', status: '', group: 'account', sort: 'orderAmount', direction: -1, scheduleMode: 'grid', inventoryFilter: '', query: '', taskFilter: '', loadedAt: '', audit: [], periodEnd: today, windowDays: 5, performanceGroup: 'anchor', performanceMetric: 'orderAmount', selectedPerformer: '', trendMetric: 'orderAmount' };
 const num = n => Number(n) || 0;
@@ -105,18 +106,20 @@ function normalize(data) {
   return data;
 }
 async function reload() {
+  let access;
   if (manage) {
-    const current = await api('/api/me');
-    if (['anchor_entry', 'service_entry'].includes(current.user?.role)) {
+    access = await api('/api/me');
+    if (['anchor_entry', 'service_entry'].includes(access.user?.role)) {
       location.replace('./entry');
       return;
     }
-    if (current.dashboardRequired && !current.dashboardUnlocked) {
+    if (access.dashboardRequired && !access.dashboardUnlocked) {
       showDashboardUnlock();
       return;
     }
   }
-  loadDashboard(await api('/api/bootstrap'));
+  const data = await api('/api/bootstrap');
+  loadDashboard(access ? { ...data, dashboardOnly: access.dashboardOnly, dashboardUnlocked: access.dashboardUnlocked } : data);
 }
 function loadDashboard(payload) {
   const data = normalize(payload);
@@ -171,19 +174,30 @@ function kpi(label, value, note, symbol) { return `<div class="kpi"><div class="
 const manageNav = [ ['daily', 'layout-dashboard', '单日大屏'], ['directory', 'settings', '直播名录'], ['performance', 'activity', '播后变化'], ['schedule', 'calendar-range', '场次排期'], ['compare', 'columns-3', '数据对比'], ['session-details', 'list', '主播场次明细'], ['monthly', 'notebook-pen', '主播月度总结报告'], ['review', 'clipboard-check', '复盘行动'], ['inventory', 'gem', '采购库存'], ['overview', 'chart-no-axes-combined', '经营总览'], ['method', 'book-open', '指标口径'] ];
 const nav = [
   ...(manage ? manageNav : manageNav.filter(([id]) => ['daily', 'performance', 'compare', 'session-details'].includes(id))),
-  ['anchor-review', 'clipboard-check', '主播复盘']
+  ['anchor-review', 'clipboard-check', '主播复盘'],
+  ['completeness', 'clipboard-check', '录入完整性'],
+  ['feedback', 'messages-square', '员工反馈']
 ];
 const isDirectoryAdmin = () => manage && state.data?.user?.role === 'admin';
+const canManageFeedback = () => manage && state.data?.dashboardOnly === false &&
+  state.data.dashboardUnlocked === true && ['admin', 'manager'].includes(state.data.user?.role);
+function canOpenView(view) {
+  if (!state.data) return false;
+  if (view === 'directory') return isDirectoryAdmin();
+  if (view === 'feedback') return canManageFeedback();
+  return nav.some(([id]) => id === view);
+}
 const directory = setupDirectory({ api, dialog, toast, reload, render, isAdmin: isDirectoryAdmin });
 const anchorReview = setupAnchorReview({ api, render, today, isActive: () => state.view === 'anchor-review' && Boolean(state.data) });
 function render() {
   const d = state.data;
   if (!d) return;
+  if (!canOpenView(state.view)) state.view = 'daily';
   if (state.view === 'daily') {
-    root.innerHTML = renderDailySales(d, state.dailyDate, manage && canEdit(), manage, state.dailyMetric, isDirectoryAdmin());
+    root.innerHTML = renderDailySales(d, state.dailyDate, manage && canEdit(), manage, state.dailyMetric, isDirectoryAdmin(), canManageFeedback());
     return;
   }
-  root.innerHTML = `<div class="app-shell"><aside class="sidebar"><div class="brand"><div class="brandmark">${icon('radar')}</div><div><strong>协作中心</strong></div></div><div class="workspace"><small>当前工作空间</small><strong>直播数据工作空间</strong><p>Facebook / 人民币 CNY</p></div><div class="nav-label">工作台</div><nav class="navigation">${nav.filter(([id]) => id !== 'directory' || isDirectoryAdmin()).map(([id, symbol, title]) => `<button type="button" data-view="${id}" data-testid="nav-${id}" class="${state.view === id ? 'active' : ''} ${['method', 'inventory', 'overview'].includes(id) ? 'desktop-nav' : ''}">${icon(symbol)}<span>${title}</span></button>`).join('')}</nav><div class="side-bottom"><div class="connection"><span class="dot"></span>共享工作空间</div><p>${d.accounts.length} 个直播账号</p><p>最近同步 ${esc(state.loadedAt)}</p></div></aside><main class="main"><header class="topbar"><div class="mobile-brand">协作中心</div><div class="crumb">工作空间 <span style="margin:0 10px">/</span> <b>${nav.find(n => n[0] === state.view)?.[2]}</b></div><div class="top-right">${d.demo ? '<span class="demo">演示数据 · 非真实经营数据</span>' : '<span class="badge neutral">人民币 CNY</span>'}<button type="button" class="icon" data-action="refresh" title="刷新共享数据" aria-label="刷新共享数据">${icon('refresh-cw')}</button>${manage ? `<button type="button" class="user-button" data-action="profile"><span class="avatar">${esc(d.user?.name?.slice(0, 1) || '我')}</span><span>${esc(d.user?.name || '成员')}</span>${icon('chevron-down')}</button>` : `<button type="button" class="icon" data-action="logout" aria-label="锁定看板" title="锁定看板">${icon('lock-keyhole')}</button>`}</div></header><div class="content">${content()}</div></main></div>`;
+  root.innerHTML = `<div class="app-shell"><aside class="sidebar"><div class="brand"><div class="brandmark">${icon('radar')}</div><div><strong>协作中心</strong></div></div><div class="workspace"><small>当前工作空间</small><strong>直播数据工作空间</strong><p>Facebook / 人民币 CNY</p></div><div class="nav-label">工作台</div><nav class="navigation">${nav.filter(([id]) => canOpenView(id)).map(([id, symbol, title]) => `<button type="button" data-view="${id}" data-testid="nav-${id}" class="${state.view === id ? 'active' : ''} ${['method', 'inventory', 'overview'].includes(id) ? 'desktop-nav' : ''}">${icon(symbol)}<span>${title}</span></button>`).join('')}</nav><div class="side-bottom"><div class="connection"><span class="dot"></span>共享工作空间</div><p>${d.accounts.length} 个直播账号</p><p>最近同步 ${esc(state.loadedAt)}</p></div></aside><main class="main"><header class="topbar"><div class="mobile-brand">协作中心</div><div class="crumb">工作空间 <span style="margin:0 10px">/</span> <b>${nav.find(n => n[0] === state.view)?.[2]}</b></div><div class="top-right">${d.demo ? '<span class="demo">演示数据 · 非真实经营数据</span>' : '<span class="badge neutral">人民币 CNY</span>'}<button type="button" class="icon" data-action="refresh" title="刷新共享数据" aria-label="刷新共享数据">${icon('refresh-cw')}</button>${manage ? `<button type="button" class="user-button" data-action="profile"><span class="avatar">${esc(d.user?.name?.slice(0, 1) || '我')}</span><span>${esc(d.user?.name || '成员')}</span>${icon('chevron-down')}</button>` : `<button type="button" class="icon" data-action="logout" aria-label="锁定看板" title="锁定看板">${icon('lock-keyhole')}</button>`}</div></header><div class="content">${content()}</div></main></div>`;
   icons();
 }
 function heading(title, description, actions = '', tag = 'FACEBOOK LIVE · JADE OPERATIONS') { return `<div class="page-heading"><div><div class="eyebrow"><span class="dot"></span>${tag}</div><h1>${title}</h1><p>${description}</p></div><div class="heading-actions">${actions}</div></div>`; }
@@ -201,6 +215,8 @@ function content() {
       { esc, today: beijingToday(), expanded: Boolean(state.detailHistory) }
     );
   }
+  if (state.view === 'completeness') return `${heading('录入完整性', '按日期查看场次录入进度与缺失字段。')}<section data-feedback-root="completeness" aria-label="录入完整性总览"></section>`;
+  if (state.view === 'feedback') return `${heading('员工反馈', '茶水间的优化建议、吐槽与协调事项汇总在这里。建议自提交起计时，请在 48 小时内给出调整动作或处理进展。')}<section data-feedback-root="manage" aria-label="员工反馈"></section>`;
   if(state.view==='monthly')return monthlyPage({heading,icon});
   if (state.view === 'compare') return comparePage();
   if (!manage || state.data.dataset?.kind === 'imported') return renderImported(state, {heading, icon, canEdit: manage && canEdit(), canExport: manage});
@@ -694,7 +710,7 @@ document.addEventListener('click', async e => {
     $('[data-daily-metric][aria-pressed="true"]')?.focus({ preventScroll: true });
     return;
   }
-  if (target.dataset.view && (target.dataset.view !== 'directory' || isDirectoryAdmin()) && nav.some(([id]) => id === target.dataset.view)) {
+  if (target.dataset.view && canOpenView(target.dataset.view)) {
     if (state.view === 'daily') {
       const date = state.dailyDate || lastCompletedDay();
       state.periodEnd = date;
@@ -866,6 +882,7 @@ setInterval(async () => {
 }, 30000);
 setupMonthly({ api, toast, refresh: () => render(), dialog, state });
 setupDepartmentGoals(api);
+setupFeedback(api);
 try { await reload(); }
 catch (error) {
   if (error.code === 'DASHBOARD_LOCKED') showDashboardUnlock();
